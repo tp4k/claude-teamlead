@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pinned on purpose. ruff's *default* rule set changes between releases —
+      # current versions no longer select E501 by default — so an unpinned
+      # linter here would silently check less than the one the tree was written
+      # against, and CI would go green on code that fails locally.
+      - run: pip install ruff==0.0.292
+      - run: ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # Every version is worth a separate answer: a failure on 3.9 alone is the
+      # floor moving, which is a different problem from a failure everywhere.
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # The suites are plain scripts with no pytest and no dependencies, so
+      # there is nothing to install. Each exits non-zero on failure; the loop
+      # runs all of them anyway, because one red suite should not hide the rest.
+      - name: Run every suite
+        run: |
+          failed=0
+          for suite in scripts/test_*.py; do
+            echo "── $suite"
+            python3 "$suite" || failed=1
+          done
+          exit $failed

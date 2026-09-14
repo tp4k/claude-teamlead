@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to $TEAMLEAD_HOME/config.json (default ~/.teamlead/config.json). Every key is optional; scripts/paths.py holds the defaults, so no config file at all is a supported state. Per-repo overrides go in <repo>/.teamlead.json (same shape) and win. A value of the wrong type is skipped, not fatal — the next tier, then the default, answers instead.",
+  "_adrPath": "Root of your ADR store. If absent or its directory is missing, teamlead falls back to <cwd>/docs/adr, then skips ADRs entirely. See references/adr-workflow.md.",
+  "adrPath": "/absolute/path/to/your/adr-repo",
+  "adrSubdir": null,
+  "_reworkCap": "Rework rounds a workstream gets before triage must STOP. Default 3.",
+  "reworkCap": 3,
+  "_maxAgeDays": "A run directory older than this is prunable. Default 30.",
+  "maxAgeDays": 30,
+  "_keepLastPerRepo": "...unless it is among the newest N runs of its repo. Default 5.",
+  "keepLastPerRepo": 5,
+  "_scopeFence": "Whether a PreToolUse hook refuses an implementer's Edit/Write outside the fenced ```scope block in its brief. Default true. It only ever answers for implementer subagents whose brief declares a fence, so turning it off is for the case where you want the old behaviour — the same rule caught at triage instead, one round later.",
+  "scopeFence": true
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "teamlead",
+  "version": "0.1.0",
+  "description": "Coordinate a delegated task end to end: plan, validate the plan, implement in parallel workstreams, verify, review on three axes, triage findings, and stop when the rework cap says the plan is wrong.",
+  "author": {
+    "name": "tp4k",
+    "url": "https://github.com/tp4k"
+  },
+  "skills": [
+    "./skills"
+  ]
+}

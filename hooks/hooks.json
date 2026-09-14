@@ -1,0 +1,33 @@
+{
+  "description": "Three needs the plugin carries itself instead of asking the user to hand-edit ~/.claude/settings.json. PreToolUse pre-approves the report writes every teamlead agent makes inside $TEAMLEAD_HOME/runs, plus the handover files /teamlead:cycle writes under $TEAMLEAD_HOME/tasks; it grants only, so anything outside those two trees gets no decision and follows the normal permission flow. A second PreToolUse hook refuses an implementer subagent's write outside the ```scope fence of its own brief — it answers only when the caller is an implementer, its brief is resolvable and that brief declares a fence, so every other write in the session, including the user's own, gets no decision. UserPromptSubmit names the session after the run, in the session that is already open — sessionTitle is only accepted on this event and on SessionStart, so a prompt boundary is the only place a rename can happen, and it never overwrites a title the user chose.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/allow-run-writes.py",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/deny-out-of-scope-writes.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session-title.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

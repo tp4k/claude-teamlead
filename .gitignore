@@ -1,0 +1,12 @@
+# Nothing per-machine lives in this tree any more.
+#
+# Run directories, worktree handover files and the user's config all sit under
+# $TEAMLEAD_HOME (default ~/.teamlead/) — see scripts/paths.py for why: `claude
+# plugin update` replaces this directory, and a plugin someone else can install
+# cannot carry one machine's briefs, repo paths and worktree names.
+#
+# What is left is local tool state only.
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.pyc

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-teamlead",
+  "description": "The teamlead plugin: delegated work from a plan to reviewed commits, with the coordinator never writing the code itself.",
+  "owner": {
+    "name": "tp4k"
+  },
+  "plugins": [
+    {
+      "name": "teamlead",
+      "source": "./",
+      "description": "Coordinate a delegated task end to end: plan, validate the plan, implement in parallel workstreams, verify, review on three axes, triage findings, and stop when the rework cap says the plan is wrong."
+    }
+  ]
+}

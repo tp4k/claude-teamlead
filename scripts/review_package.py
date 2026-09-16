@@ -105,8 +105,30 @@ MARKER_PREFIX = r"^[ \t]*(?:[-*+][ \t]+)?[`*_]{0,2}"
 # rather than consuming the rest of the document. Both choices fail toward
 # stripping too little, because too little is the pre-existing permissiveness
 # while too much invents a false rejection of a real plan.
+#
+# The opener and closer are anchored at `^ {0,3}`, not a strict `^`: CommonMark
+# reads one-to-three leading spaces as still a fence and four as an indented
+# code block, so a strict `^` would silently stop stripping real fences
+# indented up to three spaces. The closer must be at least as long as the
+# opener, which the capturing group here enforces literally — `\1` is the
+# opener's own backtick or tilde run, so the closer has to reproduce that exact
+# run before any further same-character backticks are allowed — and the
+# `(?!` `` `)`/`(?!~)` lookaheads stop the group from giving up one of its own
+# characters to satisfy the info-string's `\S`, which is what let a four-
+# backtick opener masquerade as a three-backtick one with a stray backtick
+# glued onto its info string.
+#
+# The two branches' info-string classes differ on purpose. CommonMark §4.5
+# forbids a backtick anywhere in a backtick fence's own info string — a fourth
+# member of the same masquerade class as the lookahead above — while a tilde
+# fence's info string may contain backticks freely, so only the backtick
+# branch excludes them.
 FENCE_RE = re.compile(
-    r"^[ \t]*(```|~~~)[ \t]*\S[^\n]*\n.*?^[ \t]*\1[ \t]*$", re.MULTILINE | re.DOTALL
+    r"^ {0,3}(?:(`{3,})(?!`)[ \t]*[^\s`][^\n`]*"
+    r"|(~{3,})(?!~)[ \t]*\S[^\n]*)\n"
+    r".*?"
+    r"^ {0,3}(?(1)\1`*|\2~*)[ \t]*$",
+    re.MULTILINE | re.DOTALL,
 )
 # A heading is the marker itself, optionally annotated in parentheses — nothing
 # else. The tail was previously unconstrained, so `### Spec excerpt appendix`

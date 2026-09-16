@@ -53,21 +53,41 @@ def sources() -> list[Path]:
 
 
 def annotations_of(tree: ast.AST) -> list[ast.expr]:
-    """Just the expressions written in an annotation position.
+    """Just the expressions written in a position Python evaluates at runtime.
 
     Deliberately not "every node under a function": `a | b` in a body is
     ordinary bitwise arithmetic on any version, and flagging it would push the
     next person toward silencing the check rather than fixing a real break.
+
+    A flat `ast.walk` cannot tell a module/class-level `AnnAssign` (evaluated
+    at def time) from one written inside a function body (never evaluated —
+    CPython does not even store it), so this descends scope by scope instead.
+    A `class` statement nested inside a function still evaluates its own body
+    when it runs, and a nested `def`'s signature is evaluated at its own def
+    time, so both keep being checked regardless of the enclosing function.
     """
     found: list[ast.expr] = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.returns is not None:
-                found.append(node.returns)
-        elif isinstance(node, ast.arg) and node.annotation is not None:
-            found.append(node.annotation)
-        elif isinstance(node, ast.AnnAssign):
-            found.append(node.annotation)
+
+    def visit(node: ast.AST, in_function_body: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if child.returns is not None:
+                    found.append(child.returns)
+                visit(child, True)
+            elif isinstance(child, ast.ClassDef):
+                visit(child, False)
+            elif isinstance(child, ast.arg):
+                if child.annotation is not None:
+                    found.append(child.annotation)
+                visit(child, in_function_body)
+            elif isinstance(child, ast.AnnAssign):
+                if not in_function_body:
+                    found.append(child.annotation)
+                visit(child, in_function_body)
+            else:
+                visit(child, in_function_body)
+
+    visit(tree, False)
     return found
 
 
@@ -112,6 +132,24 @@ BAD_RETURN = "from pathlib import Path\ndef f(a: int) -> Path | None: ...\n"
 BAD_ARG = "def f(a: int | None) -> int: ...\n"
 BAD_FIELD = "class C:\n    x: int | None = None\n"
 BITWISE_BODY = "def f(a: int, b: int) -> int:\n    return a | b\n"
+LOCAL_ANNOTATION_NOT_EVALUATED = (
+    "def f():\n"
+    "    x: int | None = None\n"
+    "    return x\n"
+)
+MODULE_LEVEL_ANNOTATION_STILL_EVALUATED = "x: int | None = None\n"
+CLASS_IN_FUNCTION_BODY_STILL_EVALUATED = (
+    "def f():\n"
+    "    class C:\n"
+    "        x: int | None = None\n"
+    "    return C\n"
+)
+SIGNATURE_IN_FUNCTION_BODY_STILL_EVALUATED = (
+    "def f():\n"
+    "    def g(a: int | None) -> int:\n"
+    "        return a\n"
+    "    return g\n"
+)
 
 
 def case_the_detector_finds_a_runtime_union() -> None:
@@ -177,11 +215,61 @@ def case_no_module_evaluates_a_union_annotation() -> None:
     )
 
 
+def case_a_function_local_annotation_is_not_evaluated() -> None:
+    """CPython never stores or evaluates a function-local variable annotation,
+    so flagging it here is a false positive against the floor this check
+    exists to enforce."""
+    hits = runtime_union_lines(LOCAL_ANNOTATION_NOT_EVALUATED)
+    check(
+        "a function-local variable annotation is not reported",
+        hits == [],
+        f"hits={hits}",
+    )
+
+
+def case_a_module_level_annotation_is_still_reported() -> None:
+    """The same annotation shape, but at module level, where it is evaluated
+    at import time and must still be caught, with its own line number."""
+    hits = runtime_union_lines(MODULE_LEVEL_ANNOTATION_STILL_EVALUATED)
+    check(
+        "a module-level union annotation is still reported, at its own line",
+        hits == [1],
+        f"hits={hits}",
+    )
+
+
+def case_a_class_body_inside_a_function_is_still_checked() -> None:
+    """A `class` statement evaluates its own body, including annotations, when
+    it runs — even nested inside a function — so the enclosing function body
+    does not make the class's annotations unevaluated."""
+    hits = runtime_union_lines(CLASS_IN_FUNCTION_BODY_STILL_EVALUATED)
+    check(
+        "a class field union nested inside a function body is still reported",
+        hits == [3],
+        f"hits={hits}",
+    )
+
+
+def case_a_signature_inside_a_function_is_still_checked() -> None:
+    """A nested `def`'s signature is evaluated at its own def time exactly
+    like a top-level one, regardless of the enclosing function body."""
+    hits = runtime_union_lines(SIGNATURE_IN_FUNCTION_BODY_STILL_EVALUATED)
+    check(
+        "a nested function's signature union is still reported",
+        hits == [2],
+        f"hits={hits}",
+    )
+
+
 CASES = [
     case_the_detector_finds_a_runtime_union,
     case_the_detector_accepts_what_the_floor_accepts,
     case_every_shipped_module_parses_at_the_floor,
     case_no_module_evaluates_a_union_annotation,
+    case_a_function_local_annotation_is_not_evaluated,
+    case_a_module_level_annotation_is_still_reported,
+    case_a_class_body_inside_a_function_is_still_checked,
+    case_a_signature_inside_a_function_is_still_checked,
 ]
 
 

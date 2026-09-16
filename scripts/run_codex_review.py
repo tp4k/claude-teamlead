@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import threading
+import zlib
 from pathlib import Path
 from typing import NamedTuple
 
@@ -45,17 +46,28 @@ class Fail(Exception):
 class TreeState(NamedTuple):
     """One snapshot of everything a review could disturb without being seen.
 
-    `head` and `entries` are the original checkout's own filesystem state.
-    `shared` is the *repository* — the git common directory, which every linked
-    worktree shares, so changing any of it needs no escape from the disposable
-    checkout at all.
+    `head`, `entries` and `staged` are the original checkout's own state:
+    `staged` is the logical content `git ls-files --stage` reports (mode and
+    blob OID per path), not the raw index file, so a `git checkout` that only
+    rewrites the on-disk stat cache leaves it unchanged. `shared` is the
+    *repository* — the git common directory, which every linked worktree
+    shares, so changing any of it needs no escape from the disposable checkout
+    at all. `object_ids` is the set of object IDs this repository's own object
+    store serves — local loose objects plus local pack indexes, not a store
+    reached through `objects/info/alternates` — which is what changes when
+    history is genuinely lost from that store; a semantics-preserving repack
+    moves objects between loose and packed storage without shrinking this set.
 
-    `shared` is the detector and is byte-exact. `config` is not a second
-    detector: it is the decoded `--local` config kept only so a warning can name
-    the key that moved, because `core.hooksPath` and the `alias.*` entries decide
-    what later commands in this repository execute and "something changed" is not
-    enough to act on. Decoding cannot be injective — git accepts values that are
-    not UTF-8, and two distinct byte strings can decode to the same replacement
+    `shared` is the detector and is byte-exact, except for `objects/`: storage
+    layout a repack rewrites is excluded entirely, and a loose object is
+    excluded too as long as its bytes still hash to its own name — content
+    addressing already vouches for it, and `object_ids` is what notices when it
+    stops existing. `config` is not a second detector: it is the decoded
+    `--local` config kept only so a warning can name the key that moved,
+    because `core.hooksPath` and the `alias.*` entries decide what later
+    commands in this repository execute and "something changed" is not enough
+    to act on. Decoding cannot be injective — git accepts values that are not
+    UTF-8, and two distinct byte strings can decode to the same replacement
     character — which is exactly why it renders and never decides.
     """
 
@@ -63,6 +75,8 @@ class TreeState(NamedTuple):
     entries: dict[str, str]
     shared: dict[str, str]
     config: dict[str, list[str]]
+    object_ids: frozenset[str]
+    staged: dict[str, str]
 
 
 def resolve_codex() -> str:
@@ -139,6 +153,174 @@ def summarize_event(line: str) -> str | None:
     return None
 
 
+# Permission bits `stat.S_IMODE()` would return, kept as a mask because the
+# common-directory walk below already binds the name `stat` to `path.stat()`.
+MODE_BITS_MASK = 0o7777
+
+# Storage layout a semantics-preserving `git repack -ad` rewrites without
+# changing which objects the repository can serve. Never digested: digesting
+# it would fail every repack with a false "deleted" alarm for content that
+# only moved.
+DERIVED_OBJECT_PREFIXES = ("objects/pack/", "objects/info/commit-graphs/")
+DERIVED_OBJECT_FILES = ("objects/info/packs", "objects/info/commit-graph")
+# A loose object's path is its own hash split after two hex characters. sha1
+# names are 40 hex characters total, sha256 names are 64.
+LOOSE_OBJECT_RE = re.compile(r"^objects/([0-9a-f]{2})/([0-9a-f]{38}|[0-9a-f]{62})$")
+# `git repack` (without `-n`) always runs `update-server-info` and writes this
+# cache of the current refs for the dumb-HTTP transport, whether or not any
+# ref moved. `refs/` and `packed-refs` are the authoritative signal for a ref
+# move; a plain repack regenerating this mirror of them is the same false
+# "deleted"/"created" alarm F1 is about, one directory up from `objects/`.
+DERIVED_STATE_FILES = ("info/refs",)
+# Read size for both streaming decompression of a loose object and hashing any
+# common-directory file — the shape `corpus_ab.py:READ_CHUNK_BYTES` already
+# sets, so neither one holds a whole file in memory at once.
+LOOSE_READ_CHUNK_BYTES = 1 << 16
+# Bounds the inflated size `is_valid_loose_object` will hold in memory.
+# Deflate's maximum expansion ratio is 1032:1, so an unbounded inflate of a
+# crafted ~10 MB compressed stream written under `.git/objects/` -- a path
+# the sandboxed reviewer can create, which is the entire reason this detector
+# exists -- would allocate roughly 10 GB in one shot. Exceeding this cap
+# returns `False` from `is_valid_loose_object`, which is fail-closed and
+# raises no false alarm: the path then falls through to the digest branch
+# beside that check, which only warns when the two snapshots' bytes differ.
+LOOSE_OBJECT_MAX_BYTES = 1 << 30
+
+
+def is_derived_object_layout(name: str) -> bool:
+    """A path under `objects/` that records layout, not object identity."""
+    return name.startswith(DERIVED_OBJECT_PREFIXES) or name in DERIVED_OBJECT_FILES
+
+
+def loose_object_oid(name: str) -> str | None:
+    """The object ID a loose-object path claims to be, or `None` if it is not one."""
+    match = LOOSE_OBJECT_RE.match(name)
+    return None if match is None else match.group(1) + match.group(2)
+
+
+def is_valid_loose_object(path: Path, oid: str) -> bool:
+    """A loose object is content-addressed only while its bytes hash to `oid`.
+
+    `objects/info/alternates` and a bit-flipped loose object are both paths
+    under `objects/` that are not content-addressed, so they need this check
+    rather than the size-only shortcut valid loose objects get.
+
+    Streamed through a bounded `zlib.decompressobj()` rather than
+    `zlib.decompress(path.read_bytes())`: reading the whole compressed file
+    and materialising the whole inflated object at once made peak memory
+    proportional to a value the sandboxed reviewer controls. Each call bounds
+    its own output to `LOOSE_READ_CHUNK_BYTES` via `max_length`, feeding any
+    leftover `unconsumed_tail` back in before more of the file is read, and
+    the running inflated-byte count is checked against `LOOSE_OBJECT_MAX_BYTES`
+    after every chunk.
+    """
+    algorithm = hashlib.sha1 if len(oid) == 40 else hashlib.sha256
+    digest = algorithm()
+    decompressor = zlib.decompressobj()
+    inflated_total = 0
+    try:
+        with path.open("rb") as handle:
+            pending = b""
+            while True:
+                data = pending or handle.read(LOOSE_READ_CHUNK_BYTES)
+                if not data:
+                    break
+                inflated = decompressor.decompress(data, LOOSE_READ_CHUNK_BYTES)
+                inflated_total += len(inflated)
+                if inflated_total > LOOSE_OBJECT_MAX_BYTES:
+                    return False
+                digest.update(inflated)
+                pending = decompressor.unconsumed_tail
+            tail = decompressor.flush()
+            inflated_total += len(tail)
+            if inflated_total > LOOSE_OBJECT_MAX_BYTES:
+                return False
+            digest.update(tail)
+            if not decompressor.eof:
+                return False
+            # Bytes appended after the zlib stream land in `unused_data`, not
+            # `unconsumed_tail`, so they never reach `digest.update()` above —
+            # a loose object with trailing garbage still hashed correct.
+            if decompressor.unused_data:
+                return False
+    except (OSError, zlib.error):
+        return False
+    return digest.hexdigest() == oid
+
+
+def pack_index_oids(repo: Path, common: Path) -> set[str]:
+    """Object IDs packed into `common`'s own local packs, read via `git show-index`.
+
+    Only `common / "objects" / "pack"` is walked — never a path reached through
+    `objects/info/alternates` — so a pack that lives only in a borrowed
+    alternate store contributes nothing here. `git show-index` takes a pack
+    `.idx` on stdin, one local pack at a time (`git show-index -h`); there is
+    no flag to point it at several packs, or at an alternate store, at once.
+    """
+    oids: set[str] = set()
+    pack_dir = common / "objects" / "pack"
+    if not pack_dir.is_dir():
+        return oids
+    for index_path in sorted(pack_dir.glob("*.idx")):
+        # is_file() specifically: open() on a FIFO blocks in the kernel and
+        # never raises, so except OSError below cannot catch that input, and
+        # no test here can exercise it without hanging this synchronous suite.
+        if not index_path.is_file():
+            continue
+        if not index_path.with_suffix(".pack").is_file():
+            continue
+        try:
+            with index_path.open("rb") as handle:
+                listed = subprocess.run(
+                    ["git", "-C", str(repo), "show-index"],
+                    stdin=handle,
+                    capture_output=True,
+                    text=True,
+                )
+        except OSError:
+            continue
+        for line in listed.stdout.splitlines():
+            fields = line.split()
+            if len(fields) >= 2:
+                oids.add(fields[1])
+    return oids
+
+
+def sha256_of(path: Path) -> str:
+    """Hash `path` in fixed-size chunks rather than holding it whole in memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(LOOSE_READ_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def parse_status_paths(raw: bytes) -> dict[str, str]:
+    """Decode `git status --porcelain -z -uall` bytes into path -> status code.
+
+    Decoded with `os.fsdecode` (surrogateescape) rather than `errors="replace"`:
+    replace maps every undecodable byte onto the same U+FFFD, so two distinct
+    non-UTF-8 filenames compare equal and the digest keyed on one of them is
+    never computed for the other. Surrogateescape is injective on POSIX.
+    """
+    paths: dict[str, str] = {}
+    fields = raw.split(b"\0")
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        code = entry[:2].decode("ascii")
+        path = os.fsdecode(entry[3:])
+        if code[0] in "RC":
+            # `-z` splits a rename or copy across two fields, destination
+            # first, origin second — and the origin no longer exists on disk.
+            index += 1
+        paths[path] = code
+    return paths
+
+
 def tree_state(repo: Path) -> TreeState:
     """HEAD, dirty content, and the repository state a review could disturb.
 
@@ -171,15 +353,25 @@ def tree_state(repo: Path) -> TreeState:
       accepts values that are not UTF-8, and the previous snapshot decoded with
       `errors="replace"`, which mapped the distinct values `0x80` and `0x81` onto
       the same replacement character and compared equal.
-    - `objects/` is identified by path and size instead of content, because
-      object storage is content-addressed: a loose object's path *is* the hash of
-      what is in it, so its content cannot change without its name changing.
-      Hashing it anyway would mean reading every byte of every pack on a
-      repository that is not this one's size, for no added detection.
-    - `index` is the sole path excluded, because it is a cache of the original
-      worktree's files rather than shared repository state; the reason is at the
-      exclusion itself. Everything else in there is included, including whatever
-      this docstring has not thought of.
+    - `objects/` is split by what it means rather than by path: a valid loose
+      object's path *is* the hash of its content, so it is skipped and left to
+      `object_ids`; storage layout a repack rewrites (`objects/pack/`,
+      `objects/info/packs`, `objects/info/commit-graph*`) is skipped too,
+      because none of it changes which objects the repository can serve.
+      Everything else under `objects/` — `objects/info/alternates`, a loose
+      object whose bytes no longer hash to its own name, anything not yet
+      anticipated — is digested like any other file, because it is mutable
+      metadata or corruption, not content-addressed storage.
+    - `staged` is read separately as the logical content `git ls-files --stage`
+      reports (mode and blob OID per path) rather than excluded: that is what
+      `head` and `entries` do not capture, because they see the worktree, and a
+      pure rewrite of the on-disk index file touches neither.
+    - `info/refs`, the dumb-HTTP mirror `update-server-info` rewrites on every
+      plain `git repack`, is skipped the same way: `refs/` and `packed-refs`
+      already are the authoritative signal for a moved ref.
+    - Every remaining file also records the mode bits `chmod` can flip, because
+      `hooks/pre-commit` executing is a filesystem property a byte digest alone
+      cannot see.
     """
     head = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"],
@@ -189,30 +381,41 @@ def tree_state(repo: Path) -> TreeState:
     status = subprocess.run(
         ["git", "-C", str(repo), "status", "--porcelain", "-z", "-uall"],
         capture_output=True,
-        text=True,
-        errors="replace",
     ).stdout
     entries: dict[str, str] = {}
-    fields = status.split("\0")
-    index = 0
-    while index < len(fields):
-        entry = fields[index]
-        index += 1
-        if len(entry) < 4:
-            continue
-        code, path = entry[:2], entry[3:]
-        if code[0] in "RC":
-            # `-z` splits a rename or copy across two fields, destination first,
-            # origin second — and the origin no longer exists on disk. Stepping
-            # over it here is also what stops the next real entry from being read
-            # as an origin.
-            index += 1
+    for path, code in parse_status_paths(status).items():
         target = repo / path
         try:
             digest = hashlib.sha256(target.read_bytes()).hexdigest()[:12]
         except OSError:
             digest = "-"
         entries[path] = f"{code} {digest}"
+    index_output = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "--stage", "-z"],
+        capture_output=True,
+    ).stdout
+    staged: dict[str, str] = {}
+    for record in index_output.split(b"\0"):
+        if not record:
+            continue
+        # `mode oid stage\tpath` — the mode and OID are the logical content a
+        # pure rewrite of the on-disk index (a `git checkout` stat-cache
+        # refresh) does not touch, which is the property this projection needs.
+        # Decoded as bytes, like `parse_status_paths` above: a tracked path can
+        # be non-UTF-8, and `text=True` raised `UnicodeDecodeError` on one.
+        #
+        # A path is not a unique index key on its own: an unresolved conflict
+        # carries stages 1-3 at once, and `git ls-files --stage` already emits
+        # them in ascending stage order for one path. Every stage's record is
+        # kept, joined by a newline no fixed-shape `mode oid stage` record can
+        # contain, so the join stays injective and a change to any one stage
+        # is visible.
+        meta, separator, path = record.partition(b"\t")
+        if separator:
+            key = os.fsdecode(path)
+            entry = meta.decode("ascii")
+            previous = staged.get(key)
+            staged[key] = entry if previous is None else f"{previous}\n{entry}"
     common_output = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
         capture_output=True,
@@ -226,17 +429,21 @@ def tree_state(repo: Path) -> TreeState:
     if not common.is_absolute():
         common = repo / common
     shared: dict[str, str] = {}
+    # Every loose object's OID, gathered from this same walk rather than a
+    # second directory pass — regardless of `is_valid_loose_object` below,
+    # because the set this feeds is "what a path under `objects/` claims to
+    # be", the same thing `cat-file --batch-all-objects` would have listed.
+    loose_oids: set[str] = set()
     for path in sorted(common.rglob("*")):
         name = str(path.relative_to(common))
         if name == "index":
-            # The one path deliberately left out, and not as a quiet exception to
-            # the rule above: the index is a cache of the original worktree's own
-            # files, which `head` and `entries` already capture directly and more
-            # precisely. Anything a reviewer could do to make it meaningful —
-            # staging, committing, checking out — shows up there. Keeping it would
-            # mean every real filesystem finding arrived paired with a second line
-            # restating it, and that line would be labelled shared-not-an-escape
-            # while the finding beside it was an escape.
+            # Read separately above as `staged`, a logical projection rather
+            # than these raw bytes: the stat cache that lives in this file
+            # changes on a plain `git checkout` with no staged or worktree
+            # content moving, which is exactly the duplicate warning that
+            # projection exists to avoid.
+            continue
+        if name in DERIVED_STATE_FILES:
             continue
         if path.is_symlink():
             # Recorded without following it: the interesting change is where the
@@ -247,18 +454,37 @@ def tree_state(repo: Path) -> TreeState:
         try:
             if not path.is_file():
                 continue
-            stat = path.stat()
             if name.startswith("objects/"):
-                shared[name] = f"object {stat.st_size}"
-            else:
-                digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
-                shared[name] = f"{stat.st_size} {digest}"
+                if is_derived_object_layout(name):
+                    continue
+                oid = loose_object_oid(name)
+                if oid is not None:
+                    loose_oids.add(oid)
+                    if is_valid_loose_object(path, oid):
+                        # Content-addressed and valid: `object_ids` is what
+                        # notices if it later stops existing.
+                        continue
+            stat = path.stat()
+            mode = f"{stat.st_mode & MODE_BITS_MASK:04o}"
+            # Chunked, not `path.read_bytes()`: an over-cap or invalid object
+            # falls through from the branch above and must not be
+            # materialised whole here either, on top of the failed attempt
+            # `is_valid_loose_object` already streamed through.
+            digest = sha256_of(path)[:12]
+            shared[name] = f"{mode} {stat.st_size} {digest}"
         except OSError:
             # A file that vanishes mid-walk, or that this process may not read,
             # is recorded as unreadable rather than skipped: skipping it would
             # make it identical to absent, and "the review made this unreadable"
             # is a difference worth a warning.
             shared[name] = "unreadable"
+    # Local-only: loose OIDs come from this repository's own `objects/??/`
+    # directories, gathered above, and packed OIDs from this repository's own
+    # `objects/pack/*.idx` files, read below. Neither source follows
+    # `objects/info/alternates`, so a change inside a borrowed alternate store
+    # never reaches this set — only a change to the pointer file itself does,
+    # and that is still caught by the byte-digest branch above.
+    object_ids = frozenset(loose_oids | pack_index_oids(repo, common))
     config_output = subprocess.run(
         ["git", "-C", str(repo), "config", "--list", "--local", "-z"],
         capture_output=True,
@@ -281,7 +507,7 @@ def tree_state(repo: Path) -> TreeState:
         key, separator, value = record.partition("\n")
         if separator:
             config.setdefault(key, []).append(value)
-    return TreeState(head, entries, shared, config)
+    return TreeState(head, entries, shared, config, object_ids, staged)
 
 
 def config_values(values: list[str] | None) -> str:
@@ -380,6 +606,16 @@ def tree_warnings(
                 f"WARNING: {escape}the review rewrote an already-uncommitted "
                 f"file: {path}"
             )
+    for path in sorted(set(before.staged) | set(after.staged)):
+        # `before.staged`/`after.staged` hold mode and blob OID, not the raw
+        # index file, so a `git checkout` that only refreshes the stat cache
+        # leaves this loop silent — the duplicate warning that exclusion used
+        # to prevent is now prevented by comparing the right thing instead.
+        if before.staged.get(path) != after.staged.get(path):
+            warnings.append(
+                f"WARNING: {escape}a staged-only change moved independently "
+                f"of the worktree: {path}"
+            )
     for path in sorted(set(before.shared) | set(after.shared)):
         # The runner's own disposable checkout is created after the first
         # snapshot and removed before the second, so its `worktrees/<name>/`
@@ -400,6 +636,25 @@ def tree_warnings(
             warnings.append(f"{label}: {name}: deleted during the review")
         else:
             warnings.append(f"{label}: {name}: {old} -> {new}")
+    for oid in sorted(before.object_ids - after.object_ids):
+        # Storage layout (loose vs. packed) is deliberately not part of this
+        # comparison, so a semantics-preserving repack that keeps every object
+        # ID reports nothing here. A name lost from this set is an object this
+        # repository's own store held before and does not hold now, however it
+        # was stored.
+        warnings.append(
+            f"{SHARED_OBJECT_WARNING}: objects/{oid[:2]}/{oid[2:]}: "
+            "deleted during the review"
+        )
+    for oid in sorted(after.object_ids - before.object_ids):
+        # The mirror image of the loop above: valid loose objects are skipped
+        # from `shared` entirely (see `TreeState`), so an object genuinely
+        # added to the store during the review would otherwise produce no
+        # warning of any kind.
+        warnings.append(
+            f"{SHARED_OBJECT_WARNING}: objects/{oid[:2]}/{oid[2:]}: "
+            "created during the review"
+        )
     return warnings
 
 
@@ -782,7 +1037,11 @@ def main(argv: list[str]) -> int:
                 changes = tree_warnings(
                     before, tree_state(repo), isolated=review_tree is not None
                 )
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
+                # `ValueError` alongside `OSError`: a non-UTF-8 tracked or
+                # status path used to raise `UnicodeDecodeError` here, which
+                # is a `ValueError`, aborting this `finally` before any
+                # already-accumulated warning below was ever printed.
                 changes = [
                     "WARNING: could not compare the original worktree after the "
                     f"review: {exc}"

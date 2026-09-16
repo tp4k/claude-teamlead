@@ -30,9 +30,12 @@ No pytest dependency — the skill's scripts run with bare python3.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 import tempfile
+import time
+import zlib
 from pathlib import Path
 
 # Loaded by path rather than imported: a plain `import` here has to follow a
@@ -54,6 +57,12 @@ def git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
     ).stdout
+
+
+def object_ids(repo: Path) -> set[str]:
+    """The set of object IDs `git cat-file` reports the repository can serve."""
+    out = git(repo, "cat-file", "--batch-all-objects", "--batch-check=%(objectname)")
+    return set(out.split())
 
 
 def make_repo(tmp: Path) -> Path:
@@ -855,6 +864,567 @@ def case_an_uncopyable_untracked_file_is_named(tmp: Path) -> None:
     )
 
 
+def case_a_repack_that_keeps_every_object_warns_about_nothing(tmp: Path) -> None:
+    """The physical-path model reported this as near-total history loss.
+
+    `git repack -ad` moves every object from loose to packed storage without
+    dropping any of them — the loose files vanish, the pack files and their
+    layout metadata appear, and `.git/info/refs` gets rewritten as a side
+    effect. None of that changes which object IDs the repository can serve.
+    """
+    repo = make_repo(tmp)
+    for index in range(4):
+        (repo / f"f{index}.txt").write_text(f"content {index}\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", f"c{index}")
+    ids_before = object_ids(repo)
+    before = runner.tree_state(repo)
+    git(repo, "repack", "-ad")
+    after = runner.tree_state(repo)
+    ids_after = object_ids(repo)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    check(
+        "a repack that loses no object ID warns about nothing",
+        ids_before == ids_after and len(ids_before) > 0 and warnings == [],
+        f"ids_before={len(ids_before)} ids_after={len(ids_after)} warnings={warnings}",
+    )
+
+
+def case_a_rewritten_alternates_file_is_caught(tmp: Path) -> None:
+    """`objects/info/alternates` is mutable metadata, not content-addressed.
+
+    Path and size alone cannot see this: the rewrite below keeps both, so only
+    a content digest tells the two states apart.
+    """
+    repo = make_repo(tmp)
+    info = repo / ".git" / "objects" / "info"
+    info.mkdir(parents=True, exist_ok=True)
+    alternates = info / "alternates"
+    alternates.write_text("/tmp/store-aaaa/objects\n")
+    before = runner.tree_state(repo)
+    alternates.write_text("/tmp/store-bbbb/objects\n")
+    warnings = runner.tree_warnings(before, runner.tree_state(repo), isolated=True)
+    check(
+        "an equal-length rewrite of objects/info/alternates is warned about",
+        any("objects/info/alternates" in warning for warning in warnings)
+        and any("object storage changed" in warning for warning in warnings),
+        f"warnings={warnings}",
+    )
+
+
+def case_equal_size_loose_object_corruption_is_caught(tmp: Path) -> None:
+    """A loose object is content-addressed only while it hashes to its name.
+
+    Flipping one byte keeps the length, and `git` writes loose objects
+    `0444`, so corrupting one first requires clearing that bit.
+    """
+    repo = make_repo(tmp)
+    oid = git(repo, "rev-parse", "HEAD:a.txt").strip()
+    loose = repo / ".git" / "objects" / oid[:2] / oid[2:]
+    before = runner.tree_state(repo)
+    corrupted = bytearray(loose.read_bytes())
+    corrupted[-1] ^= 0xFF
+    loose.chmod(0o644)
+    loose.write_bytes(bytes(corrupted))
+    warnings = runner.tree_warnings(before, runner.tree_state(repo), isolated=True)
+    fsck = subprocess.run(
+        ["git", "-C", str(repo), "fsck"], capture_output=True, text=True
+    )
+    check(
+        "a same-length byte flip in a loose object is warned about",
+        fsck.returncode != 0
+        and any(f"{oid[:2]}/{oid[2:]}" in warning for warning in warnings)
+        and any("object storage changed" in warning for warning in warnings),
+        f"warnings={warnings} fsck_returncode={fsck.returncode}",
+    )
+
+
+def case_a_truncated_loose_object_is_caught(tmp: Path) -> None:
+    """`decompressobj.flush()` does not raise on an unterminated stream.
+
+    Every content byte still inflates before the missing trailing adler32, so
+    only an explicit end-of-stream check — not the digest comparison alone —
+    catches a loose object chopped short.
+    """
+    repo = make_repo(tmp)
+    oid = git(repo, "rev-parse", "HEAD:a.txt").strip()
+    loose = repo / ".git" / "objects" / oid[:2] / oid[2:]
+    before = runner.tree_state(repo)
+    loose.chmod(0o644)
+    loose.write_bytes(loose.read_bytes()[:-4])
+    warnings = runner.tree_warnings(before, runner.tree_state(repo), isolated=True)
+    check(
+        "a truncated loose object is warned about",
+        len(warnings) == 1 and f"{oid[:2]}/{oid[2:]}" in warnings[0],
+        f"warnings={warnings}",
+    )
+
+
+def case_a_loose_object_swapped_for_a_valid_stream_of_other_content_is_caught(
+    tmp: Path,
+) -> None:
+    """A valid zlib stream carrying a valid object still isn't this path's object.
+
+    Every other guard passes: the stream terminates cleanly, decompresses to
+    a real git object, and `git cat-file --batch-all-objects` cannot see the
+    swap either, because the object IDs on disk are unchanged — only a
+    content digest keyed by path catches an object that now hashes to
+    something other than its own name.
+    """
+    repo = make_repo(tmp)
+    oid = git(repo, "rev-parse", "HEAD:a.txt").strip()
+    loose = repo / ".git" / "objects" / oid[:2] / oid[2:]
+    before = runner.tree_state(repo)
+    loose.chmod(0o644)
+    loose.write_bytes(zlib.compress(b"blob 5\x00hello"))
+    after = runner.tree_state(repo)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    fsck = subprocess.run(
+        ["git", "-C", str(repo), "fsck"], capture_output=True, text=True
+    )
+    check(
+        "a loose object swapped for a valid stream of other content is caught",
+        len(warnings) == 1
+        and f"{oid[:2]}/{oid[2:]}" in warnings[0]
+        and "created during the review" in warnings[0]
+        and fsck.returncode != 0
+        and before.object_ids == after.object_ids,
+        f"warnings={warnings} fsck_returncode={fsck.returncode} "
+        f"object_ids_equal={before.object_ids == after.object_ids}",
+    )
+
+
+def case_trailing_garbage_after_a_loose_object_stream_is_caught(tmp: Path) -> None:
+    """`decompressor.unused_data` was consulted nowhere before this fix.
+
+    Every content byte still hashes correctly and the stream still terminates
+    cleanly — only bytes appended *after* the stream, which land in
+    `unused_data` rather than reaching `digest.update()`, tell the two states
+    apart.
+    """
+    repo = make_repo(tmp)
+    oid = git(repo, "rev-parse", "HEAD:a.txt").strip()
+    loose = repo / ".git" / "objects" / oid[:2] / oid[2:]
+    before = runner.tree_state(repo)
+    loose.chmod(0o644)
+    loose.write_bytes(loose.read_bytes() + b"garbage")
+    after = runner.tree_state(repo)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    fsck = subprocess.run(
+        ["git", "-C", str(repo), "fsck"], capture_output=True, text=True
+    )
+    valid = runner.is_valid_loose_object(loose, oid)
+    check(
+        "trailing garbage after a valid loose-object stream is caught",
+        valid is False
+        and fsck.returncode != 0
+        and len(warnings) == 1
+        and f"{oid[:2]}/{oid[2:]}" in warnings[0]
+        and "object storage changed" in warnings[0],
+        f"valid={valid} warnings={warnings} fsck_returncode={fsck.returncode}",
+    )
+
+
+def case_an_oversized_loose_object_is_refused_by_the_cap(tmp: Path) -> None:
+    """`LOOSE_OBJECT_MAX_BYTES` bounds inflate; nothing else in the suite reaches it.
+
+    The cap is temporarily lowered so a 1 MiB object exceeds it without a
+    1 GiB fixture, and restored in `finally` so no other case sees it moved.
+    """
+    repo = make_repo(tmp)
+    oid = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input=b"y" * (1 << 20),
+        capture_output=True,
+    ).stdout.decode().strip()
+    loose = repo / ".git" / "objects" / oid[:2] / oid[2:]
+    real_cap = runner.LOOSE_OBJECT_MAX_BYTES
+    runner.LOOSE_OBJECT_MAX_BYTES = 1 << 16
+    try:
+        over_cap = runner.is_valid_loose_object(loose, oid)
+        state = runner.tree_state(repo)
+    finally:
+        runner.LOOSE_OBJECT_MAX_BYTES = real_cap
+    loose_path = f"objects/{oid[:2]}/{oid[2:]}"
+    check(
+        "an over-cap object is refused, and refusal is the cap not a digest mismatch",
+        over_cap is False
+        and loose_path in state.shared
+        and runner.is_valid_loose_object(loose, oid) is True,
+        f"over_cap={over_cap} shared_has_path={loose_path in state.shared} "
+        f"valid_under_restored_cap={runner.is_valid_loose_object(loose, oid)}",
+    )
+
+
+def case_a_staged_only_change_is_reported(tmp: Path) -> None:
+    """Excluding `index` lost staged-only state; the projection restores it.
+
+    Blob D is written to object storage before the first snapshot, so the
+    index swap below introduces no new object — the only thing that changes
+    is what is staged, and HEAD and the worktree stay identical.
+    """
+    repo = make_repo(tmp)
+    (repo / "a.txt").write_text("B staged\n")
+    git(repo, "add", "a.txt")
+    (repo / "a.txt").write_text("C worktree\n")
+    blob_d = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input="D replacement\n",
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    before = runner.tree_state(repo)
+    git(repo, "update-index", "--cacheinfo", f"100644,{blob_d},a.txt")
+    after = runner.tree_state(repo)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    check(
+        "an index-only blob swap with HEAD and worktree unchanged is reported",
+        before.head == after.head
+        and before.entries == after.entries
+        and len(warnings) == 1
+        and "a.txt" in warnings[0]
+        and "staged" in warnings[0],
+        f"warnings={warnings}",
+    )
+
+
+def case_a_change_to_an_earlier_index_stage_is_reported(tmp: Path) -> None:
+    """A path is not a unique index key: an unresolved conflict carries stages 1-3.
+
+    Keying `staged` on the path alone made three records for `a.txt` overwrite
+    each other, so changing stage 1 while stage 3 held went unseen.
+    """
+    repo = make_repo(tmp)
+    git(repo, "rm", "--cached", "-q", "a.txt")
+
+    def write_blob(content: bytes) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+            input=content,
+            capture_output=True,
+        ).stdout.decode().strip()
+
+    stage2 = write_blob(b"stage2\n")
+    stage3 = write_blob(b"stage3\n")
+
+    def set_stages(stage1_oid: str) -> None:
+        info = (
+            f"100644 {stage1_oid} 1\ta.txt\n"
+            f"100644 {stage2} 2\ta.txt\n"
+            f"100644 {stage3} 3\ta.txt\n"
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "update-index", "--index-info"],
+            input=info,
+            text=True,
+            check=True,
+        )
+
+    set_stages(write_blob(b"stage1\n"))
+    before = runner.tree_state(repo)
+    set_stages(write_blob(b"stage1 changed\n"))
+    after = runner.tree_state(repo)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    check(
+        "a change to an earlier conflict stage is reported though a later stage held",
+        before.staged != after.staged
+        and any(
+            "staged-only change moved independently" in w and "a.txt" in w
+            for w in warnings
+        ),
+        f"before_staged={before.staged!r} after_staged={after.staged!r} "
+        f"warnings={warnings}",
+    )
+
+
+def case_a_checkout_does_not_duplicate_a_filesystem_warning(tmp: Path) -> None:
+    """The index projection must not repeat a finding `entries` already made.
+
+    `git update-index --refresh` rewrites the index's stat cache for a file
+    whose mtime moved but whose content and staged blob did not — the
+    duplicate-warning problem the original exclusion was papering over. The
+    real finding here is the untracked file created during the review, and it
+    must appear exactly once.
+    """
+    repo = make_repo(tmp)
+    before = runner.tree_state(repo)
+    (repo / "codex-probe.txt").write_text("probe\n")
+    # A bare `touch()` can land in the same on-disk second the index already
+    # recorded, which git then treats as racily clean and never rewrites --
+    # so this case passed regardless of whether the index projection was
+    # excluded. Moving the mtime 10 seconds into the future is a move git
+    # cannot dismiss that way.
+    stamp = time.time() + 10
+    os.utime(repo / "a.txt", (stamp, stamp))
+    subprocess.run(
+        ["git", "-C", str(repo), "update-index", "--refresh", "-q"],
+        capture_output=True,
+    )
+    warnings = runner.tree_warnings(before, runner.tree_state(repo))
+    check(
+        "a stat-cache-only index refresh adds no warning beside the real one",
+        len(warnings) == 1 and "codex-probe.txt" in warnings[0],
+        f"warnings={warnings}",
+    )
+
+
+def case_a_hook_made_executable_is_caught(tmp: Path) -> None:
+    """The byte-only snapshot omitted executable mode.
+
+    `chmod +x` on an already-present hook changes what git executes while
+    every byte of the file, and its size, stay the same.
+    """
+    repo = make_repo(tmp)
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho hi\n")
+    hook.chmod(0o644)
+    before = runner.tree_state(repo)
+    hook.chmod(0o755)
+    warnings = runner.tree_warnings(before, runner.tree_state(repo), isolated=True)
+    check(
+        "chmod +x on an existing hook is caught though its bytes are unchanged",
+        any("hook changed" in warning for warning in warnings)
+        and any("pre-commit" in warning for warning in warnings),
+        f"warnings={warnings}",
+    )
+
+
+def case_two_non_utf8_status_paths_stay_distinct(tmp: Path) -> None:
+    """`errors="replace"` let two distinct filenames compare equal.
+
+    macOS/APFS refuses to create such filenames on disk, so this asserts
+    against the extracted parser directly rather than a fixture file.
+    """
+    raw = b"?? name-\x80.txt\x00?? name-\x81.txt\x00"
+    parsed = runner.parse_status_paths(raw)
+    check(
+        "two status paths differing only in a non-UTF-8 byte stay distinct",
+        len(parsed) == 2,
+        f"parsed={parsed!r}",
+    )
+
+
+def case_a_non_utf8_tracked_path_does_not_break_the_snapshot(tmp: Path) -> None:
+    """`git ls-files --stage -z` decoded strictly raised `UnicodeDecodeError`.
+
+    Staged with `--cacheinfo` and bytes argv, no worktree file, so APFS never
+    has to accept the name. The field is `staged` after the row-5 rename.
+
+    Two distinct non-UTF-8 paths are staged, not just one: `errors="replace"`
+    would map both onto the same U+FFFD key and collapse them, which the
+    "does not raise" assertion alone cannot see.
+    """
+    repo = make_repo(tmp)
+    oid = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input=b"tracked content",
+        capture_output=True,
+    ).stdout.decode().strip()
+    cacheinfo = f"100644,{oid}".encode() + b",name-\x80.txt"
+    subprocess.run(
+        ["git", "-C", str(repo), "update-index", "--add", "--cacheinfo", cacheinfo],
+        check=True,
+    )
+    cacheinfo_second = f"100644,{oid}".encode() + b",name-\x81.txt"
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "update-index", "--add",
+            "--cacheinfo", cacheinfo_second,
+        ],
+        check=True,
+    )
+    state = runner.tree_state(repo)
+    non_a_keys = [key for key in state.staged if key != "a.txt"]
+    check(
+        "a non-UTF-8 tracked path does not raise, and two distinct paths "
+        "stay distinct staged keys",
+        "a.txt" in state.staged
+        and any(key != "a.txt" for key in state.staged)
+        and len(state.staged) == 3
+        and len(non_a_keys) == 2
+        and non_a_keys[0] != non_a_keys[1],
+        f"staged={state.staged!r}",
+    )
+
+
+def case_an_object_added_to_the_shared_store_is_reported(tmp: Path) -> None:
+    """Only deletions were mirrored; an addition must not be silent either.
+
+    `git hash-object -w --stdin` between the two snapshots stages arbitrary
+    content in the live object database and must produce exactly one warning
+    naming the new object.
+    """
+    repo = make_repo(tmp)
+    before = runner.tree_state(repo)
+    oid = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input=b"created during the review",
+        capture_output=True,
+    ).stdout.decode().strip()
+    after = runner.tree_state(repo)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    loose_path = f"objects/{oid[:2]}/{oid[2:]}"
+    check(
+        "an object added to the shared store during the review is reported",
+        len(warnings) == 1 and loose_path in warnings[0] and "created" in warnings[0],
+        f"warnings={warnings}",
+    )
+
+
+def case_a_change_inside_a_borrowed_alternate_store_is_not_reported(tmp: Path) -> None:
+    """The inventory is local-only: a borrowed store's own content is out of scope.
+
+    `objects/info/alternates` still points at `borrowed`, so the pointer file
+    itself is unchanged and stays silent too — only a change to that pointer,
+    not to what it points at, is this tool's business.
+    """
+    repo = make_repo(tmp)
+    borrowed = tmp / "borrowed"
+    borrowed.mkdir()
+    git(borrowed, "init", "-q")
+    info = repo / ".git" / "objects" / "info"
+    info.mkdir(parents=True, exist_ok=True)
+    (info / "alternates").write_text(f"{borrowed / '.git' / 'objects'}\n")
+    before = runner.tree_state(repo)
+    subprocess.run(
+        ["git", "-C", str(borrowed), "hash-object", "-w", "--stdin"],
+        input=b"lives only in the borrowed store",
+        capture_output=True,
+    )
+    after = runner.tree_state(repo)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    check(
+        "a change inside a borrowed alternate store produces no warning at all",
+        warnings == [],
+        f"warnings={warnings}",
+    )
+
+
+def case_the_local_inventory_survives_a_repack_without_emptying(tmp: Path) -> None:
+    """A quiet repack is quiet because the two sets MATCH, not because both are empty.
+
+    Returning `frozenset()` from the local inventory would pass every silence
+    test in this suite; only comparing it against a known-non-empty set after
+    a repack discriminates that from the real fix.
+    """
+    repo = make_repo(tmp)
+    for index in range(4):
+        (repo / f"g{index}.txt").write_text(f"content {index}\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", f"g{index}")
+    before = runner.tree_state(repo)
+    git(repo, "repack", "-ad")
+    after = runner.tree_state(repo)
+    check(
+        "the local inventory is non-empty and unchanged across a repack",
+        before.object_ids == after.object_ids and len(after.object_ids) > 0,
+        f"before={len(before.object_ids)} after={len(after.object_ids)}",
+    )
+
+
+def case_a_non_regular_file_named_idx_does_not_break_the_snapshot(tmp: Path) -> None:
+    """A directory named `*.idx` in the pack directory does not break the snapshot.
+
+    What this pins is the outcome — the local inventory stays non-empty and
+    unchanged — and not any one guard. Three separate mechanisms keep this
+    case green: delete `is_file()` alone and the `.pack` sibling check still
+    skips the path, since the fixture's `a.idx` has no `a.pack` sibling;
+    delete both guards and `open()` raises `IsADirectoryError`, a subclass of
+    `OSError`, which the handler below catches.
+
+    So no test here pins `is_file()` itself. The one input that isolates it is
+    a FIFO, whose `open()` blocks in the kernel without ever raising, and a
+    FIFO fixture would hang this synchronous suite — the same reason recorded
+    in the comment above the guard in `run_codex_review.py`.
+    """
+    repo = make_repo(tmp)
+    for index in range(4):
+        (repo / f"h{index}.txt").write_text(f"content {index}\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", f"h{index}")
+    git(repo, "repack", "-ad")
+    before_ids = runner.tree_state(repo).object_ids
+    (repo / ".git" / "objects" / "pack" / "a.idx").mkdir()
+    after_ids = runner.tree_state(repo).object_ids
+    check(
+        "a non-regular file named *.idx does not break the snapshot",
+        after_ids == before_ids and len(after_ids) > 0,
+        f"before={len(before_ids)} after={len(after_ids)}",
+    )
+
+
+def case_an_unreadable_pack_index_drops_its_oids_without_raising(tmp: Path) -> None:
+    """`is_file()` alone does not catch this: a chmod'd `.idx` is still a regular file.
+
+    Only a bare `except OSError` around the `open()` call — not the `is_file()`
+    guard alone — keeps `tree_state` from raising, and the dropped pack's OIDs
+    must still surface as a `deleted during the review` warning rather than
+    vanishing without a trace.
+    """
+    if os.geteuid() == 0:
+        check(
+            "an unreadable pack index drops its oids without raising",
+            True,
+            "skipped: running as root, chmod(0o000) does not deny root",
+        )
+        return
+    repo = make_repo(tmp)
+    for index in range(4):
+        (repo / f"k{index}.txt").write_text(f"content {index}\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", f"k{index}")
+    oid = git(repo, "rev-parse", "HEAD:k0.txt").strip()
+    git(repo, "repack", "-ad")
+    index_files = sorted((repo / ".git" / "objects" / "pack").glob("*.idx"))
+    before = runner.tree_state(repo)
+    for index_path in index_files:
+        index_path.chmod(0o000)
+    try:
+        after = runner.tree_state(repo)
+    finally:
+        for index_path in index_files:
+            index_path.chmod(0o644)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    check(
+        "an unreadable pack index does not raise and its OIDs are reported deleted",
+        any(
+            f"{oid[:2]}/{oid[2:]}" in warning and "deleted during the review" in warning
+            for warning in warnings
+        ),
+        f"warnings={warnings}",
+    )
+
+
+def case_a_pack_index_without_its_pack_file_stops_counting_its_oids(tmp: Path) -> None:
+    """An `.idx` whose `.pack` sibling is gone must not contribute any OIDs.
+
+    `objects/pack/` is excluded from the shared byte digest wholesale, so a
+    missing `.pack` produces no byte warning either; without this guard the
+    two silences compose into zero warnings even though the repository can
+    no longer serve the object at all.
+    """
+    repo = make_repo(tmp)
+    for index in range(4):
+        (repo / f"k{index}.txt").write_text(f"content {index}\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", f"k{index}")
+    oid = git(repo, "rev-parse", "HEAD:k0.txt").strip()
+    git(repo, "repack", "-ad")
+    before = runner.tree_state(repo)
+    for pack_path in (repo / ".git" / "objects" / "pack").glob("*.pack"):
+        pack_path.unlink()
+    after = runner.tree_state(repo)
+    warnings = runner.tree_warnings(before, after, isolated=True)
+    check(
+        "a pack index without its pack file stops counting its oids",
+        any(
+            f"{oid[:2]}/{oid[2:]}" in warning and "deleted during the review" in warning
+            for warning in warnings
+        ),
+        f"warnings={warnings}",
+    )
+
+
 CASES = [
     case_network_mode_pairs_workspace_write_with_the_flag,
     case_no_network_is_the_hard_read_only_sandbox,
@@ -890,6 +1460,25 @@ CASES = [
     case_an_unnamed_common_dir_file_is_still_reported,
     case_a_clean_tree_clears_the_previous_backup,
     case_an_uncopyable_untracked_file_is_named,
+    case_a_repack_that_keeps_every_object_warns_about_nothing,
+    case_a_rewritten_alternates_file_is_caught,
+    case_equal_size_loose_object_corruption_is_caught,
+    case_a_truncated_loose_object_is_caught,
+    case_a_loose_object_swapped_for_a_valid_stream_of_other_content_is_caught,
+    case_trailing_garbage_after_a_loose_object_stream_is_caught,
+    case_an_oversized_loose_object_is_refused_by_the_cap,
+    case_a_staged_only_change_is_reported,
+    case_a_change_to_an_earlier_index_stage_is_reported,
+    case_a_checkout_does_not_duplicate_a_filesystem_warning,
+    case_a_hook_made_executable_is_caught,
+    case_two_non_utf8_status_paths_stay_distinct,
+    case_a_non_utf8_tracked_path_does_not_break_the_snapshot,
+    case_an_object_added_to_the_shared_store_is_reported,
+    case_a_change_inside_a_borrowed_alternate_store_is_not_reported,
+    case_the_local_inventory_survives_a_repack_without_emptying,
+    case_a_non_regular_file_named_idx_does_not_break_the_snapshot,
+    case_an_unreadable_pack_index_drops_its_oids_without_raising,
+    case_a_pack_index_without_its_pack_file_stops_counting_its_oids,
 ]
 
 

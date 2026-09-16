@@ -87,8 +87,21 @@ escape. Report them too, and read them in this order. A config warning comes fir
 execute — and a hook warning is the same danger arriving directly. A reflog warning is
 next: ref tips say where the branches are now, the reflog is the only record of where they
 were, so a shrinking one means the repository lost its way back rather than merely moving.
-An object warning matters most when it says `deleted`, which is history becoming
-unreachable rather than moving.
+An object warning is judged by which object IDs the repository can still serve from
+its own object store — local loose objects and local pack indexes — not by storage
+layout or by a store reached through `objects/info/alternates`, so a change inside
+that borrowed store produces no warning, a change to the pointer file itself still
+does, and a `git repack` or `git gc` that keeps every object produces none either. A
+`deleted` line means an object the repository could serve before the review is gone,
+or that mutable metadata deciding which objects are reachable (such as
+`objects/info/alternates`) was removed. A `created` line is the addition side of the
+same comparison — a new object the repository can now serve, new reachability
+metadata, or a loose object whose bytes no longer hash to its own name, since that
+corruption is tracked as content rather than as an object ID. Either mechanism that
+makes a loose object stop verifying — a hash that no longer matches, or a zlib stream
+that never reaches its own end — reads as a `created` line on that path whether or
+not the object was present before the review, since only an object that no longer
+verifies is ever entered into that map.
 `--no-network` keeps the hard read-only sandbox and skips the disposable worktree — worth
 passing when the change under review touches nothing GitHub can answer for, since no CI
 or PR claim then needs settling. The runner writes the final answer to

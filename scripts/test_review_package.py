@@ -19,6 +19,7 @@ No pytest dependency — the skill's scripts run with bare python3.
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import sys
@@ -26,6 +27,13 @@ import tempfile
 from pathlib import Path
 
 PACKAGER = Path(__file__).resolve().parent / "review_package.py"
+
+# Loaded by path rather than imported: a plain `import` here has to follow a
+# `sys.path` edit, which is the E402 the house linter refuses to have
+# silenced.
+_SPEC = importlib.util.spec_from_file_location("review_package", PACKAGER)
+rp = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(rp)
 
 QUESTIONS = """# Open questions
 
@@ -507,6 +515,356 @@ def case_a_spec_quote_containing_code_keeps_its_headings(tmp: Path) -> None:
     )
 
 
+def case_a_four_backtick_template_fence_is_still_stripped(tmp: Path) -> None:
+    """R6-F direction (i): a fence opened AND closed with four backticks.
+
+    The group used to match exactly three backticks and let `[ \t]*\\S` consume
+    a fourth, so a ` ```` ` opener matched while the closer's own strict-three
+    check made a four-backtick closer fail to match — the fence never closed,
+    survived stripping, and the quoted template was counted as a real plan.
+    """
+    shown = """# Plan
+
+## Goal
+
+Merge the ledger.
+
+Here is the shape each workstream should take:
+
+````markdown
+## WS-1 — example
+
+### Spec excerpt
+...
+
+### Observable acceptance
+...
+
+### Test plan
+...
+
+### Reuse and scope
+reuse: x
+keep because: y
+````
+
+## Decisions taken
+
+none
+
+## Project forbiddens
+
+none
+
+## Anti-scope
+
+none
+"""
+    check(
+        "a template fenced with four backticks on both sides is not announced",
+        not announced_for(tmp, shown),
+        "plan carries the template in a ````markdown fence and nothing else",
+    )
+
+
+def case_a_fence_closed_by_a_longer_delimiter_is_stripped(tmp: Path) -> None:
+    """CommonMark allows a closer at least as long as the opener: three open,
+    four close, still one fence — so the quoted template inside must still be
+    stripped rather than counted as the plan's real material."""
+    shown = """# Plan
+
+## Goal
+
+Merge the ledger.
+
+Here is the shape each workstream should take:
+
+```markdown
+## WS-1 — example
+
+### Spec excerpt
+...
+
+### Observable acceptance
+...
+
+### Test plan
+...
+
+### Reuse and scope
+reuse: x
+keep because: y
+````
+
+## Decisions taken
+
+none
+
+## Project forbiddens
+
+none
+
+## Anti-scope
+
+none
+"""
+    check(
+        "a three-backtick opener closed by four backticks is still one fence",
+        not announced_for(tmp, shown),
+        "plan carries the template in a ``` ... ```` fence and nothing else",
+    )
+
+
+def case_indented_backticks_are_not_a_fence(tmp: Path) -> None:
+    """R6-F direction (ii): four-space-indented backtick lines are CommonMark
+    literal text, not a fence — so the real sections between them must survive.
+
+    The old `^[ \t]*` prefix tolerated any indentation, so a four-space-indented
+    bare ` ```` ` line closed a four-space-indented ` ```python ` opener and the
+    genuine plan between them was deleted.
+    """
+    indented = STRUCTURED_PLAN.replace(
+        "## WS-1 — ledger merge\n",
+        "## WS-1 — ledger merge\n\n    ```python\n",
+    ).replace(
+        "## Decisions taken\n",
+        "    ```\n\n## Decisions taken\n",
+    )
+    check(
+        "real sections between indented backtick lines are not swallowed",
+        indented != STRUCTURED_PLAN and announced_for(tmp, indented),
+        f"edited={indented != STRUCTURED_PLAN}",
+    )
+
+
+def case_a_fence_indented_three_spaces_is_still_stripped(tmp: Path) -> None:
+    """The boundary: CommonMark treats one-to-three leading spaces as a fence
+    and four as an indented code block, so `^ {0,3}` must still strip a fence
+    indented three spaces — this is the case that would fail under a strict
+    `^` and so keeps the anchor decision honest."""
+    shown = """# Plan
+
+## Goal
+
+Merge the ledger.
+
+Here is the shape each workstream should take:
+
+   ```markdown
+## WS-1 — example
+
+### Spec excerpt
+...
+
+### Observable acceptance
+...
+
+### Test plan
+...
+
+### Reuse and scope
+reuse: x
+keep because: y
+   ```
+
+## Decisions taken
+
+none
+
+## Project forbiddens
+
+none
+
+## Anti-scope
+
+none
+"""
+    check(
+        "a fence indented three spaces is still recognised and stripped",
+        not announced_for(tmp, shown),
+        "plan carries the template in a fence indented three spaces",
+    )
+
+
+def case_an_opener_of_four_backticks_is_not_closed_by_three(tmp: Path) -> None:
+    """A closer shorter than its opener does not close it (CommonMark: the closer
+    must be at least as long as the opener), so a four-backtick opener followed
+    only by a bare three-backtick line is never closed at all — the fence stays
+    open, nothing is stripped, and the headings inside it are the document's own
+    real headings rather than a template's. That is "fail toward stripping too
+    little" (`review_package.py:104-107`) taken to its own boundary: an
+    unterminated quote must leave its material in place, not vanish it.
+    """
+    shown = """# Plan
+
+## Goal
+
+Merge the ledger.
+
+Here is the shape each workstream should take:
+
+````markdown
+## WS-1 — example
+
+### Spec excerpt
+...
+
+### Observable acceptance
+...
+
+### Test plan
+...
+
+### Reuse and scope
+reuse: x
+keep because: y
+```
+
+## Decisions taken
+
+none
+
+## Project forbiddens
+
+none
+
+## Anti-scope
+
+none
+"""
+    check(
+        "a four-backtick opener closed only by a bare three-backtick line stays open",
+        announced_for(tmp, shown),
+        "plan carries an unterminated ````markdown fence, so its headings still count",
+    )
+
+
+def case_a_bare_fence_left_open_in_a_quote_does_not_pair_across_a_heading(
+    tmp: Path,
+) -> None:
+    """Only a fence with an info string opens a block, which is what stops a
+    bare fence from pairing with an unrelated one much later in the document.
+
+    The spec quote below leaves a bare ``` opener unclosed — the same shape as
+    `case_a_spec_quote_containing_code_keeps_its_headings`'s own leftover
+    opener. That sibling's leftover has nothing later in the document shaped
+    like a closer, so it matches nothing under either version of the fence
+    regex and does not discriminate. This document adds a second bare ```
+    line after `### Observable acceptance`: if the opener's info-string
+    requirement (`review_package.py:121`) is ever dropped, the two bare
+    fences pair with each other and strip everything between them, including
+    the heading. With the requirement in place, neither one opens, so
+    nothing is stripped and the heading survives.
+    """
+    shown = """# Plan
+
+## Goal
+
+Merge the ledger.
+
+## WS-1 — ledger merge
+
+### Spec excerpt
+
+The spec shows a raw example, left open in the quote:
+
+```
+Rows shared by both sides appear once.
+
+### Observable acceptance
+
+`test_merge_ledger::shared_rows_appear_once` fails before, passes after.
+
+### Test plan
+
+The example above closes here:
+
+```
+
+### Reuse and scope
+
+reuse: `scripts/ledger.py::parse_rows`
+keep because: `parse_rows` already tolerates the `Prio` block header
+
+## Decisions taken
+
+Rows appear once — the task's step 3.
+
+## Project forbiddens
+
+No `# noqa`, verbatim from CLAUDE.md.
+
+## Anti-scope
+
+The reparent.
+"""
+    check(
+        "a bare fence opened before the heading does not pair with one after it",
+        announced_for(tmp, shown),
+        "plan carries two bare ``` lines bracketing ### Observable acceptance",
+    )
+
+
+# CommonMark §4.5 forbids a backtick anywhere in a backtick fence's own info
+# string, so `bad`info` after ```` ``` ```` must not open a fence at all. Built
+# from STRUCTURED_PLAN by wrapping the WS-1 body between such an opener and a
+# bare closer: under the old shared info-string class this opener paired with
+# the closer and stripped all four workstream sections between them.
+BACKTICK_INFO_STRING_PLAN = STRUCTURED_PLAN.replace(
+    "## WS-1 — ledger merge\n\n### Spec excerpt",
+    "## WS-1 — ledger merge\n\n```bad`info\n### Spec excerpt",
+).replace(
+    "keep because: `parse_rows` already tolerates the `Prio` block header\n\n"
+    "## Decisions taken",
+    "keep because: `parse_rows` already tolerates the `Prio` block header\n```\n\n"
+    "## Decisions taken",
+)
+# The mirror fixture: the same info string after `~~~` instead of ```` ``` ````.
+# CommonMark permits backticks in a tilde fence's info string, so this must
+# still open a fence and still strip the quoted WS-1 body — the case that
+# would go red if the narrowing were applied to the tilde branch too.
+TILDE_INFO_STRING_PLAN = STRUCTURED_PLAN.replace(
+    "## WS-1 — ledger merge\n\n### Spec excerpt",
+    "## WS-1 — ledger merge\n\n~~~bad`info\n### Spec excerpt",
+).replace(
+    "keep because: `parse_rows` already tolerates the `Prio` block header\n\n"
+    "## Decisions taken",
+    "keep because: `parse_rows` already tolerates the `Prio` block header\n~~~\n\n"
+    "## Decisions taken",
+)
+
+
+def case_a_backtick_in_a_backtick_info_string_is_not_a_fence(tmp: Path) -> None:
+    """CommonMark §4.5: a backtick fence's info string may not contain a
+    backtick, so an opener like ` ```bad`info ` must not open a fence.
+
+    Before the fix the shared `[^\\n]*` info-string class let the backtick
+    through, the permissive opener paired with the bare closer several lines
+    later, and the whole WS-1 body between them — all four workstream
+    sections — was stripped and reported missing.
+    """
+    check(
+        "a backtick in a backtick fence's info string opens no fence",
+        rp.missing_plan_sections(BACKTICK_INFO_STRING_PLAN) == []
+        and rp.plan_is_structured(BACKTICK_INFO_STRING_PLAN) is True,
+        f"missing={rp.missing_plan_sections(BACKTICK_INFO_STRING_PLAN)}",
+    )
+
+
+def case_a_backtick_in_a_tilde_info_string_is_still_a_fence(tmp: Path) -> None:
+    """Backticks are legal CommonMark inside a `~~~` fence's info string, so
+    the narrowing above must apply only to the backtick branch — the same
+    info string after `~~~` delimiters still opens a fence and still strips
+    the quoted WS-1 body.
+    """
+    check(
+        "a backtick in a tilde fence's info string still opens a fence",
+        rp.missing_plan_sections(TILDE_INFO_STRING_PLAN) != []
+        and rp.plan_is_structured(TILDE_INFO_STRING_PLAN) is False,
+        f"missing={rp.missing_plan_sections(TILDE_INFO_STRING_PLAN)}",
+    )
+
+
 CASES = [
     case_answers_reach_the_package,
     case_answers_stop_at_the_next_heading,
@@ -527,6 +885,14 @@ CASES = [
     case_a_parenthesised_heading_is_still_the_section,
     case_a_template_shown_in_a_labelled_fence_does_not_count,
     case_a_spec_quote_containing_code_keeps_its_headings,
+    case_a_four_backtick_template_fence_is_still_stripped,
+    case_a_fence_closed_by_a_longer_delimiter_is_stripped,
+    case_indented_backticks_are_not_a_fence,
+    case_a_fence_indented_three_spaces_is_still_stripped,
+    case_an_opener_of_four_backticks_is_not_closed_by_three,
+    case_a_bare_fence_left_open_in_a_quote_does_not_pair_across_a_heading,
+    case_a_backtick_in_a_backtick_info_string_is_not_a_fence,
+    case_a_backtick_in_a_tilde_info_string_is_still_a_fence,
 ]
 
 

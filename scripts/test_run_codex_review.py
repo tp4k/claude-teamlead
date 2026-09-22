@@ -1425,6 +1425,30 @@ def case_a_pack_index_without_its_pack_file_stops_counting_its_oids(tmp: Path) -
     )
 
 
+def case_the_default_stem_is_the_code_review_name(tmp: Path) -> None:
+    review, events = runner.next_artifacts(tmp)
+    check(
+        "default stem is unchanged",
+        review.name == "codex-review-r1.md" and events.name == "codex-review-r1.jsonl",
+        f"{review.name} / {events.name}",
+    )
+
+
+def case_a_plan_review_stem_does_not_collide_with_the_code_review(tmp: Path) -> None:
+    # The point of the stem: both reviews live beside their own prompt, and a run
+    # that does a plan review and then a code review must not have the second one
+    # land as round 2 of the first. Rounds count per stem.
+    (tmp / "codex-plan-review-r1.md").write_text("plan review\n")
+    plan_next, _ = runner.next_artifacts(tmp, "codex-plan-review")
+    code_next, _ = runner.next_artifacts(tmp)
+    check(
+        "stems count rounds separately",
+        plan_next.name == "codex-plan-review-r2.md"
+        and code_next.name == "codex-review-r1.md",
+        f"{plan_next.name} / {code_next.name}",
+    )
+
+
 CASES = [
     case_network_mode_pairs_workspace_write_with_the_flag,
     case_no_network_is_the_hard_read_only_sandbox,
@@ -1479,6 +1503,8 @@ CASES = [
     case_a_non_regular_file_named_idx_does_not_break_the_snapshot,
     case_an_unreadable_pack_index_drops_its_oids_without_raising,
     case_a_pack_index_without_its_pack_file_stops_counting_its_oids,
+    case_the_default_stem_is_the_code_review_name,
+    case_a_plan_review_stem_does_not_collide_with_the_code_review,
 ]
 
 

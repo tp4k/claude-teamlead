@@ -126,11 +126,19 @@ def repo_from_prompt(prompt: str) -> Path:
     return repo
 
 
-def next_artifacts(directory: Path) -> tuple[Path, Path]:
+def next_artifacts(directory: Path, stem: str = "codex-review") -> tuple[Path, Path]:
+    """The next free `<stem>-rN.md` / `.jsonl` pair in `directory`.
+
+    The stem is a parameter because a run can now send Codex two different
+    things: the plan, before anything is built, and the diff, after. Both land
+    beside their own prompt, and sharing one stem would make the plan review of
+    round 1 and the code review of round 1 the same filename — with the second
+    silently becoming `r2` and every later reader mis-attributing it.
+    """
     round_number = 1
     while True:
-        review = directory / f"codex-review-r{round_number}.md"
-        events = directory / f"codex-review-r{round_number}.jsonl"
+        review = directory / f"{stem}-r{round_number}.md"
+        events = directory / f"{stem}-r{round_number}.jsonl"
         if not review.exists() and not events.exists():
             return review, events
         round_number += 1
@@ -956,6 +964,14 @@ def main(argv: list[str]) -> int:
         help="kill Codex and fail if the review runs longer than this (default: 30)",
     )
     parser.add_argument(
+        "--artifact-stem",
+        default="codex-review",
+        help=(
+            "basename for the review and event files, before `-rN` "
+            "(default: codex-review; a plan review passes codex-plan-review)"
+        ),
+    )
+    parser.add_argument(
         "--no-network",
         action="store_true",
         help=(
@@ -975,7 +991,10 @@ def main(argv: list[str]) -> int:
     repo = repo_from_prompt(prompt)
     codex = resolve_codex()
     require_login(codex)
-    review_path, events_path = next_artifacts(prompt_path.parent)
+    stem = args.artifact_stem
+    if not stem or "/" in stem or stem != stem.strip():
+        raise Fail("--artifact-stem must be a bare filename stem")
+    review_path, events_path = next_artifacts(prompt_path.parent, stem)
 
     network = not args.no_network
     before = tree_state(repo)

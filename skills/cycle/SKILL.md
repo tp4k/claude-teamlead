@@ -1,8 +1,8 @@
 ---
 name: cycle
-description: 'One delivery cycle from one free-text task, in one session: a fresh worktree off origin/main, bootstrapped, the session moved into it and named after the work, then /teamlead:delegate, then a full /teamlead:codex-review with its findings ledger. Three decision points, not zero. Use when the user says "cycle this", "full teamlead cycle", "fresh tree + teamlead", or hands over a task and wants the worktree, the run and the review packaged together.'
+description: 'One delivery cycle from one free-text task, in one session: a fresh worktree off origin/main, bootstrapped, the session moved into it and named after the work, then /teamlead:delegate with the plan reviewed by Codex before anything is built, then a full /teamlead:codex-review with its findings ledger. Four decision points, not zero. Use when the user says "cycle this", "full teamlead cycle", "fresh tree + teamlead", or hands over a task and wants the worktree, the run and the review packaged together.'
 user-invocable: true
-argument-hint: "<task description> [--slug NAME] [--base REF] [--no-perf-review] [--no-security-review] [--adr] | --resume <slug>"
+argument-hint: "<task description> [--slug NAME] [--base REF] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--with-human-readable-plan=off|generate|pause] [--adr] | --resume <slug>"
 allowed-tools: Bash(git worktree list), Bash(git rev-parse *), Bash(git show-ref *), Bash(git check-ignore *), Bash(git log *), Bash(git status *), Bash(git fetch *), EnterWorktree, AskUserQuestion
 ---
 
@@ -19,22 +19,36 @@ primary checkout hands every subagent a workspace the worktree is not inside. Ru
 `EnterWorktree` moves the roots and cwd together, which is the whole reason this used to demand
 a second session.
 
-`$ARGUMENTS` is the task. Strip `--slug`, `--base`, `--resume` and the flags `/teamlead:delegate`
-parses itself (`--no-perf-review`, `--no-security-review`, `--adr`) before the remaining
-text becomes the task; the `/teamlead:delegate` flags are passed through untouched.
+`$ARGUMENTS` is the task. Strip `--slug`, `--base` and `--resume`; everything else is the task
+text, and `/teamlead:delegate` resolves its own options out of it (`run_config.py` reads the flags
+it knows and ignores the prose, so nothing here has to decide what is a flag).
 
-## Three decision points
+**The cycle adds two of those options itself**, appended to the task text it passes on:
+`--codex-plan-review=always --with-human-readable-plan=generate`. A cycle is the expensive
+shape of this workflow — a fresh tree, a full run, then a 10–20 minute independent review of
+the diff — and the cheapest place by far to catch a wrong design is before any of that starts:
+a plan defect costs a paragraph here and a whole round after implementation. The human-readable
+plan comes with it because the cycle is also the path where the user is furthest from the work,
+having handed over one line of text. A user flag wins over both: an explicit
+`--codex-plan-review=off` in the task text is theirs, not a value to override.
 
-The cycle is one command, not one turn. It stops for you three times, and you should know
+## Four decision points
+
+The cycle is one command, not one turn. It stops for you four times, and you should know
 where before you start it:
 
-1. **`/teamlead:delegate` step 6** — open questions and the scope cut block dispatch. Arrives as
-   `AskUserQuestion` cards; `go` accepts every recommendation at once.
-2. **The plan confirmation** (`$RUN/plan.md`), only when the planner returns `complex=yes` — proceed,
-   edit it first, or send it back to the planner.
-3. **`/teamlead:codex-review` step 4** — which of the triaged findings to act on.
+1. **The run options card** (`/teamlead:delegate` step 3a) — the plan review, the human-readable
+   plan, and whether the security and performance reviewers run always, only where the planner
+   flags a surface, or not at all. Current values are pre-marked; every one of them has a config
+   default, so this card is a chance to change your mind, not a form to fill in.
+2. **`/teamlead:delegate` step 6** — the open questions, plus a card for any design finding that is
+   a real choice. Arrives as `AskUserQuestion` cards; `go` accepts every recommendation at once.
+3. **The hold gate** (`/teamlead:delegate` step 6d) — the plan is final and something wants your
+   eyes on it: a scope cut the validator named, confirmed design findings, or `=pause`. This is
+   where `$RUN/plan-human.md` is worth reading; it is the same plan in about a page.
+4. **`/teamlead:codex-review` step 4** — which of the triaged findings to act on.
 
-A fourth appears only on a collision (step 2). Nothing else is asked; nothing is
+A fifth appears only on a collision (step 2). Nothing else is asked; nothing is
 merged or pushed at any point.
 
 ---
@@ -150,7 +164,7 @@ repo: <abs repo>
 worktree: <abs worktree>
 branch: <branch>
 base: <base>@<sha>
-flags: <the /teamlead:delegate flags, or none>
+flags: <the user's own flags, plus --codex-plan-review=always --with-human-readable-plan=generate>
 bootstrap: <the command step 5 ran>
 
 # Task
@@ -208,8 +222,11 @@ see the nested `CLAUDE.md` files.
 
 ## 9. Implement — `/teamlead:delegate`
 
-Invoke the `teamlead` skill with the task text from the file plus its `flags:` line, telling
-it the repo is this worktree. It owns planning, questions, implementation, verification,
+Invoke the `teamlead` skill with the task text from the file plus its `flags:` line — which
+already carries `--codex-plan-review=always --with-human-readable-plan=generate` from step 6 —
+telling it the repo is this worktree. When the run reports the human-readable plan's path, print
+it: it is the artifact this cycle produces for a person rather than for an agent, and a path that
+appears only inside a subagent's output is one nobody opens. It owns planning, questions, implementation, verification,
 review and triage; duplicate none of that here. Its run directory is
 `~/.teamlead/runs/<worktree-dir-name>/<timestamp>-<slug>/` — keyed on the
 directory name it is handed, which is why the worktree carries the slug.
@@ -244,9 +261,10 @@ line as the result.
 
 ## 11. Closing report
 
-One message: worktree path, branch, base SHA, run directory, commit count, the review
-ledger's counts line, the `review-followup.md` path, the `/teamlead:delegate <path>` one-liner, and
-the deferred-work rows added if any.
+One message: worktree path, branch, base SHA, run directory, commit count, the plan design
+review's counts line, the `$RUN/plan-human.md` path, the code review ledger's counts line, the
+`review-followup.md` path, the `/teamlead:delegate <path>` one-liner, and the deferred-work rows
+added if any.
 
 The fix round is deliberately **not** part of the cycle. Fixing confirmed findings is a fresh
 `/teamlead:delegate` run with its own plan, its own questions and its own reviewers; folding it in

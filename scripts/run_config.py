@@ -55,6 +55,13 @@ VALUE_FLAGS: dict[str, str] = {
     "--security-review": "securityReview",
     "--perf-review": "perfReview",
     "--codex-code-review": "codexCodeReview",
+    # `--adr` is listed here as well as in BARE_FLAGS, exactly as
+    # `--codex-code-review` is. Both spellings are real: `off` and `on` are the
+    # values the option admits, so `--adr=off` has to mean off rather than
+    # falling through to whatever a config file says — a flag typed to turn
+    # something off that instead leaves it on is the worst shape this parser
+    # has. The bare form still means `on`, via BARE_FLAGS below.
+    "--adr": "adr",
 }
 BARE_FLAGS: dict[str, tuple[str, str]] = {
     "--adr": ("adr", "on"),
@@ -74,6 +81,21 @@ SEED_NOTE = (
 
 class Fail(Exception):
     pass
+
+
+def takes_no_value(name: str) -> Fail:
+    """The error for a bare flag written with an inline value.
+
+    Rejecting is the only safe answer, and `--autopilot=false` is why. Reading
+    the name and discarding the value turns a flag typed to KEEP the run's
+    approval stops into the flag that skips every one of them — the user's
+    intent inverted, silently, at the one gate that protects the rest. Parsing
+    `=false` instead would invent a boolean syntax no flag here documents, and
+    leave `--autopilot=no` and `--autopilot=0` as the next two versions of this
+    bug. So the flag stops the run and names its real spelling, which is what a
+    bad flag value does everywhere else in this parser.
+    """
+    return Fail(f"{name} takes no value: write it bare as {name}, or omit it.")
 
 
 def parse_flags(raw: str) -> tuple[dict[str, str], set[str]]:
@@ -101,6 +123,8 @@ def parse_flags(raw: str) -> tuple[dict[str, str], set[str]]:
         name, _, inline = token.partition("=")
 
         if name in MODE_FLAGS:
+            if inline:
+                raise takes_no_value(name)
             modes.add(name)
             continue
 
@@ -129,7 +153,14 @@ def parse_flags(raw: str) -> tuple[dict[str, str], set[str]]:
             values[key] = value
             continue
 
-        if name in BARE_FLAGS and not inline:
+        if name in BARE_FLAGS:
+            # Only the `--no-*` aliases reach here now: every bare flag that is
+            # also a real option is in VALUE_FLAGS and was handled above. An
+            # alias for `=off` has no value of its own to carry, so an inline
+            # one is the same mistake as on a mode flag and gets the same answer
+            # rather than being dropped on the floor.
+            if inline:
+                raise takes_no_value(name)
             key, value = BARE_FLAGS[name]
             values[key] = value
     return values, modes

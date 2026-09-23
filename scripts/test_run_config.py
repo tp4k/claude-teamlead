@@ -248,6 +248,37 @@ def case_use_config_options_skips_only_the_card(tmp: Path) -> None:
     )
 
 
+def case_a_mode_flag_with_a_value_is_fatal(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    proc = run(home, repo, "--flags", "--autopilot=false rewrite the cache")
+    check(
+        "--autopilot=false is refused rather than read as --autopilot",
+        proc.returncode == 1 and "takes no value" in proc.stderr,
+        proc.stdout + proc.stderr,
+    )
+
+
+def case_a_negative_alias_with_a_value_is_fatal(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    proc = run(home, repo, "--flags", "--no-security-review=false")
+    check(
+        "an inline value on a `--no-*` alias stops the run instead of vanishing",
+        proc.returncode == 1 and "takes no value" in proc.stderr,
+        proc.stdout + proc.stderr,
+    )
+
+
+def case_adr_off_is_honoured_over_a_config_saying_on(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    (repo / ".teamlead.json").write_text(json.dumps({"adr": "on"}))
+    proc = run(home, repo, "--flags", "--adr=off rewrite the cache")
+    check(
+        "--adr=off beats a config that says on, rather than being dropped",
+        proc.returncode == 0 and value_of(proc.stdout, "adr") == "off",
+        proc.stdout + proc.stderr,
+    )
+
+
 def case_the_resolved_config_is_written_for_a_later_session(tmp: Path) -> None:
     home, repo = fixture(tmp)
     target = tmp / "run" / "config.json"
@@ -331,6 +362,9 @@ CASES = [
     case_an_apostrophe_in_the_task_does_not_break_resolution,
     case_autopilot_says_the_card_is_skipped,
     case_use_config_options_skips_only_the_card,
+    case_a_mode_flag_with_a_value_is_fatal,
+    case_a_negative_alias_with_a_value_is_fatal,
+    case_adr_off_is_honoured_over_a_config_saying_on,
     case_the_resolved_config_is_written_for_a_later_session,
     case_a_disabled_scope_fence_promotes_when_needed,
     case_the_fence_leaves_when_needed_alone,

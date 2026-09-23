@@ -1,5 +1,34 @@
 {
-  "_comment": "Copy to $TEAMLEAD_HOME/config.json (default ~/.teamlead/config.json). Every key is optional; scripts/paths.py holds the defaults, so no config file at all is a supported state. Per-repo overrides go in <repo>/.teamlead.json (same shape) and win. A value of the wrong type is skipped, not fatal — the next tier, then the default, answers instead.",
+  "_comment": "Copy to $TEAMLEAD_HOME/config.json (default ~/.teamlead/config.json). Every key is optional; scripts/paths.py holds the defaults, so no config file at all is a supported state. Per-repo overrides go in <repo>/.teamlead.json (same shape) and win. A value of the wrong type — or one an option does not admit — is skipped, not fatal: the next tier, then the default, answers instead. The same value passed as a FLAG is fatal, because someone typed it seconds ago and is watching.",
+  "_run_options": "The seven keys below are the run options. `scripts/run_config.py` resolves them per run (card answer > flag > repo config > this file > default) and writes the result to $RUN/config.json. Every in-code default is `off`; the first run on a machine seeds this file with securityReview and perfReview set to `on`, so the reviewers you already had do not disappear the day the options arrive.",
+
+  "_codexPlanReview": "off | hard | always. Codex reviews the plan's DESIGN before any code exists — decomposition, task fit, acceptance quality, design fit. `hard` runs it only when the planner returns complex=yes (3+ workstreams or any L stream). A design defect costs a paragraph here and a whole implementation round later. Needs a saved Codex CLI login; when Codex cannot run, the run says so and continues.",
+  "codexPlanReview": "off",
+
+  "_opusPlanReview": "off | fallback | always. The same design review by the bundled teamlead:plan-reviewer agent. `fallback` runs it only when a wanted Codex review could not happen (no login, runner error, timeout) — the failure it exists to prevent is a design review that silently did not occur, since the run continues either way. `always` runs both: a row two independent reviews raise is the cheapest proof a plan is wrong.",
+  "opusPlanReview": "off",
+
+  "_humanReadablePlan": "off | generate | pause. `generate` writes $RUN/plan-human.md — the same plan in about a page, aimed at the person who has to approve it rather than at the agents that build from it. `pause` also holds dispatch until they have answered. plan.md stays the source of truth; where the two disagree, plan.md is right.",
+  "humanReadablePlan": "off",
+
+  "_securityReview": "off | when-needed | on. `on` is the historical behaviour: the reviewer runs on every workstream, full on opus where the planner tagged `attacker-controlled input: yes`, a bounded sonnet sanity pass where it tagged `no`. `when-needed` skips the `no` streams entirely. That rests on the tag being binding, so it is promoted back to `on` automatically whenever scopeFence is false.",
+  "securityReview": "on",
+
+  "_perfReview": "off | when-needed | on. Exactly as securityReview, against the planner's `hot path:` tag.",
+  "perfReview": "on",
+
+  "_codexCodeReview": "off | on. On a clean finish, end the run with the /teamlead:codex-review one-liner for the finished diff. It is offered rather than run: that review is its own 10–20 minute loop with its own findings triage.",
+  "codexCodeReview": "off",
+
+  "_adr": "off | on. Write an ADR for decisions that pass the 3-part test (hard to reverse AND surprising without context AND a real trade-off). Reading ADRs is always on and needs no setting.",
+  "adr": "off",
+
+  "_planValidatorPasses": "How many plan-validation passes a run gets. Default 1 — the validator now runs after the plan is final, so a second pass only pays when new paths appeared in a fix round.",
+  "planValidatorPasses": 1,
+
+  "_codexPlanReviewAxes": "Which axes the Codex plan review grades. Default: all four. Narrow it only with a reason — an axis nobody grades is a class of defect nobody catches.",
+  "codexPlanReviewAxes": ["decomposition", "task-fit", "acceptance", "design-fit"],
+
   "_adrPath": "Root of your ADR store. If absent or its directory is missing, teamlead falls back to <cwd>/docs/adr, then skips ADRs entirely. See references/adr-workflow.md.",
   "adrPath": "/absolute/path/to/your/adr-repo",
   "adrSubdir": null,
@@ -9,6 +38,6 @@
   "maxAgeDays": 30,
   "_keepLastPerRepo": "...unless it is among the newest N runs of its repo. Default 5.",
   "keepLastPerRepo": 5,
-  "_scopeFence": "Whether a PreToolUse hook refuses an implementer's Edit/Write outside the fenced ```scope block in its brief. Default true. It only ever answers for implementer subagents whose brief declares a fence, so turning it off is for the case where you want the old behaviour — the same rule caught at triage instead, one round later.",
+  "_scopeFence": "Whether a PreToolUse hook refuses an implementer's Edit/Write outside the fenced ```scope block in its brief. Default true. It only ever answers for implementer subagents whose brief declares a fence, so turning it off is for the case where you want the old behaviour — the same rule caught at triage instead, one round later. Turning it off also disables `when-needed` review selection, which depends on it.",
   "scopeFence": true
 }

@@ -19,13 +19,53 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
+# The Codex plan-review rubric, in the order the prompt asks for them. It lives
+# beside the other defaults because turning one axis off is a config edit, and a
+# reader comparing their config against the shipped list needs both in one file.
+PLAN_REVIEW_AXES: tuple[str, ...] = (
+    "decomposition",
+    "task-fit",
+    "acceptance",
+    "design-fit",
+)
+
+# Every run option defaults to "off". A run with no config and no flags is the
+# plain loop this plugin started as, and a reader of config.json never has to
+# know which keys are secretly on: absence means off, everywhere, for all of
+# them. The two reviewers that predate this rule are restored by the config the
+# first run seeds (`run_config.py`), not by a special case here — a special case
+# is exactly the thing that makes the other twelve keys unreadable.
 DEFAULTS: dict[str, object] = {
     "reworkCap": 3,
     "maxAgeDays": 30,
     "keepLastPerRepo": 5,
     "scopeFence": True,
+    "codexPlanReview": "off",
+    "opusPlanReview": "off",
+    "humanReadablePlan": "off",
+    "securityReview": "off",
+    "perfReview": "off",
+    "codexCodeReview": "off",
+    "adr": "off",
+    "planValidatorPasses": 1,
+    "codexPlanReviewAxes": PLAN_REVIEW_AXES,
+}
+
+# What each option may say. Declaring the vocabulary here rather than in the
+# script that reads it is what lets a config typo degrade the way `setting`
+# promises: `"securityReview": "yes"` is skipped as invalid and the next tier
+# answers, instead of reaching the coordinator as a third state nothing handles.
+CHOICES: dict[str, tuple[str, ...]] = {
+    "codexPlanReview": ("off", "hard", "always"),
+    "opusPlanReview": ("off", "fallback", "always"),
+    "humanReadablePlan": ("off", "generate", "pause"),
+    "securityReview": ("off", "when-needed", "on"),
+    "perfReview": ("off", "when-needed", "on"),
+    "codexCodeReview": ("off", "on"),
+    "adr": ("off", "on"),
 }
 
 
@@ -83,7 +123,44 @@ def nonneg_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def setting(key: str, repo: Path | None = None, valid=None) -> object:
+def one_of(key: str) -> Callable[[object], bool]:
+    """A validator accepting only the values `key` is allowed to take."""
+    allowed = CHOICES[key]
+    return lambda value: isinstance(value, str) and value in allowed
+
+
+def review_axes(repo: Path | None = None) -> list[str]:
+    """The plan-review axes this repo asks for, already validated.
+
+    `DEFAULTS` is `dict[str, object]` on purpose — thirteen keys across five
+    types, and spelling out that union costs more than it explains — so reading
+    a value back through it yields `object`. For the twelve scalar keys that is
+    free; for the one whose value is a *collection* it means a caller cannot
+    iterate what it got without a type checker objecting, and the tempting fix
+    is to read `DEFAULTS` directly and skip `setting` altogether. That is what
+    `run_config.py` did, and it silently recorded the shipped default in
+    `$RUN/config.json` while `plan_review_package.py` graded against the
+    configured list — the run's own record disagreeing with the run.
+
+    So the axes get the one accessor that states its own return type, and both
+    readers go through it.
+    """
+    configured = setting(
+        "codexPlanReviewAxes",
+        repo,
+        lambda value: isinstance(value, list)
+        and all(isinstance(item, str) for item in value),
+    )
+    if isinstance(configured, list):
+        return [str(axis) for axis in configured]
+    return list(PLAN_REVIEW_AXES)
+
+
+def setting(
+    key: str,
+    repo: Path | None = None,
+    valid: Callable[[object], bool] | None = None,
+) -> object:
     """`key` from the repo's `.teamlead.json`, else the global config, else the default.
 
     A value that fails `valid` does not stop the search, it is skipped — a typo in

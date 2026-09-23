@@ -129,6 +129,33 @@ def one_of(key: str) -> Callable[[object], bool]:
     return lambda value: isinstance(value, str) and value in allowed
 
 
+def review_axes(repo: Path | None = None) -> list[str]:
+    """The plan-review axes this repo asks for, already validated.
+
+    `DEFAULTS` is `dict[str, object]` on purpose — thirteen keys across five
+    types, and spelling out that union costs more than it explains — so reading
+    a value back through it yields `object`. For the twelve scalar keys that is
+    free; for the one whose value is a *collection* it means a caller cannot
+    iterate what it got without a type checker objecting, and the tempting fix
+    is to read `DEFAULTS` directly and skip `setting` altogether. That is what
+    `run_config.py` did, and it silently recorded the shipped default in
+    `$RUN/config.json` while `plan_review_package.py` graded against the
+    configured list — the run's own record disagreeing with the run.
+
+    So the axes get the one accessor that states its own return type, and both
+    readers go through it.
+    """
+    configured = setting(
+        "codexPlanReviewAxes",
+        repo,
+        lambda value: isinstance(value, list)
+        and all(isinstance(item, str) for item in value),
+    )
+    if isinstance(configured, list):
+        return [str(axis) for axis in configured]
+    return list(PLAN_REVIEW_AXES)
+
+
 def setting(
     key: str,
     repo: Path | None = None,

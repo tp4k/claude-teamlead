@@ -369,7 +369,7 @@ def main(argv: list[str]) -> int:
                     "planValidatorPasses": paths.setting(
                         "planValidatorPasses", repo, paths.positive_int
                     ),
-                    "codexPlanReviewAxes": list(paths.DEFAULTS["codexPlanReviewAxes"]),
+                    "codexPlanReviewAxes": paths.review_axes(repo),
                     "scopeFence": scope_fence(repo),
                 },
                 indent=2,

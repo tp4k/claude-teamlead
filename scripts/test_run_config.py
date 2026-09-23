@@ -279,6 +279,21 @@ def case_adr_off_is_honoured_over_a_config_saying_on(tmp: Path) -> None:
     )
 
 
+def case_narrowed_axes_reach_the_written_record(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    (repo / ".teamlead.json").write_text(
+        json.dumps({"codexPlanReviewAxes": ["decomposition", "design-fit"]})
+    )
+    target = tmp / "run" / "config.json"
+    run(home, repo, "--flags", "rewrite the cache", "--out", str(target))
+    written = json.loads(target.read_text())
+    check(
+        "$RUN/config.json records the axes the review will use, not the default",
+        written["codexPlanReviewAxes"] == ["decomposition", "design-fit"],
+        target.read_text(),
+    )
+
+
 def case_the_resolved_config_is_written_for_a_later_session(tmp: Path) -> None:
     home, repo = fixture(tmp)
     target = tmp / "run" / "config.json"
@@ -365,6 +380,7 @@ CASES = [
     case_a_mode_flag_with_a_value_is_fatal,
     case_a_negative_alias_with_a_value_is_fatal,
     case_adr_off_is_honoured_over_a_config_saying_on,
+    case_narrowed_axes_reach_the_written_record,
     case_the_resolved_config_is_written_for_a_later_session,
     case_a_disabled_scope_fence_promotes_when_needed,
     case_the_fence_leaves_when_needed_alone,

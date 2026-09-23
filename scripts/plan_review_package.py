@@ -95,16 +95,7 @@ def resolve_axes(repo: Path, override: str | None) -> list[str]:
     if override is not None:
         wanted = {item.strip() for item in override.split(",") if item.strip()}
     else:
-        configured = paths.setting(
-            "codexPlanReviewAxes",
-            repo,
-            lambda value: isinstance(value, list) and all(
-                isinstance(item, str) for item in value
-            ),
-        )
-        wanted = set(configured) if isinstance(configured, list) else set(
-            paths.PLAN_REVIEW_AXES
-        )
+        wanted = set(paths.review_axes(repo))
     unknown = wanted - set(paths.PLAN_REVIEW_AXES)
     if unknown:
         raise Fail(

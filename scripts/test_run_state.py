@@ -771,6 +771,31 @@ def case_cycle_card_overrides_its_flags(tmp: Path) -> None:
            "4", "PLANNER", 0, home=cycle_home(tmp, CYCLE_FLAGS))
 
 
+def card_config(**answered: str) -> str:
+    cfg = json.loads(config(**answered))
+    for k in answered:
+        cfg["sources"][k] = "options card"
+    return json.dumps(cfg)
+
+
+def case_cycle_card_answered_a_lost_flags_line(tmp: Path) -> None:
+    """A real run: `flags: none` in the task file, but the user answered both
+    cycle options on the card. The card is the later word, so
+    there is nothing left for the flags line to decide."""
+    run = mkrun(tmp, {"config.json": card_config(codexPlanReview="hard",
+                                                 humanReadablePlan="generate"),
+                      "task.md": TASK})
+    expect("`flags: none` but both cycle options answered on the card → step 4",
+           run, "4", "PLANNER", 0, home=cycle_home(tmp, "none"))
+
+
+def case_cycle_card_answered_only_one(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": card_config(codexPlanReview="hard"),
+                      "task.md": TASK})
+    expect("`flags: none` and only one cycle option on the card → still 3a", run,
+           "3a", "--with-human-readable-plan", 0, home=cycle_home(tmp, "none"))
+
+
 def case_non_cycle_run_ignores_task_files(tmp: Path) -> None:
     """A task file for a *different* worktree says nothing about this run."""
     home = cycle_home(tmp, "none")
@@ -798,6 +823,8 @@ CASES = [
     case_cycle_flags_not_in_config,
     case_cycle_flags_carried,
     case_cycle_card_overrides_its_flags,
+    case_cycle_card_answered_a_lost_flags_line,
+    case_cycle_card_answered_only_one,
     case_non_cycle_run_ignores_task_files,
     case_not_a_run_directory,
     case_kickoff_without_task,

@@ -620,6 +620,9 @@ def case_final_report_ends_the_loop(tmp: Path) -> None:
 
 COMPLEX_Q = QUESTIONS.replace("PLAN_WRITTEN ws=1",
                               "PLAN_WRITTEN ws=1 complex=yes questions=1")
+# What run_codex_review.py leaves behind when Codex could not even be started.
+ATTEMPT_FAILED = ("2026-09-24T10:30:00 started\n"
+                  "2026-09-24T10:30:01 failed: codex not found on PATH\n")
 
 
 def case_no_config_is_step_3a(tmp: Path) -> None:
@@ -655,12 +658,25 @@ def case_codex_hard_on_a_complex_plan(tmp: Path) -> None:
            "4", "plan_review_package.py", 0)
 
 
-def case_codex_failure_does_not_block(tmp: Path) -> None:
-    """The skill is explicit that a Codex failure never blocks dispatch. Having
-    *started* it — the package on disk — is the obligation; an answer is not."""
+def case_package_built_but_never_launched(tmp: Path) -> None:
+    """plan_review_package.py writes PROMPT.md before the runner starts, so the
+    prompt alone proves only the first of the two commands ran."""
     run = mkrun(tmp, {"config.json": config(codexPlanReview="always"),
                       "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
                       "plan-review-package/PROMPT.md": "review this plan\n"})
+    expect("PROMPT.md with no runner attempt → step 4, launch run_codex_review.py",
+           run, "4", "run_codex_review.py", 0)
+
+
+def case_codex_failure_does_not_block(tmp: Path) -> None:
+    """The skill is explicit that a Codex failure never blocks dispatch. Having
+    *started* it — the runner's attempt record — is the obligation; an answer
+    is not. A Codex missing from PATH fails before any events file exists, so
+    the attempt record is what proves the try."""
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="always"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
+                      "plan-review-package/PROMPT.md": "review this plan\n",
+                      "plan-review-package/plan-review-attempts.log": ATTEMPT_FAILED})
     expect("a started Codex review with no answer (opus off) → validator", run,
            "4", "VALIDATOR", 0)
 
@@ -669,7 +685,8 @@ def case_codex_failed_fallback_owed(tmp: Path) -> None:
     run = mkrun(tmp, {"config.json": config(codexPlanReview="always",
                                             opusPlanReview="fallback"),
                       "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
-                      "plan-review-package/PROMPT.md": "review this plan\n"})
+                      "plan-review-package/PROMPT.md": "review this plan\n",
+                      "plan-review-package/plan-review-attempts.log": ATTEMPT_FAILED})
     expect("Codex gave no answer and opus=fallback → the fallback is owed", run,
            "5", "plan-reviewer", 0)
 
@@ -770,6 +787,7 @@ CASES = [
     case_codex_wanted_but_never_started,
     case_codex_hard_on_a_simple_plan,
     case_codex_hard_on_a_complex_plan,
+    case_package_built_but_never_launched,
     case_codex_failure_does_not_block,
     case_codex_failed_fallback_owed,
     case_answered_review_needs_triage,

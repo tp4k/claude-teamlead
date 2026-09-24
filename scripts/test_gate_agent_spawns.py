@@ -146,9 +146,23 @@ def case_reviewed_run_allowed(tmp: Path) -> None:
 def case_codex_failure_allowed(tmp: Path) -> None:
     files = {k: v for k, v in REVIEWED.items()
              if k not in ("plan-review-package/plan-review-r1.md", "plan-triage.md")}
-    run = mkrun(tmp, files | {"config.json": config(opusPlanReview="off")})
+    run = mkrun(tmp, files | {
+        "config.json": config(opusPlanReview="off"),
+        "plan-review-package/plan-review-attempts.log":
+            "2026-09-24T10:30:00 started\n"
+            "2026-09-24T10:30:01 failed: no saved Codex login\n"})
     expect_silent("a Codex review that started and failed never blocks dispatch",
                   spawn("teamlead:implementer", run))
+
+
+def case_package_without_launch_denied(tmp: Path) -> None:
+    """The package script writes PROMPT.md before the runner is ever called."""
+    files = {k: v for k, v in REVIEWED.items()
+             if k not in ("plan-review-package/plan-review-r1.md", "plan-triage.md")}
+    run = mkrun(tmp, files | {"config.json": config(opusPlanReview="off")})
+    expect_deny("PROMPT.md with no runner attempt: implementer refused",
+                spawn("teamlead:implementer", run), "step 4",
+                "run_codex_review.py")
 
 
 def case_relay_owed(tmp: Path) -> None:

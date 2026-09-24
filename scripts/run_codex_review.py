@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import zlib
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -967,8 +968,8 @@ def main(argv: list[str]) -> int:
         "--artifact-stem",
         default="codex-review",
         help=(
-            "basename for the review and event files, before `-rN` "
-            "(default: codex-review; a plan review passes codex-plan-review)"
+            "basename for the review, event and attempts files, before `-rN` "
+            "(default: codex-review; a plan review passes plan-review)"
         ),
     )
     parser.add_argument(
@@ -987,13 +988,43 @@ def main(argv: list[str]) -> int:
     prompt_path = Path(args.prompt).expanduser().resolve()
     if not prompt_path.is_file():
         raise Fail(f"review prompt not found: {prompt_path}")
+    stem = args.artifact_stem
+    if not stem or "/" in stem or stem != stem.strip():
+        raise Fail("--artifact-stem must be a bare filename stem")
+    attempts = prompt_path.parent / f"{stem}-attempts.log"
+    record_attempt(attempts, "started")
+    try:
+        review_path = review(args, prompt_path, stem)
+    except Fail as exc:
+        record_attempt(attempts, f"failed: {exc}")
+        raise
+    record_attempt(attempts, f"done: {review_path}")
+    return 0
+
+
+def record_attempt(log: Path, line: str) -> None:
+    """Append one timestamped line to `<stem>-attempts.log` beside the prompt.
+
+    This is the evidence that a review was *tried*, which is what the step gate
+    (run_state.design_gap) requires before a plan may be validated. It has to be
+    written before Codex is resolved: no Codex on PATH and no saved login are
+    exactly the failures the skill says never block, and both happen before any
+    events file exists. A failed write must not fail the review itself.
+    """
+    stamp = datetime.now().isoformat(timespec="seconds")
+    try:
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(f"{stamp} {' '.join(line.split())}\n")
+    except OSError:
+        pass
+
+
+def review(args: argparse.Namespace, prompt_path: Path, stem: str) -> Path:
+    """One review round: run Codex on the prompt; return the review file."""
     prompt = prompt_path.read_text(encoding="utf-8", errors="replace")
     repo = repo_from_prompt(prompt)
     codex = resolve_codex()
     require_login(codex)
-    stem = args.artifact_stem
-    if not stem or "/" in stem or stem != stem.strip():
-        raise Fail("--artifact-stem must be a bare filename stem")
     review_path, events_path = next_artifacts(prompt_path.parent, stem)
 
     network = not args.no_network
@@ -1086,7 +1117,7 @@ def main(argv: list[str]) -> int:
     # Warnings already went to stderr above, on both the success and the failure
     # path. Printing them again here would double every line the skill is told to
     # relay verbatim, which reads as twice as many tree modifications as occurred.
-    return 0
+    return review_path
 
 
 if __name__ == "__main__":

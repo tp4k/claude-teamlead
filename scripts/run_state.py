@@ -279,6 +279,7 @@ def scope_cut(r: Run) -> str:
 
 
 PLAN_REVIEW_DIR = "plan-review-package"
+PLAN_REVIEW_STEM = "plan-review"  # run_codex_review.py --artifact-stem
 # The two options a /teamlead:cycle run appends to every task. Compared by value,
 # so a user's own `--with-human-readable-plan=pause` in a cycle still counts.
 CYCLE_OPTIONS = ("codexPlanReview", "humanReadablePlan")
@@ -360,9 +361,13 @@ def design_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     """Steps 4a and 5: what config.json promised before the plan is validated.
 
     Only *starting* the Codex review is owed. The skill is explicit that a Codex
-    failure, timeout or missing login never blocks dispatch, so the package on
-    disk is the evidence and an answer is not required — what a failure does
-    owe, when that is the setting, is the opus fallback.
+    failure, timeout or missing login never blocks dispatch, so an answer is not
+    required — what a failure does owe, when that is the setting, is the opus
+    fallback. The evidence of a start is the runner's own: PROMPT.md is written
+    by plan_review_package.py *before* the runner is called, so it proves only
+    the first of the two commands. run_codex_review.py appends to
+    `plan-review-attempts.log` before it resolves Codex at all, so even a Codex
+    missing from PATH leaves the record; an events or review file counts too.
     """
     opts = options(r)
     codex, opus = opts.get("codexPlanReview"), opts.get("opusPlanReview")
@@ -370,12 +375,20 @@ def design_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     pkg = r.run / PLAN_REVIEW_DIR
     codex_wanted = codex == "always" or (
         codex == "hard" and "complex=yes" in r.text("questions.md"))
+    run_it = (f"run_codex_review.py <abs $RUN/{PLAN_REVIEW_DIR}/PROMPT.md> "
+              "--artifact-stem plan-review IN THE BACKGROUND (step 4a). If Codex "
+              "fails, say so and go on")
     if codex_wanted and not (pkg / "PROMPT.md").exists():
         return (4, "Codex plan design review never started", f"codexPlanReview="
-                f"{codex}: run plan_review_package.py $RUN, then run_codex_review.py "
-                f"<abs $RUN/{PLAN_REVIEW_DIR}/PROMPT.md> --artifact-stem plan-review "
-                "IN THE BACKGROUND (step 4a). If Codex fails, say so and go on",
-                False)
+                f"{codex}: run plan_review_package.py $RUN, then {run_it}", False)
+    attempted = pkg.is_dir() and (
+        (pkg / f"{PLAN_REVIEW_STEM}-attempts.log").exists()
+        or any(pkg.glob(f"{PLAN_REVIEW_STEM}-r*.jsonl"))
+        or any(pkg.glob(f"{PLAN_REVIEW_STEM}-r*.md")))
+    if codex_wanted and not attempted:
+        return (4, "Codex plan review packaged but never launched",
+                f"codexPlanReview={codex}: PROMPT.md is there and the runner never "
+                f"ran — {run_it}", False)
     answered = sorted(pkg.glob("plan-review-r*.md")) if pkg.is_dir() else []
     opus_file = r.run / "plan-design-review.md"
     if opus == "always" and not opus_file.exists():

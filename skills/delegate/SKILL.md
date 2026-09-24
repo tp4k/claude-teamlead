@@ -97,6 +97,8 @@ Strip the flag text out of the task before writing `task.md`, and record the fla
           python3 $PLUGIN/scripts/run_codex_review.py <abs .../plan-review-package/PROMPT.md> --artifact-stem plan-review
         IN THE BACKGROUND (10–20 min; the answer lands beside the prompt as plan-review-r1.md). --artifact-stem is
         not optional: without it a plan review and a later code review of the same run overwrite each other.
+        Both commands, always: the step gate counts the review as started only once the runner has written
+        plan-review-attempts.log, which it does even when Codex is missing or logged out.
         opusPlanReview=always → ALSO spawn `teamlead:plan-reviewer` (brief D) in this same message. Two independent
         reads of one plan is not redundancy — a row both raise is the cheapest possible proof the plan is wrong.
         opusPlanReview=fallback → spawn it only once the Codex review is known to have failed, timed out, or had no

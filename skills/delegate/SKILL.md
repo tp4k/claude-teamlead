@@ -27,6 +27,7 @@ Every `references/…` path below is under `$PLUGIN` too. They are written bare 
 7. **A subagent's report is a claim, not evidence.** After every coding round: spot-check with `git log` / `git show --stat`, then run `teamlead:verifier` so the verification commands are executed by an agent that did not write the code. Reviewers spawn only on a verified PASS.
 8. **Forbidden git ops** (in every implementer prompt): `reset --hard`, `rebase`, `commit --amend`, `push --force`, `stash drop`, `checkout -- <path>`, deleting commits.
 9. **Strict scope for implementers** is enforced three times over: by `roles/implementer.md` (no drive-by refactors; refactor requests instead), by a PreToolUse hook that refuses a write outside the fenced `scope` block in the brief's `## Scope`, and by you at triage — out-of-brief edits are a NEEDS_REWORK row demanding a revert. A rework brief stays a pointer and does **not** repeat the fence — the hook falls back down the rounds to the planner's round-1 block, which is the same list. The one time you write a `## Scope` fence yourself is to **widen** it: an implementer that reports a file it was refused is asking you for exactly that, so either add the file to a fence in the next round's brief (the whole list, since the new block replaces the old) or decline it in the same breath as the finding it came from. Never write a narrower one — that blocks a fix you asked for. Refactor requests are yours to decide — `references/refactor-workflow.md`.
+9a. **Steps are gated at spawn time.** A PreToolUse hook reads the run directory before every `teamlead:planner`, `teamlead:plan-validator` and `teamlead:implementer` spawn and refuses one that would skip a step still owed — no `config.json` (3a), a plan review config.json promised but never started (4a), triage of a returned review (5), validation or the relay turn (6) before dispatch. A refusal names the step and what to do; do that step, never rephrase the spawn to slip past it. A Codex review that *failed* never blocks — only starting it is owed.
 10. **Docs are the spec.** The planner extracts a verbatim spec excerpt per workstream into `plan.md` and into each round-1 brief; `code-review` grades conformance against it; specialists get it as context. You never paraphrase a spec and you never copy it into a prompt — you name the `## WS-<N>` block of `plan.md`.
 11. **Never end your turn while a subagent you spawned is still running.** Its result arrives as a task notification *inside this turn*; stop first and the loop stalls until a human resumes you (three of six eval runs stalled here). A turn with no pending tool call ends, so waiting must be a tool call — **one call per phase, never a `sleep` per poll**: every poll is a full-context turn of yours, and 14–19 of the 83–104 coordinator turns in two measured runs were sleeps. Wait on the files the role docs promise:
     `python3 $PLUGIN/scripts/wait_for.py --timeout <s> <every file this phase produces>`
@@ -68,6 +69,8 @@ Strip the flag text out of the task before writing `task.md`, and record the fla
 3.  KICKOFF:  python3 $PLUGIN/scripts/new_run.py <repo> "<slug>"   → prints RUN_DIR=<$RUN> and PLUGIN_ROOT=<$PLUGIN>  (prunes old runs first)
     A `SESSION_TITLE=<slug>` line means this session gets renamed to the slug at the next prompt — the plugin's
     UserPromptSubmit hook does it, so print nothing about it and never ask the user to relaunch or `/rename`.
+    Exit 3 / `REFUSED: another copy of this plugin` → STOP and relay it verbatim: a second copy of the plugin
+    under ~/.claude/skills means this session may be running the wrong copy's skills. Never work around it.
     Write $RUN/task.md: the task VERBATIM (flags stripped) + `flags: <flags|none>`.
     ADR store found → select the relevant ADRs, write their text to $RUN/adrs.md under `# SELECTED ADRs`.
 3a. RUN OPTIONS, before anything is planned:
@@ -94,6 +97,8 @@ Strip the flag text out of the task before writing `task.md`, and record the fla
           python3 $PLUGIN/scripts/run_codex_review.py <abs .../plan-review-package/PROMPT.md> --artifact-stem plan-review
         IN THE BACKGROUND (10–20 min; the answer lands beside the prompt as plan-review-r1.md). --artifact-stem is
         not optional: without it a plan review and a later code review of the same run overwrite each other.
+        Both commands, always: the step gate counts the review as started only once the runner has written
+        plan-review-attempts.log, which it does even when Codex is missing or logged out.
         opusPlanReview=always → ALSO spawn `teamlead:plan-reviewer` (brief D) in this same message. Two independent
         reads of one plan is not redundancy — a row both raise is the cheapest possible proof the plan is wrong.
         opusPlanReview=fallback → spawn it only once the Codex review is known to have failed, timed out, or had no

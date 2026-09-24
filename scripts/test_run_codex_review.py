@@ -1449,6 +1449,73 @@ def case_a_plan_review_stem_does_not_collide_with_the_code_review(tmp: Path) -> 
     )
 
 
+def case_a_codex_that_cannot_start_still_records_the_attempt(tmp: Path) -> None:
+    # The step gate needs proof the review was *tried*, and the failures the
+    # skill says must never block — no Codex on PATH, no login — happen before
+    # any events file exists. So the attempt record is written first, and the
+    # failure is appended to it on the way out.
+    repo = make_repo(tmp)
+    pkg = tmp / "plan-review-package"
+    pkg.mkdir()
+    prompt = pkg / "PROMPT.md"
+    prompt.write_text(f"# Review\n\n- Repo / worktree: `{repo}`\n")
+    saved = runner.resolve_codex
+
+    def missing() -> str:
+        raise runner.Fail("codex not found on PATH")
+
+    runner.resolve_codex = missing
+    raised = ""
+    try:
+        runner.main([str(prompt), "--artifact-stem", "plan-review"])
+    except runner.Fail as exc:
+        raised = str(exc)
+    finally:
+        runner.resolve_codex = saved
+    log = pkg / "plan-review-attempts.log"
+    text = log.read_text() if log.is_file() else ""
+    check(
+        "a Codex that cannot start leaves a started + failed attempt record",
+        "codex not found" in raised and " started" in text
+        and "failed: codex not found on PATH" in text
+        and not list(pkg.glob("*.jsonl")),
+        f"raised={raised!r} log={text!r}",
+    )
+
+
+def case_a_finished_review_records_its_outcome(tmp: Path) -> None:
+    repo = make_repo(tmp)
+    pkg = tmp / "plan-review-package"
+    pkg.mkdir()
+    prompt = pkg / "PROMPT.md"
+    prompt.write_text(f"# Review\n\n- Repo / worktree: `{repo}`\n")
+    saved = (runner.resolve_codex, runner.require_login, runner.run_review)
+
+    def answer(codex, review_repo, text, review, events, timeout, network) -> int:
+        events.write_text("{}\n")
+        review.write_text("1. WS-1 too big\n")
+        return 0
+
+    runner.resolve_codex = lambda: "codex"
+    runner.require_login = lambda codex: None
+    runner.run_review = answer
+    try:
+        code = runner.main([str(prompt), "--artifact-stem", "plan-review",
+                            "--no-network"])
+    finally:
+        runner.resolve_codex, runner.require_login, runner.run_review = saved
+    log = pkg / "plan-review-attempts.log"
+    text = log.read_text() if log.is_file() else ""
+    check(
+        "a finished review appends done: <review path> to the attempt record",
+        code == 0 and " started" in text
+        # resolve(): the runner resolves the prompt path, and on macOS the temp
+        # dir /var/... is a symlink to /private/var/...
+        and f"done: {pkg.resolve() / 'plan-review-r1.md'}" in text,
+        f"code={code} log={text!r}",
+    )
+
+
 CASES = [
     case_network_mode_pairs_workspace_write_with_the_flag,
     case_no_network_is_the_hard_read_only_sandbox,
@@ -1505,6 +1572,8 @@ CASES = [
     case_a_pack_index_without_its_pack_file_stops_counting_its_oids,
     case_the_default_stem_is_the_code_review_name,
     case_a_plan_review_stem_does_not_collide_with_the_code_review,
+    case_a_codex_that_cannot_start_still_records_the_attempt,
+    case_a_finished_review_records_its_outcome,
 ]
 
 

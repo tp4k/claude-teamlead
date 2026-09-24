@@ -19,6 +19,9 @@ through ${CLAUDE_PLUGIN_ROOT}, but the reviewer briefs go to subagent types the
 plugin does not own (`code-review`, `performance-engineer`), and a subagent prompt
 is not a shell — a `${...}` in one arrives literally. So the coordinator gets the
 resolved path here, in the call it already makes, rather than guessing at one.
+
+It refuses (exit 3, nothing created) when another copy of this plugin is
+installed beside it — see plugin_copies.py.
 """
 import os
 import re
@@ -28,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 import paths
+import plugin_copies
 import session_title
 from prune_runs import prune
 
@@ -45,6 +49,12 @@ def main(argv: list[str]) -> int:
     if not repo.is_dir():
         print(f"not a directory: {repo}")
         return 2
+    # Before anything is created or pruned: a shadowed plugin means this run
+    # may be following another copy's skills (plugin_copies.py says why).
+    shadowed = plugin_copies.check()
+    if shadowed:
+        print(shadowed)
+        return 3
     slug = slugify(argv[1])
     task_file = None
     if "--task-file" in argv:

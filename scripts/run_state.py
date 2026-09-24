@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import paths
+import run_config
 # routing_line already solves "which line of this file is the verdict", including
 # the search-from-the-end rule that keeps a quoted spec excerpt from outranking the
 # real one. Reimplementing it here would be the duplication this skill tells
@@ -277,11 +278,153 @@ def scope_cut(r: Run) -> str:
     return "" if body.lower().startswith("none") else body
 
 
-def plan_next(r: Run) -> tuple[int, str, str, bool] | None:
+PLAN_REVIEW_DIR = "plan-review-package"
+PLAN_REVIEW_STEM = "plan-review"  # run_codex_review.py --artifact-stem
+# The two options a /teamlead:cycle run appends to every task. Compared by value,
+# so a user's own `--with-human-readable-plan=pause` in a cycle still counts.
+CYCLE_OPTIONS = ("codexPlanReview", "humanReadablePlan")
+
+
+def options(r: Run) -> dict:
+    """`config.json`'s resolved options — `{}` when absent or unreadable."""
+    opts = paths.read_json(r.run / "config.json").get("options")
+    return opts if isinstance(opts, dict) else {}
+
+
+def cycle_task_file(r: Run) -> Path | None:
+    """The /teamlead:cycle task file that launched this run, if one did.
+
+    Matched on its `worktree:` line against repo.txt rather than on the slug:
+    kickoff may suffix a slug on collision, but a cycle's worktree is created
+    fresh for exactly one task and is the very path the run was handed.
+    """
+    repo = r.text("repo.txt").strip()
+    if not repo:
+        return None
+    try:
+        files = sorted(paths.tasks_dir().glob("*.md"))
+    except OSError:
+        return None
+    for f in files:
+        try:
+            head = f.read_text(errors="replace").split("\n# Task", 1)[0]
+        except OSError:
+            continue
+        if f"\nworktree: {repo}\n" in f"\n{head}\n":
+            return f
+    return None
+
+
+def cycle_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
+    """A cycle run whose own two options never reached config.json.
+
+    The cycle appends `--codex-plan-review=always --with-human-readable-plan=
+    generate` to the task it hands on, so that its plan review cannot quietly
+    be off. Two places can drop them: the task file's `flags:` line, and the
+    text the coordinator passes to run_config.py. Either way config.json ends up
+    holding a config-file or built-in value, which reads like a deliberate
+    setting and not like a lost one. An options-card answer is the user's later
+    word on the same question, so it always stands.
+    """
+    task_file = cycle_task_file(r)
+    if task_file is None:
+        return None
+    flags_line = next((ln[6:].strip() for ln in task_file.read_text(
+        errors="replace").splitlines() if ln.startswith("flags:")), "")
+    try:
+        wanted, _ = run_config.parse_flags(flags_line)
+    except run_config.Fail:
+        wanted = {}
+    if any(k not in wanted for k in CYCLE_OPTIONS):
+        return ("3a", "cycle options lost", f"{task_file} has `flags: "
+                f"{flags_line or 'none'}`, but a /teamlead:cycle task file always "
+                "carries --codex-plan-review=always --with-human-readable-plan="
+                "generate (plus any flag the user typed). Fix that line, re-run "
+                "run_config.py with it and the task text, then show the options "
+                "card", False)
+    raw = paths.read_json(r.run / "config.json").get("sources")
+    sources = raw if isinstance(raw, dict) else {}
+    opts = options(r)
+    off = [k for k in CYCLE_OPTIONS
+           if opts.get(k) != wanted[k] and sources.get(k) != "options card"]
+    if off:
+        got = ", ".join(f"{k}={opts.get(k)!r} from {sources.get(k, '?')}"
+                        for k in off)
+        return ("3a", "cycle options not in config.json", f"config.json has {got}, "
+                f"but the cycle's task file asks for `{flags_line}`: re-run "
+                "run_config.py with --flags carrying that line and the task text, "
+                "then show the options card", False)
+    return None
+
+
+def design_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
+    """Steps 4a and 5: what config.json promised before the plan is validated.
+
+    Only *starting* the Codex review is owed. The skill is explicit that a Codex
+    failure, timeout or missing login never blocks dispatch, so an answer is not
+    required — what a failure does owe, when that is the setting, is the opus
+    fallback. The evidence of a start is the runner's own: PROMPT.md is written
+    by plan_review_package.py *before* the runner is called, so it proves only
+    the first of the two commands. run_codex_review.py appends to
+    `plan-review-attempts.log` before it resolves Codex at all, so even a Codex
+    missing from PATH leaves the record; an events or review file counts too.
+    """
+    opts = options(r)
+    codex, opus = opts.get("codexPlanReview"), opts.get("opusPlanReview")
+    human = opts.get("humanReadablePlan")
+    pkg = r.run / PLAN_REVIEW_DIR
+    codex_wanted = codex == "always" or (
+        codex == "hard" and "complex=yes" in r.text("questions.md"))
+    run_it = (f"run_codex_review.py <abs $RUN/{PLAN_REVIEW_DIR}/PROMPT.md> "
+              "--artifact-stem plan-review IN THE BACKGROUND (step 4a). If Codex "
+              "fails, say so and go on")
+    if codex_wanted and not (pkg / "PROMPT.md").exists():
+        return (4, "Codex plan design review never started", f"codexPlanReview="
+                f"{codex}: run plan_review_package.py $RUN, then {run_it}", False)
+    attempted = pkg.is_dir() and (
+        (pkg / f"{PLAN_REVIEW_STEM}-attempts.log").exists()
+        or any(pkg.glob(f"{PLAN_REVIEW_STEM}-r*.jsonl"))
+        or any(pkg.glob(f"{PLAN_REVIEW_STEM}-r*.md")))
+    if codex_wanted and not attempted:
+        return (4, "Codex plan review packaged but never launched",
+                f"codexPlanReview={codex}: PROMPT.md is there and the runner never "
+                f"ran — {run_it}", False)
+    answered = sorted(pkg.glob("plan-review-r*.md")) if pkg.is_dir() else []
+    opus_file = r.run / "plan-design-review.md"
+    if opus == "always" and not opus_file.exists():
+        return (4, "opus plan design review missing", "opusPlanReview=always: "
+                "spawn teamlead:plan-reviewer (brief D) — step 4a", False)
+    if opus == "fallback" and codex_wanted and not answered \
+            and not opus_file.exists():
+        return (5, "no plan design review answered", "wait for the Codex plan "
+                "review if it is still running; if it failed, timed out or had "
+                "no login, spawn teamlead:plan-reviewer (brief D, fallback line)",
+                False)
+    if human in ("generate", "pause") and not (r.run / "plan-human.md").exists():
+        return (4, "human-readable plan missing", f"humanReadablePlan={human}: "
+                "spawn teamlead:writer for $RUN/plan-human.md (brief H) — step 4a",
+                False)
+    if (answered or opus_file.exists()) and not (r.run / "plan-triage.md").exists():
+        return (5, "plan triage not written", "you write $RUN/plan-triage.md: "
+                "every row of every returned design review, verbatim, with its "
+                "verdict and evidence (step 5)", False)
+    return None
+
+
+def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
     """The pre-dispatch half of the loop: steps 3 to 6a."""
     if not (r.run / "task.md").exists():
         return (3, "kickoff incomplete", "write $RUN/task.md: the task verbatim, flags "
                 "stripped, plus its `flags:` line", False)
+    if not (r.run / "config.json").exists():
+        return ("3a", "run options never resolved", "python3 $PLUGIN/scripts/"
+                "run_config.py <repo> --flags \"<the task text, verbatim>\" --out "
+                "$RUN/config.json, then the options card it asks for. Every later "
+                "step reads config.json; without it no plan review is owed, so "
+                "none happens", False)
+    gap = cycle_gap(r)
+    if gap:
+        return gap
     if not (r.run / "questions.md").exists():
         return (4, "plan not on disk", "spawn the opus PLANNER (brief P) — "
                 "questions.md is written last, so its absence means the plan is "
@@ -290,6 +433,9 @@ def plan_next(r: Run) -> tuple[int, str, str, bool] | None:
     if "adr_conflict=yes" in q and "## Answers" not in q:
         return (5, "ADR conflict", "HALT per references/adr-workflow.md: name the ADR "
                 "and clause and ask the user. Do not dispatch", True)
+    gap = design_gap(r)
+    if gap:
+        return gap
     if not (r.run / "plan-validation.md").exists():
         return (4, "plan unvalidated", "spawn the opus PLAN VALIDATOR (brief V)", False)
     pv = verdict(r.run / "plan-validation.md")
@@ -321,6 +467,42 @@ def plan_next(r: Run) -> tuple[int, str, str, bool] | None:
                 "then wait with --rewritten $RUN/plan.md "
                 "--expect $RUN/plan.md PLAN_FIXED", False)
     return None
+
+
+# The roles whose spawn marks a step boundary, and so can be checked against
+# the run directory before they start. Reviewers, verifiers and writers are
+# spawned at many points and prove nothing about what came before them.
+GATED_ROLES = ("planner", "plan-validator", "implementer")
+
+
+def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
+    """What the run still owes before `role` may be spawned, or None.
+
+    The same reading of the run directory as plan_next, cut at the point each
+    role belongs to: a planner needs the options resolved, a plan validator also
+    needs the design reviews config.json promised, and an implementer needs the
+    whole pre-dispatch half done. A Fix-mode planner passes too, since it comes
+    after everything a planner needs. Autopilot skips the relay turn, so an
+    implementer is allowed past an unanswered one there — nothing else.
+    """
+    if role not in GATED_ROLES:
+        return None
+    if not (r.run / "config.json").exists():
+        return plan_next(r)  # step 3 or 3a, whichever is missing
+    gap = cycle_gap(r)
+    if gap or role == "planner":
+        return gap
+    if role == "plan-validator":
+        # questions.md is written last: without it the plan is unfinished, and
+        # plan_next names the planner spawn that is owed instead.
+        if not (r.run / "questions.md").exists():
+            return plan_next(r)
+        return design_gap(r)
+    state = plan_next(r)
+    if state and state[1] == "user relay outstanding" \
+            and paths.read_json(r.run / "config.json").get("autopilot") is True:
+        return None
+    return state
 
 
 def main(argv: list[str]) -> int:

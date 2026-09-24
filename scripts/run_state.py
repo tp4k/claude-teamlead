@@ -329,24 +329,27 @@ def cycle_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     task_file = cycle_task_file(r)
     if task_file is None:
         return None
+    raw = paths.read_json(r.run / "config.json").get("sources")
+    sources = raw if isinstance(raw, dict) else {}
+    # Only what the card left unanswered still hangs on the flags line.
+    pending = [k for k in CYCLE_OPTIONS if sources.get(k) != "options card"]
+    if not pending:
+        return None
     flags_line = next((ln[6:].strip() for ln in task_file.read_text(
         errors="replace").splitlines() if ln.startswith("flags:")), "")
     try:
         wanted, _ = run_config.parse_flags(flags_line)
     except run_config.Fail:
         wanted = {}
-    if any(k not in wanted for k in CYCLE_OPTIONS):
+    if any(k not in wanted for k in pending):
         return ("3a", "cycle options lost", f"{task_file} has `flags: "
                 f"{flags_line or 'none'}`, but a /teamlead:cycle task file always "
                 "carries --codex-plan-review=always --with-human-readable-plan="
                 "generate (plus any flag the user typed). Fix that line, re-run "
                 "run_config.py with it and the task text, then show the options "
                 "card", False)
-    raw = paths.read_json(r.run / "config.json").get("sources")
-    sources = raw if isinstance(raw, dict) else {}
     opts = options(r)
-    off = [k for k in CYCLE_OPTIONS
-           if opts.get(k) != wanted[k] and sources.get(k) != "options card"]
+    off = [k for k in pending if opts.get(k) != wanted[k]]
     if off:
         got = ", ".join(f"{k}={opts.get(k)!r} from {sources.get(k, '?')}"
                         for k in off)

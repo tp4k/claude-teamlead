@@ -245,7 +245,7 @@ Six agents. Each pins its own model and tool set, so the coordinator passes none
 The reviewers at step 9 are harness agent types (`code-review`,
 `performance-engineer`, `security-review`), chosen per run.
 
-And three hooks the plugin carries itself, so that no one has to hand-edit
+And four hooks the plugin carries itself, so that no one has to hand-edit
 `~/.claude/settings.json`:
 
 - **`PreToolUse` (allow)** pre-approves the report writes every teamlead agent
@@ -255,10 +255,15 @@ And three hooks the plugin carries itself, so that no one has to hand-edit
   `scope` block of its own brief. It answers only for implementer subagents whose
   brief declares a fence, so every other write in the session — including yours —
   is untouched. Set `"scopeFence": false` to turn it off.
+- **`PreToolUse` (step gate)** refuses a `teamlead:` planner, plan validator or
+  implementer spawn while the run directory shows an earlier step still owed —
+  no `config.json`, a promised plan review never started, no validation or relay
+  before dispatch. It answers only for those roles on a real `$RUN`, so any other
+  spawn is untouched. A Codex review that fails never blocks.
 - **`UserPromptSubmit`** names the session after the run. It never overwrites a
   title you chose yourself.
 
-Hooks are installed user-wide, so all three are written to stay silent outside a
+Hooks are installed user-wide, so all four are written to stay silent outside a
 teamlead run.
 
 ## Safety rails
@@ -357,6 +362,9 @@ and nothing reseeds them.
 | The plan design review never appears | Codex has no saved login, or is not on `PATH`. The run reports it and continues by design — set `CODEX_BIN`, or run `codex login`. Set `opusPlanReview=fallback` so the review happens anyway. |
 | A specialist review is missing from the report | `when-needed` with the planner's tag at `no` deletes that review rather than shrinking it. The final report names every specialist that did not run, and the tag that decided it. |
 | Runs vanished from a path you had bookmarked | They live under `$TEAMLEAD_HOME`, and old ones are pruned at kickoff by `maxAgeDays` / `keepLastPerRepo`. |
+| Kickoff says `REFUSED: another copy of this plugin` | A second directory under `~/.claude/skills/` (usually a worktree of this repo) registers as a plugin with the same name, and a session may load either copy's skills. Move it out (`git worktree move`), load test branches with `claude --plugin-dir <path>`, then start a new session. |
+| No options card, no plan review, and old runs never had a `config.json` | The same shadowing, from before kickoff checked for it: the session ran an older copy's `delegate`. Fix as above. |
+| A spawn is refused with `Not yet: this run is at step …` | The step gate found an earlier step still owed. Do the step it names; `run_state.py $RUN` shows where the run stands. |
 | An implementer reports a file it was refused | That is the scope fence asking you to widen it. The next round's brief gets the whole new fence, or the request is declined along with the finding it came from. |
 
 ## Tests

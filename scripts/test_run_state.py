@@ -20,6 +20,7 @@ that needs an install is a suite nobody runs.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -57,11 +58,35 @@ def check(name: str, ok: bool, detail: str) -> None:
     results.append((name, ok, detail))
 
 
-def mkrun(tmp: Path, files: dict[str, str]) -> Path:
+def config(**options: str) -> str:
+    """A `config.json` as run_config.py writes it; every optional review off.
+
+    Off is the default here, not a realistic setting, so that every case written
+    before step 3a existed keeps asserting what it always asserted: a run that
+    resolved its options and asked for no plan review. The cases that are about
+    the plan review turn it on by name.
+    """
+    opts = {"codexPlanReview": "off", "opusPlanReview": "off",
+            "humanReadablePlan": "off", "securityReview": "on",
+            "perfReview": "on", "codexCodeReview": "off", "adr": "off"}
+    opts.update(options)
+    return json.dumps({"options": opts,
+                       "sources": {k: "default" for k in opts},
+                       "autopilot": False, "optionsCard": "shown"})
+
+
+def mkrun(tmp: Path, files: dict[str, str | None]) -> Path:
+    """A run directory holding `files`, plus a default config.json.
+
+    Pass `"config.json": None` for a run whose step 3a never happened.
+    """
     run = tmp / "2026-09-04-1200-coupons"
     (run / "briefs").mkdir(parents=True)
     (run / "repo.txt").write_text("/repo/pricing\n")
+    files = {"config.json": config(), **files}
     for name, body in files.items():
+        if body is None:
+            continue
         p = run / name
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body)
@@ -591,7 +616,171 @@ def case_final_report_ends_the_loop(tmp: Path) -> None:
     expect("final-report.md → the loop is complete", run, "11", "complete", 0)
 
 
+# --- step 3a, 4a and 5: the steps a stale skill copy silently did not have ---
+
+COMPLEX_Q = QUESTIONS.replace("PLAN_WRITTEN ws=1",
+                              "PLAN_WRITTEN ws=1 complex=yes questions=1")
+
+
+def case_no_config_is_step_3a(tmp: Path) -> None:
+    """The m0c-grammar run verbatim in shape: task, plan, questions and a PLAN_VALID
+    validation all on disk, and no config.json — the options card never ran, so
+    nothing downstream knows whether a plan review was wanted."""
+    run = mkrun(tmp, {"config.json": None, "task.md": TASK, "plan.md": PLAN,
+                      "questions.md": QUESTIONS, "plan-validation.md": VALID,
+                      "briefs/impl-ws1-r1.md": BRIEF})
+    expect("no config.json → step 3a, however far the files got", run,
+           "3a", "run_config.py", 0)
+
+
+def case_codex_wanted_but_never_started(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="always"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS})
+    expect("codexPlanReview=always and no package → step 4, start the Codex review",
+           run, "4", "plan_review_package.py", 0)
+
+
+def case_codex_hard_on_a_simple_plan(tmp: Path) -> None:
+    """`hard` means complex=yes only; a simple plan owes no review."""
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="hard"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS})
+    expect("codexPlanReview=hard, complex=no → straight to the validator", run,
+           "4", "VALIDATOR", 0)
+
+
+def case_codex_hard_on_a_complex_plan(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="hard"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": COMPLEX_Q})
+    expect("codexPlanReview=hard, complex=yes → the Codex review is owed", run,
+           "4", "plan_review_package.py", 0)
+
+
+def case_codex_failure_does_not_block(tmp: Path) -> None:
+    """The skill is explicit that a Codex failure never blocks dispatch. Having
+    *started* it — the package on disk — is the obligation; an answer is not."""
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="always"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
+                      "plan-review-package/PROMPT.md": "review this plan\n"})
+    expect("a started Codex review with no answer (opus off) → validator", run,
+           "4", "VALIDATOR", 0)
+
+
+def case_codex_failed_fallback_owed(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="always",
+                                            opusPlanReview="fallback"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
+                      "plan-review-package/PROMPT.md": "review this plan\n"})
+    expect("Codex gave no answer and opus=fallback → the fallback is owed", run,
+           "5", "plan-reviewer", 0)
+
+
+def case_answered_review_needs_triage(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="always"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
+                      "plan-review-package/PROMPT.md": "review this plan\n",
+                      "plan-review-package/plan-review-r1.md": "1. WS-1 too big\n"})
+    expect("a Codex answer with no plan-triage.md → step 5, triage it", run,
+           "5", "plan-triage.md", 0)
+
+
+def case_triaged_review_moves_on(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="always"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
+                      "plan-review-package/PROMPT.md": "review this plan\n",
+                      "plan-review-package/plan-review-r1.md": "1. WS-1 too big\n",
+                      "plan-triage.md": "CONFIRMED 0 · WRONG 1 · SETTLED 0 · OPEN 0\n"})
+    expect("reviewed and triaged → the validator", run, "4", "VALIDATOR", 0)
+
+
+def case_opus_always_is_owed(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": config(opusPlanReview="always"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS})
+    expect("opusPlanReview=always and no plan-design-review.md → step 4", run,
+           "4", "plan-reviewer", 0)
+
+
+def case_human_plan_is_owed(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": config(humanReadablePlan="generate"),
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS})
+    expect("humanReadablePlan=generate and no plan-human.md → step 4, brief H", run,
+           "4", "plan-human.md", 0)
+
+
+# --- a /teamlead:cycle run whose own options never reached run_config.py ---
+
+def cycle_home(tmp: Path, flags: str) -> Path:
+    home = tmp / "home"
+    (home / "tasks").mkdir(parents=True)
+    (home / "tasks" / "coupons.md").write_text(
+        "slug: coupons\nrepo: /repo\nworktree: /repo/pricing\n"
+        f"branch: feat/coupons\nbase: main@abc1234\nflags: {flags}\n\n# Task\nx\n")
+    return home
+
+
+CYCLE_FLAGS = "--codex-plan-review=always --with-human-readable-plan=generate"
+
+
+def case_cycle_task_file_lost_its_flags(tmp: Path) -> None:
+    """The cycle writes its own two options into the task file; `flags: none` there
+    is exactly what the stale copy wrote, and it is visible before any planning."""
+    run = mkrun(tmp, {"task.md": TASK})
+    expect("a cycle task file with `flags: none` → step 3a, the cycle's flags",
+           run, "3a", "--codex-plan-review", 0, home=cycle_home(tmp, "none"))
+
+
+def case_cycle_flags_not_in_config(tmp: Path) -> None:
+    """The task file is right but run_config.py was given other text, so the
+    cycle's `always` never reached config.json."""
+    run = mkrun(tmp, {"task.md": TASK})
+    expect("cycle flags present but config.json says otherwise → step 3a", run,
+           "3a", "codexPlanReview", 0, home=cycle_home(tmp, CYCLE_FLAGS))
+
+
+def case_cycle_flags_carried(tmp: Path) -> None:
+    run = mkrun(tmp, {"config.json": config(codexPlanReview="always",
+                                            humanReadablePlan="generate"),
+                      "task.md": TASK})
+    expect("cycle flags carried into config.json → planning proceeds", run,
+           "4", "PLANNER", 0, home=cycle_home(tmp, CYCLE_FLAGS))
+
+
+def case_cycle_card_overrides_its_flags(tmp: Path) -> None:
+    """The options card is the user's later word; a cycle run where they turned
+    the Codex review off on the card is not a lost flag."""
+    cfg = json.loads(config(codexPlanReview="off", humanReadablePlan="generate"))
+    cfg["sources"]["codexPlanReview"] = "options card"
+    run = mkrun(tmp, {"config.json": json.dumps(cfg), "task.md": TASK})
+    expect("a card answer beats the cycle's flag without tripping the check", run,
+           "4", "PLANNER", 0, home=cycle_home(tmp, CYCLE_FLAGS))
+
+
+def case_non_cycle_run_ignores_task_files(tmp: Path) -> None:
+    """A task file for a *different* worktree says nothing about this run."""
+    home = cycle_home(tmp, "none")
+    text = (home / "tasks" / "coupons.md").read_text()
+    (home / "tasks" / "coupons.md").write_text(
+        text.replace("worktree: /repo/pricing", "worktree: /repo/elsewhere"))
+    run = mkrun(tmp, {"task.md": TASK})
+    expect("another worktree's task file is not this run's", run,
+           "4", "PLANNER", 0, home=home)
+
+
 CASES = [
+    case_no_config_is_step_3a,
+    case_codex_wanted_but_never_started,
+    case_codex_hard_on_a_simple_plan,
+    case_codex_hard_on_a_complex_plan,
+    case_codex_failure_does_not_block,
+    case_codex_failed_fallback_owed,
+    case_answered_review_needs_triage,
+    case_triaged_review_moves_on,
+    case_opus_always_is_owed,
+    case_human_plan_is_owed,
+    case_cycle_task_file_lost_its_flags,
+    case_cycle_flags_not_in_config,
+    case_cycle_flags_carried,
+    case_cycle_card_overrides_its_flags,
+    case_non_cycle_run_ignores_task_files,
     case_not_a_run_directory,
     case_kickoff_without_task,
     case_plan_without_questions,

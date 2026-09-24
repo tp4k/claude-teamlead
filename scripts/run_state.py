@@ -480,7 +480,11 @@ def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     if gap or role == "planner":
         return gap
     if role == "plan-validator":
-        return design_gap(r) if (r.run / "questions.md").exists() else None
+        # questions.md is written last: without it the plan is unfinished, and
+        # plan_next names the planner spawn that is owed instead.
+        if not (r.run / "questions.md").exists():
+            return plan_next(r)
+        return design_gap(r)
     state = plan_next(r)
     if state and state[1] == "user relay outstanding" \
             and paths.read_json(r.run / "config.json").get("autopilot") is True:

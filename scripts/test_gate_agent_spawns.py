@@ -123,6 +123,13 @@ def case_codex_owed_before_validation(tmp: Path) -> None:
                 "plan_review_package.py")
 
 
+def case_validator_before_plan(tmp: Path) -> None:
+    """questions.md is written last, so without it there is no plan to validate."""
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "config.json": config()})
+    expect_deny("a validator before the planner finished is refused at step 4",
+                spawn("teamlead:plan-validator", run), "step 4", "PLANNER")
+
+
 def case_codex_owed_before_dispatch(tmp: Path) -> None:
     run = mkrun(tmp, dict(M0C, **{"config.json": config()}))
     expect_deny("hard + complex=yes: implementer refused until the Codex review "

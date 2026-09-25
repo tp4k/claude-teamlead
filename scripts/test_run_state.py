@@ -730,7 +730,8 @@ def cycle_home(tmp: Path, flags: str) -> Path:
     (home / "tasks").mkdir(parents=True)
     (home / "tasks" / "coupons.md").write_text(
         "slug: coupons\nrepo: /repo\nworktree: /repo/pricing\n"
-        f"branch: feat/coupons\nbase: main@abc1234\nflags: {flags}\n\n# Task\nx\n")
+        f"branch: feat/coupons\nbase: main@abc1234\nflags: {flags}\n\n"
+        "# Task\nApply stacked coupons in a fixed order.\n")
     return home
 
 
@@ -807,6 +808,15 @@ def case_non_cycle_run_ignores_task_files(tmp: Path) -> None:
            "4", "PLANNER", 0, home=home)
 
 
+def case_follow_up_run_in_a_cycle_worktree(tmp: Path) -> None:
+    """A real run: the cycle's own last step hands over `/teamlead:delegate
+    <run>/review-followup.md`, which runs in the *same* worktree. That
+    run's task is not the cycle's, so the cycle's flags are not owed to it."""
+    run = mkrun(tmp, {"task.md": "Fix the review findings.\n\nflags: none\n"})
+    expect("a follow-up run in a cycle's worktree is not the cycle's run", run,
+           "4", "PLANNER", 0, home=cycle_home(tmp, CYCLE_FLAGS))
+
+
 CASES = [
     case_no_config_is_step_3a,
     case_codex_wanted_but_never_started,
@@ -826,6 +836,7 @@ CASES = [
     case_cycle_card_answered_a_lost_flags_line,
     case_cycle_card_answered_only_one,
     case_non_cycle_run_ignores_task_files,
+    case_follow_up_run_in_a_cycle_worktree,
     case_not_a_run_directory,
     case_kickoff_without_task,
     case_plan_without_questions,

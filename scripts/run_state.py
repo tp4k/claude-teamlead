@@ -25,6 +25,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import cast
 
 import paths
 import run_config
@@ -56,7 +57,8 @@ def rework_cap(run: Path) -> int:
         repo = Path((run / "repo.txt").read_text().strip())
     except OSError:
         repo = None
-    return paths.setting("reworkCap", repo, valid=paths.positive_int)
+    # `valid` only lets a positive int through, and the default is one too.
+    return cast(int, paths.setting("reworkCap", repo, valid=paths.positive_int))
 
 
 def verdict(path: Path) -> str:
@@ -295,10 +297,15 @@ def cycle_task_file(r: Run) -> Path | None:
     """The /teamlead:cycle task file that launched this run, if one did.
 
     Matched on its `worktree:` line against repo.txt rather than on the slug:
-    kickoff may suffix a slug on collision, but a cycle's worktree is created
-    fresh for exactly one task and is the very path the run was handed.
+    kickoff may suffix a slug on collision, and the worktree is the very path
+    the run was handed. The worktree alone is not enough, though: the cycle's
+    last step hands over `/teamlead:delegate <run>/review-followup.md` in the
+    same tree, so the task file's body must also be in this run's task.md —
+    the cycle passes that text on verbatim. Its `flags:` line is not required
+    there, since losing it is exactly what cycle_gap looks for.
     """
     repo = r.text("repo.txt").strip()
+    task = r.text("task.md")
     if not repo:
         return None
     try:
@@ -307,10 +314,11 @@ def cycle_task_file(r: Run) -> Path | None:
         return None
     for f in files:
         try:
-            head = f.read_text(errors="replace").split("\n# Task", 1)[0]
+            head, _, body = f.read_text(errors="replace").partition("\n# Task")
         except OSError:
             continue
-        if f"\nworktree: {repo}\n" in f"\n{head}\n":
+        body = body.strip()
+        if f"\nworktree: {repo}\n" in f"\n{head}\n" and body and body in task:
             return f
     return None
 

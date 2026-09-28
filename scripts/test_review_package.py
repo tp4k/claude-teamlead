@@ -19,21 +19,17 @@ No pytest dependency — the skill's scripts run with bare python3.
 """
 from __future__ import annotations
 
-import importlib.util
+import json
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-PACKAGER = Path(__file__).resolve().parent / "review_package.py"
+# A plain import: `python3 scripts/<suite>.py` puts scripts/ first on sys.path.
+import review_package as rp
 
-# Loaded by path rather than imported: a plain `import` here has to follow a
-# `sys.path` edit, which is the E402 the house linter refuses to have
-# silenced.
-_SPEC = importlib.util.spec_from_file_location("review_package", PACKAGER)
-rp = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(rp)
+PACKAGER = Path(__file__).resolve().parent / "review_package.py"
 
 QUESTIONS = """# Open questions
 
@@ -106,12 +102,13 @@ def scaffold(
 
 
 def package(
-    tmp: Path, run: Path, base: str
+    tmp: Path, run: Path, base: str, *extra: str
 ) -> tuple[Path, subprocess.CompletedProcess[str]]:
     out = tmp / "pkg"
     env = dict(os.environ, TEAMLEAD_HOME=str(tmp / "home"))
     proc = subprocess.run(
-        [sys.executable, str(PACKAGER), str(run), "--out", str(out), "--base", base],
+        [sys.executable, str(PACKAGER), str(run), "--out", str(out), "--base", base,
+         *extra],
         capture_output=True,
         text=True,
         env=env,
@@ -865,7 +862,73 @@ def case_a_backtick_in_a_tilde_info_string_is_still_a_fence(tmp: Path) -> None:
     )
 
 
+# --- opusCodeReview: resolved once, before the 10–20 minute Codex wait ---
+
+def opus_line(proc: subprocess.CompletedProcess[str]) -> str:
+    lines = proc.stdout.splitlines()
+    return next((ln for ln in lines if ln.startswith("opus    :")), "")
+
+
+def global_config(tmp: Path, **values: object) -> Path:
+    home = tmp / "home"
+    home.mkdir(exist_ok=True)
+    (home / "config.json").write_text(json.dumps(values))
+    return home / "config.json"
+
+
+def case_opus_fallback_defaults_off(tmp: Path) -> None:
+    _, run, base = scaffold(tmp, None)
+    _, proc = package(tmp, run, base)
+    line = opus_line(proc)
+    check("no config and no flag → opusCodeReview=off from default",
+          proc.returncode == 0 and "opusCodeReview=off" in line and "(default)" in line,
+          f"line={line!r} err={proc.stderr!r}")
+
+
+def case_opus_fallback_from_global_config(tmp: Path) -> None:
+    _, run, base = scaffold(tmp, None)
+    cfg = global_config(tmp, opusCodeReview="fallback")
+    _, proc = package(tmp, run, base)
+    line = opus_line(proc)
+    check("global config says fallback → the line says so and names the file",
+          "opusCodeReview=fallback" in line and str(cfg) in line, f"line={line!r}")
+
+
+def case_opus_fallback_repo_beats_global(tmp: Path) -> None:
+    repo, run, base = scaffold(tmp, None)
+    global_config(tmp, opusCodeReview="fallback")
+    (repo / ".teamlead.json").write_text(json.dumps({"opusCodeReview": "off"}))
+    _, proc = package(tmp, run, base)
+    line = opus_line(proc)
+    check("the repo's .teamlead.json outranks the global config",
+          "opusCodeReview=off" in line and ".teamlead.json" in line, f"line={line!r}")
+
+
+def case_opus_fallback_flag_beats_config(tmp: Path) -> None:
+    _, run, base = scaffold(tmp, None)
+    global_config(tmp, opusCodeReview="fallback")
+    _, proc = package(tmp, run, base, "--opus-code-review=off")
+    line = opus_line(proc)
+    check("--opus-code-review=off outranks a config that says fallback",
+          "opusCodeReview=off" in line and "(flag)" in line, f"line={line!r}")
+
+
+def case_opus_fallback_typo_is_skipped(tmp: Path) -> None:
+    """`"yes"` is not a value this key takes; it must not read as on."""
+    _, run, base = scaffold(tmp, None)
+    global_config(tmp, opusCodeReview="yes")
+    _, proc = package(tmp, run, base)
+    line = opus_line(proc)
+    check("an invalid config value is skipped and the default answers",
+          "opusCodeReview=off" in line and "(default)" in line, f"line={line!r}")
+
+
 CASES = [
+    case_opus_fallback_defaults_off,
+    case_opus_fallback_from_global_config,
+    case_opus_fallback_repo_beats_global,
+    case_opus_fallback_flag_beats_config,
+    case_opus_fallback_typo_is_skipped,
     case_answers_reach_the_package,
     case_answers_stop_at_the_next_heading,
     case_the_questions_stay_out,

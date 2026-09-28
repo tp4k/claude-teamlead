@@ -29,7 +29,6 @@ No pytest dependency — the skill's scripts run with bare python3.
 """
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -38,13 +37,8 @@ import time
 import zlib
 from pathlib import Path
 
-# Loaded by path rather than imported: a plain `import` here has to follow a
-# `sys.path` edit, which is the E402 the house linter refuses to have silenced.
-_SPEC = importlib.util.spec_from_file_location(
-    "run_codex_review", Path(__file__).resolve().parent / "run_codex_review.py"
-)
-runner = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(runner)
+# A plain import: `python3 scripts/<suite>.py` puts scripts/ first on sys.path.
+import run_codex_review as runner
 
 results: list[tuple[str, bool, str]] = []
 
@@ -667,7 +661,7 @@ def case_reflog_expiry_from_the_disposable_tree_is_caught(tmp: Path) -> None:
     check(
         "erasing the shared reflogs from the disposable tree is reported",
         remaining == ""
-        and warnings
+        and bool(warnings)
         and all("reflog changed" in warning for warning in warnings)
         and any("HEAD" in warning for warning in warnings)
         and not any("isolation escaped" in warning for warning in warnings),

@@ -49,6 +49,7 @@ DEFAULTS: dict[str, object] = {
     "securityReview": "off",
     "perfReview": "off",
     "codexCodeReview": "off",
+    "opusCodeReview": "off",
     "adr": "off",
     "planValidatorPasses": 1,
     "codexPlanReviewAxes": PLAN_REVIEW_AXES,
@@ -65,6 +66,7 @@ CHOICES: dict[str, tuple[str, ...]] = {
     "securityReview": ("off", "when-needed", "on"),
     "perfReview": ("off", "when-needed", "on"),
     "codexCodeReview": ("off", "on"),
+    "opusCodeReview": ("off", "fallback"),
     "adr": ("off", "on"),
 }
 

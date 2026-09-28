@@ -38,6 +38,7 @@ import sys
 from pathlib import Path
 
 import paths
+import run_config
 
 RUNS_ROOT = paths.runs_dir()
 SHA_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
@@ -874,6 +875,19 @@ def build_prompt(ctx: dict) -> str:
     return "\n".join(lines)
 
 
+def opus_code_review(flag: str | None, repo: Path) -> tuple[str, str]:
+    """(value, where it came from) for the Opus stand-in when Codex cannot run.
+
+    Resolved here, before the 10–20 minute wait, because a fallback decided
+    after Codex has already failed is a decision nobody made in advance.
+    """
+    if flag is not None:
+        return flag, "flag"
+    key = "opusCodeReview"
+    value = str(paths.setting(key, repo, paths.one_of(key)))
+    return value, run_config.tier_of(key, repo)
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(add_help=True, description=__doc__)
     ap.add_argument("target", nargs="?", default=None)
@@ -887,6 +901,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--with-diff", action="store_true")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--list", action="store_true", help="list recent runs and exit")
+    ap.add_argument(
+        "--opus-code-review",
+        choices=paths.CHOICES["opusCodeReview"],
+        help="whether an Opus review stands in when Codex cannot run "
+        "(default: the opusCodeReview setting)",
+    )
     args = ap.parse_args(argv)
 
     if args.list:
@@ -1026,6 +1046,8 @@ def main(argv: list[str]) -> int:
         listed = f"  ({commit_counts['shown']} listed in the prompt)"
     print(f"commits : {commit_counts['total']}{listed}")
     print(f"files   : {len(rows)}")
+    fallback, source = opus_code_review(args.opus_code_review, repo)
+    print(f"opus    : opusCodeReview={fallback}  ({source})")
     if inputs:
         print(f"inputs  : {', '.join(inputs)}")
     print()

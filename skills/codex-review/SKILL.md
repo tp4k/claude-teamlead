@@ -147,8 +147,22 @@ any reason. Without this, the change ends its cycle with no independent review a
 and the only trace is one error line nobody acts on.
 
 First record the live tree, since this reviewer works in it rather than in a disposable
-checkout: `git -C <repo> rev-parse HEAD` and `git -C <repo> status --porcelain`. Then
-spawn `teamlead:code-reviewer` in the foreground with exactly this prompt:
+checkout. Snapshot everything its contract (`agents/code-reviewer.md`) forbids it to
+touch: tracked and untracked files, `HEAD`, every ref (the stash included), local config
+and hooks:
+
+```bash
+{ git -C <repo> rev-parse HEAD; git -C <repo> status --porcelain;
+  git -C <repo> for-each-ref --format='%(objectname) %(refname)';
+  git -C <repo> config --local --list;
+  ls -lA "$(git -C <repo> rev-parse --path-format=absolute --git-path hooks)"; } \
+  > <abs dir of PROMPT.md>/tree-before-rN.txt
+```
+
+Ignored files are left out on purpose: the contract lets the reviewer run the test
+commands `PROMPT.md` names, and those write build output there on every run, so a
+comparison including them would warn every time and the warning would stop meaning
+anything. Then spawn `teamlead:code-reviewer` in the foreground with exactly this prompt:
 
 ```
 PROMPT.md: <abs path of review-package/PROMPT.md>
@@ -162,8 +176,8 @@ spawn `general-purpose` with `model: opus` instead, and put
 `Read $PLUGIN/agents/code-reviewer.md first; it is your instruction set.` above those
 four lines.
 
-When it returns, re-run both git commands. A different `HEAD` or a changed status line
-means the reviewer changed the live tree: report the before and after as a `WARNING:`,
+When it returns, run the same block into `tree-after-rN.txt` and `diff` the two files.
+Any difference means the reviewer changed the live tree: report the diff as a `WARNING:`,
 exactly as you would a runner warning, and do not revert anything yourself. Then read the
 answer file in full and triage it (step 3) exactly as you would a Codex answer. The file
 has the same contract, and the ledger's first line says who wrote it.

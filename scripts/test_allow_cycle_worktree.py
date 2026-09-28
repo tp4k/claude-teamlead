@@ -190,6 +190,36 @@ def case_only_a_newly_created_tree_is_granted(tmp: Path) -> None:
           home, allow=True)
 
 
+def handover(home: Path, repo: Path, tree: Path, slug: str) -> None:
+    (home / "tasks" / f"{slug}.md").write_text(
+        f"slug: {slug}\nrepo: {repo}\nworktree: {tree}\nbranch: feat/slug\n"
+        f"session: {SESSION}\n\n# Task\nx\n"
+    )
+
+
+def case_fabricated_git_files_are_not_a_worktree(tmp: Path) -> None:
+    """The PR #5 review: `.git` and `HEAD` are just files anyone can write."""
+    repo, tree, home = cycle_fixture(tmp)
+    fake, admin = tmp / "fake", tmp / "fake-admin"
+    fake.mkdir()
+    admin.mkdir()
+    (admin / "HEAD").write_text("ref: refs/heads/feat/slug\n")
+    (admin / "commondir").write_text("..\n")
+    (admin / "gitdir").write_text(f"{fake}/.git\n")
+    (fake / ".git").write_text(f"gitdir: {admin}\n")
+    handover(home, repo, fake, "fake")
+    check("fresh fabricated `.git`, `HEAD` and `commondir` are not granted",
+          enter(str(fake)), home, allow=False)
+    twin = tmp / "twin"
+    twin.mkdir()
+    (twin / ".git").write_text((tree / ".git").read_text())
+    handover(home, repo, twin, "twin")
+    check("a directory claiming a real tree's admin dir is not granted",
+          enter(str(twin)), home, allow=False)
+    check("the real tree beside both forgeries is still granted",
+          enter(str(tree)), home, allow=True)
+
+
 CASES = [
     case_the_handed_over_tree_is_allowed,
     case_everything_else_gets_no_decision,
@@ -199,6 +229,7 @@ CASES = [
     case_the_grant_belongs_to_the_session_that_wrote_it,
     case_two_handovers_for_one_tree_do_not_shadow,
     case_only_a_newly_created_tree_is_granted,
+    case_fabricated_git_files_are_not_a_worktree,
 ]
 
 

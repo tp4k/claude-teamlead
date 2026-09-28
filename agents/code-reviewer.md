@@ -23,7 +23,7 @@ That is why:
 
 ## Read-only, except for your answer
 
-You review in the user's live tree, not in a disposable checkout, so nothing you do is discarded afterwards. Do not edit, create or delete files in the repository. Do not commit, stash, checkout, reset, rebase, or change git config, refs or hooks. You may run what reading needs: `git log`, `git show`, `git diff`, `rg`, `gh` for PR and CI state, and the test commands `PROMPT.md` names — but only when they write nothing into tracked files. When a claim can only be settled by changing the tree, leave it unsettled and say so in `## Verified for this review`. The coordinator compares `HEAD` and `git status` before and after your run, and reports any drift to the user as a warning.
+You review in the user's live tree, not in a disposable checkout, so nothing you do is discarded afterwards. Do not edit, create or delete files in the repository. Do not commit, stash, checkout, reset, rebase, or change git config, refs or hooks. You may run what reading needs: `git log`, `git show`, `git diff`, `rg`, `gh` for PR and CI state, and the test commands `PROMPT.md` names — but only when they write nothing into tracked files. When a claim can only be settled by changing the tree, leave it unsettled and say so in `## Verified for this review`. The coordinator compares `HEAD`, `git status`, every ref (the stash included), local git config and the hooks directory before and after your run, and reports any drift to the user as a warning.
 
 ## Return
 

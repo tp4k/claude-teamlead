@@ -20,8 +20,9 @@ must be the `worktree:` line of a handover file in `$TEAMLEAD_HOME/tasks/` that:
 - was written in the last `FRESH_SECONDS` — step 6 writes it one step before the
   switch, and `--resume` starts in the tree without switching, so an older file
   has no legitimate switch left to grant;
-- names the branch the worktree is actually on, and the target is a linked
-  worktree (its `.git` is a file pointing at a gitdir with that `HEAD`);
+- names the branch the worktree is actually on, and the target is a worktree git
+  registered — the `.git` → admin dir → `gitdir` link holds both ways (see
+  `linked_tree`), so fabricated `.git` and `HEAD` files are not enough;
 - targets a worktree git created within `FRESH_SECONDS`, and was itself written
   after that creation — the cycle makes the tree in step 3 and hands it over in
   step 6, so an older tree was not made by this cycle.
@@ -67,18 +68,39 @@ def resolved(p: str) -> Path | None:
 
 
 def linked_tree(tree: Path) -> tuple[str, float] | None:
-    """`(branch, created)` for a linked worktree, read without running git.
+    """`(branch, created)` for a worktree git registered, or `None`.
+
+    Registered means git's own two-way link holds: the tree's `.git` names an
+    admin dir under `<common>/worktrees/`, that dir's `gitdir` names the tree's
+    `.git` back, and `<common>` is a repository. A `.git` file and a `HEAD`
+    alone are two files anyone can write.
+
+    Read as files, never by running git: git run inside a fabricated repo
+    honours that repo's config, and `core.fsmonitor` there is a command.
 
     `created` is the mtime of the admin dir's `commondir`: `git worktree add`
     writes it once and nothing afterwards touches it, where `HEAD` and `index`
     move with every checkout.
     """
     try:
-        pointer = (tree / ".git").read_text().strip().removeprefix("gitdir:")
-        gitdir = tree / pointer.strip()
-        head = (gitdir / "HEAD").read_text().strip()
-        created = (gitdir / "commondir").stat().st_mtime
+        dot_git = (tree / ".git").resolve()
+        pointer = dot_git.read_text().strip()
+        if not pointer.startswith("gitdir:"):
+            return None
+        admin = (tree / pointer.removeprefix("gitdir:").strip()).resolve()
+        common = (admin / (admin / "commondir").read_text().strip()).resolve()
+        back = Path((admin / "gitdir").read_text().strip()).resolve()
+        registered = (
+            admin.parent == common / "worktrees"
+            and back == dot_git
+            and (common / "HEAD").is_file()
+            and (common / "objects").is_dir()
+        )
+        head = (admin / "HEAD").read_text().strip()
+        created = (admin / "commondir").stat().st_mtime
     except OSError:
+        return None
+    if not registered:
         return None
     if not head.startswith("ref: refs/heads/"):
         return None

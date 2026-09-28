@@ -10,8 +10,13 @@ reads as the cycle stalling. The plugin carries its own permission needs as hook
 The grant is narrow on purpose. The call must be exactly `{path}`, and the path
 must be the `worktree:` line of a handover file in `$TEAMLEAD_HOME/tasks/` that:
 
-- carries a full cycle header (`slug:`, `repo:`, `worktree:`, `branch:` before
-  `# Task`), so an arbitrary note in that directory grants nothing;
+- carries a full cycle header (`slug:`, `repo:`, `worktree:`, `branch:`,
+  `session:` before `# Task`), so an arbitrary note in that directory grants
+  nothing;
+- names the session asking. `$TEAMLEAD_HOME` is shared by every session on the
+  machine, so without this a handover would pre-approve the same switch for all of
+  them; step 6 writes `$CLAUDE_CODE_SESSION_ID`, which is the hook's `session_id`
+  (the pairing `scripts/session_title.py` already relies on);
 - was written in the last `FRESH_SECONDS` — step 6 writes it one step before the
   switch, and `--resume` starts in the tree without switching, so an older file
   has no legitimate switch left to grant;
@@ -20,9 +25,10 @@ must be the `worktree:` line of a handover file in `$TEAMLEAD_HOME/tasks/` that:
 
 A primary checkout, an arbitrary directory, a stale handover, or a `{name}` call
 that creates a new tree gets no decision. The tasks directory is itself
-auto-writable (`allow-run-writes.py`), so a forged fresh file is the residual
-risk; what it can buy is a switch into an already-registered worktree, which is
-the same thing the prompt would have offered.
+auto-writable (`allow-run-writes.py`), so a fresh file forged *by the session
+that then switches* is the residual risk; what it can buy that session is a
+switch into an already-registered worktree, which is the same thing the prompt
+would have offered it.
 
 Like its sibling it only ever *grants*: anything it does not recognise produces no
 output and falls through to the normal permission flow.
@@ -36,7 +42,7 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 FRESH_SECONDS = 30 * 60
-HEADER_KEYS = ("slug", "repo", "worktree", "branch")
+HEADER_KEYS = ("slug", "repo", "worktree", "branch", "session")
 
 
 def resolved(p: str) -> Path | None:
@@ -64,9 +70,13 @@ def branch_of(tree: Path) -> str | None:
     return head.removeprefix("ref: refs/heads/") if head.startswith("ref: ") else None
 
 
-def handed_over(tasks: Path, now: float) -> dict[Path, str]:
-    """`worktree -> branch` for every fresh, complete cycle handover file."""
-    found: dict[Path, str] = {}
+def handed_over(tasks: Path, now: float) -> set[tuple[Path, str, str]]:
+    """`(worktree, branch, session)` for every fresh, complete cycle handover file.
+
+    A set, not a map keyed by worktree: two files naming one tree must not
+    shadow each other, or which session gets the grant would depend on sort order.
+    """
+    found: set[tuple[Path, str, str]] = set()
     for f in sorted(tasks.glob("*.md")) if tasks.is_dir() else []:
         try:
             if now - f.stat().st_mtime > FRESH_SECONDS:
@@ -83,7 +93,7 @@ def handed_over(tasks: Path, now: float) -> dict[Path, str]:
             continue
         tree = resolved(fields["worktree"])
         if tree is not None:
-            found[tree] = fields["branch"]
+            found.add((tree, fields["branch"], fields["session"]))
     return found
 
 
@@ -97,15 +107,18 @@ def main() -> int:
     tool_input = event.get("tool_input")
     if not isinstance(tool_input, dict) or set(tool_input) != {"path"}:
         return 0
+    session = event.get("session_id")
     raw = tool_input["path"]
     target = resolved(raw) if isinstance(raw, str) else None
-    if target is None or not (target / ".git").is_file():
+    if not isinstance(session, str) or not session or target is None:
+        return 0
+    branch = branch_of(target) if (target / ".git").is_file() else None
+    if branch is None:
         return 0
     sys.path.insert(0, str(SCRIPTS))
     import paths
 
-    branch = handed_over(paths.tasks_dir(), time.time()).get(target)
-    if branch is None or branch_of(target) != branch:
+    if (target, branch, session) not in handed_over(paths.tasks_dir(), time.time()):
         return 0
     json.dump(
         {

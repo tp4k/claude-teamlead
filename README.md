@@ -264,7 +264,8 @@ And five hooks the plugin carries itself, so that no one has to hand-edit
   spawn is untouched. A Codex review that fails never blocks.
 - **`PreToolUse` (worktree)** pre-approves `/teamlead:cycle`'s one
   `EnterWorktree` switch, into the linked worktree its handover file in
-  `$TEAMLEAD_HOME/tasks/` names. Any other switch gets no decision.
+  `$TEAMLEAD_HOME/tasks/` names, and only for the session that wrote it. Any
+  other switch, or any other session, gets no decision.
 - **`UserPromptSubmit`** names the session after the run. It never overwrites a
   title you chose yourself.
 

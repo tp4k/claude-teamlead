@@ -163,6 +163,7 @@ slug: <slug>
 repo: <abs repo>
 worktree: <abs worktree>
 branch: <branch>
+session: <`echo "$CLAUDE_CODE_SESSION_ID"` — this session's id>
 base: <base>@<sha>
 flags: <the user's own flags, plus --codex-plan-review=always --with-human-readable-plan=generate>
 bootstrap: <the command step 5 ran>
@@ -182,7 +183,9 @@ EnterWorktree({ path: "<worktree>" })
 ```
 
 The plugin's `allow-cycle-worktree.py` hook pre-approves this call because the task file from
-step 6 names the tree, so write that file first and pass the same absolute path here.
+step 6 names the tree *and this session*, so write that file first and pass the same absolute
+path here. `$TEAMLEAD_HOME` is shared across sessions; the `session:` line is what keeps the
+grant from reaching any other one. A missing or wrong id costs only the prompt.
 
 One call, and the session's cwd, its write access and its workspace roots are all inside the
 worktree; the worktree's own `CLAUDE.md` and settings load with it. Report one line and

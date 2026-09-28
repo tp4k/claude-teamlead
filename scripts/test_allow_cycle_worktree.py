@@ -49,8 +49,12 @@ def check(name: str, event: object, home: Path, allow: bool) -> None:
     )
 
 
-def enter(path: object) -> dict:
-    return {"tool_name": "EnterWorktree", "tool_input": {"path": path}}
+SESSION = "sess-a"
+
+
+def enter(path: object, session: object = SESSION) -> dict:
+    return {"tool_name": "EnterWorktree", "session_id": session,
+            "tool_input": {"path": path}}
 
 
 def git(*args: str) -> None:
@@ -67,7 +71,8 @@ def cycle_fixture(tmp: Path) -> tuple[Path, Path, Path]:
     git("-C", str(repo), "worktree", "add", "-q", "-b", "feat/slug", str(tree))
     (home / "tasks").mkdir(parents=True)
     (home / "tasks" / "slug.md").write_text(
-        f"slug: slug\nrepo: {repo}\nworktree: {tree}\nbranch: feat/slug\n\n"
+        f"slug: slug\nrepo: {repo}\nworktree: {tree}\nbranch: feat/slug\n"
+        f"session: {SESSION}\n\n"
         "# Task\nworktree: /somewhere/else\n"
     )
     return repo, tree, home
@@ -124,7 +129,7 @@ def case_the_handover_must_be_fresh_complete_and_match(tmp: Path) -> None:
     check("a bare `worktree:` note without the cycle header grants nothing",
           enter(str(tree)), home, allow=False)
     task.write_text(f"slug: slug\nrepo: {repo}\nworktree: {tree}\n"
-                    "branch: feat/other\n\n# Task\nx\n")
+                    f"branch: feat/other\nsession: {SESSION}\n\n# Task\nx\n")
     check("a handover naming a branch the tree is not on grants nothing",
           enter(str(tree)), home, allow=False)
 
@@ -133,8 +138,38 @@ def case_extra_inputs_get_no_decision(tmp: Path) -> None:
     """The Codex review's MEDIUM: `path` plus `name` is not the one-path switch."""
     _, tree, home = cycle_fixture(tmp)
     check("a call carrying both `path` and `name` is not granted",
-          {"tool_name": "EnterWorktree",
+          {"tool_name": "EnterWorktree", "session_id": SESSION,
            "tool_input": {"path": str(tree), "name": "x"}}, home, allow=False)
+
+
+def case_the_grant_belongs_to_the_session_that_wrote_it(tmp: Path) -> None:
+    """The PR #5 review: `$TEAMLEAD_HOME` is shared, so the handover must name
+    the one session it pre-approves, not every session on the machine."""
+    repo, tree, home = cycle_fixture(tmp)
+    check("another session switching into the handed-over tree is not granted",
+          enter(str(tree), session="sess-b"), home, allow=False)
+    check("an event with no session id is not granted",
+          enter(str(tree), session=None), home, allow=False)
+    check("an empty session id is not granted", enter(str(tree), session=""),
+          home, allow=False)
+    (home / "tasks" / "slug.md").write_text(
+        f"slug: slug\nrepo: {repo}\nworktree: {tree}\nbranch: feat/slug\n\n"
+        "# Task\nx\n"
+    )
+    check("a handover with no `session:` line grants nothing", enter(str(tree)),
+          home, allow=False)
+
+
+def case_two_handovers_for_one_tree_do_not_shadow(tmp: Path) -> None:
+    repo, tree, home = cycle_fixture(tmp)
+    (home / "tasks" / "zz-later.md").write_text(
+        f"slug: slug\nrepo: {repo}\nworktree: {tree}\nbranch: feat/slug\n"
+        "session: sess-b\n\n# Task\nx\n"
+    )
+    check("the first file's session keeps its grant beside a second file",
+          enter(str(tree)), home, allow=True)
+    check("the second file's session gets its own grant",
+          enter(str(tree), session="sess-b"), home, allow=True)
 
 
 CASES = [
@@ -143,6 +178,8 @@ CASES = [
     case_a_removed_tree_loses_the_grant,
     case_the_handover_must_be_fresh_complete_and_match,
     case_extra_inputs_get_no_decision,
+    case_the_grant_belongs_to_the_session_that_wrote_it,
+    case_two_handovers_for_one_tree_do_not_shadow,
 ]
 
 

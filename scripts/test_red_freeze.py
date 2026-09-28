@@ -293,6 +293,21 @@ def case_run_leaves_the_repo_alone(tmp: Path) -> None:
           status == "" and not (repo.root / "stray.txt").exists(), status)
 
 
+LONG = ("for i in range(1, 301):\n    print(f'line {i}')\n"
+        "raise SystemExit(1)\n")
+
+
+def case_run_marks_omitted_lines(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", LONG)
+    red = repo.red()
+    _, out = run(repo, red, cmd=CHECK_CMD)
+    block = out.split(f"RED run {red[:9]}: exit 1", 1)[-1]
+    check("--run marks a cut tail, so a test absent from it is not read as passing",
+          "earlier lines omitted" in block and "line 300" in block
+          and "line 1\n" not in block, out)
+
+
 CASES = [
     case_untouched_red_is_frozen,
     case_added_tests_are_allowed,
@@ -311,6 +326,7 @@ CASES = [
     case_run_reports_the_red_commit_failure,
     case_run_catches_a_red_that_passes,
     case_run_leaves_the_repo_alone,
+    case_run_marks_omitted_lines,
 ]
 
 

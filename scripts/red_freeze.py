@@ -28,7 +28,9 @@ failure the report's `red:` lines quote: a report written after GREEN has only
 HEAD's and the probes' output at hand, and quotes one of those instead. A RED
 run that exits 0 is `RED_PASSES <sha>` (exit 1) — tests green on arrival. Only
 the exit code is read, so one test passing beside failing ones is not flagged:
-it shows as a `red:` line with no matching failure in the block. Every RED
+it shows as a `red:` line with no matching failure in the block — unless
+the block opens with `(... N earlier lines omitted)`, when the failure may sit
+above the tail and the reviewer reruns the command to see it. Every RED
 given gets the same command, so on a rework round pass `--run` this round's RED
 alone — an earlier RED predates this round's tests. The export holds tracked
 files only, so the command must work from a fresh clone.
@@ -115,7 +117,7 @@ def check(repo: str, head: str, reds: list[str]) -> tuple[list[str], list[str], 
     return missing, notes, frozen
 
 
-TAIL = 40
+TAIL = 200
 
 
 def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
@@ -134,7 +136,10 @@ def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
         proc = subprocess.run(cmd, shell=True, cwd=tree, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     lines = proc.stdout.rstrip("\n").splitlines()
-    return proc.returncode, "\n".join(lines[-TAIL:])
+    if len(lines) > TAIL:
+        cut = len(lines) - TAIL
+        lines = [f"(... {cut} earlier lines omitted)", *lines[-TAIL:]]
+    return proc.returncode, "\n".join(lines)
 
 
 def main(argv: list[str]) -> int:

@@ -13,8 +13,9 @@ Additions after RED are allowed — a new test, a stronger fixture, an extra
 import on its own line. A frozen line that was edited, moved into a helper with
 different text, or deleted is reported. Matching is on stripped content with
 multiplicity, not on position, so tests added above a frozen line do not flag
-it; the one blind spot is a frozen line removed and the identical text added
-elsewhere in the same file, which is no weakening either.
+it. The blind spot is the same text surviving elsewhere in the same file: an
+assertion cut from its test but left in a helper nothing calls still counts as
+present, so the reviewer checks that frozen assertions still sit in live tests.
 
 Prints `RED_FROZEN` (exit 0) or `RED_CHANGED` plus one line per missing frozen
 line (exit 1). A bad revision, or a RED commit that is not an ancestor of
@@ -25,8 +26,12 @@ look like a test is a `note:`, not a failure — the reviewer judges that one.
 commit and prints `RED run <sha>: exit <n>` with the output's tail. That is the
 failure the report's `red:` lines quote: a report written after GREEN has only
 HEAD's and the probes' output at hand, and quotes one of those instead. A RED
-run that exits 0 is `RED_PASSES <sha>` (exit 1) — tests green on arrival. The
-export holds tracked files only, so the command must work from a fresh clone.
+run that exits 0 is `RED_PASSES <sha>` (exit 1) — tests green on arrival. Only
+the exit code is read, so one test passing beside failing ones is not flagged:
+it shows as a `red:` line with no matching failure in the block. Every RED
+given gets the same command, so on a rework round pass `--run` this round's RED
+alone — an earlier RED predates this round's tests. The export holds tracked
+files only, so the command must work from a fresh clone.
 
 No dependencies beyond git, for the same reason as the rest of `scripts/`.
 """

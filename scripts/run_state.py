@@ -25,6 +25,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import cast
 
 import paths
 import run_config
@@ -56,7 +57,8 @@ def rework_cap(run: Path) -> int:
         repo = Path((run / "repo.txt").read_text().strip())
     except OSError:
         repo = None
-    return paths.setting("reworkCap", repo, valid=paths.positive_int)
+    # `valid` only lets a positive int through, and the default is one too.
+    return cast(int, paths.setting("reworkCap", repo, valid=paths.positive_int))
 
 
 def verdict(path: Path) -> str:

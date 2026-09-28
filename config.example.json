@@ -20,6 +20,9 @@
   "_codexCodeReview": "off | on. On a clean finish, end the run with the /teamlead:codex-review one-liner for the finished diff. It is offered rather than run: that review is its own 10–20 minute loop with its own findings triage.",
   "codexCodeReview": "off",
 
+  "_opusCodeReview": "off | fallback. When /teamlead:codex-review cannot run Codex (not installed, no login, runner error, timeout), the bundled teamlead:code-reviewer agent reviews the same package instead of the review stopping. Read by review_package.py at packaging time, so the choice is made before the wait; `--opus-code-review=<v>` on /teamlead:codex-review overrides it. The ledger names the reviewer — an Opus review shares a model family with the implementers and is not the cross-vendor read Codex gives.",
+  "opusCodeReview": "off",
+
   "_adr": "off | on. Write an ADR for decisions that pass the 3-part test (hard to reverse AND surprising without context AND a real trade-off). Reading ADRs is always on and needs no setting.",
   "adr": "off",
 

@@ -14,6 +14,7 @@ import shutil
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import paths
 
@@ -29,7 +30,9 @@ def run_started(name: str) -> datetime | None:
 
 def prune(dry_run: bool) -> list[Path]:
     runs_dir = paths.runs_dir()
-    max_age = timedelta(days=paths.setting("maxAgeDays", valid=paths.positive_int))
+    # `valid` only lets a positive int through, and the default is one too.
+    days = cast(int, paths.setting("maxAgeDays", valid=paths.positive_int))
+    max_age = timedelta(days=days)
     keep_last = paths.setting("keepLastPerRepo", valid=paths.nonneg_int)
     cutoff = datetime.now() - max_age
     removed: list[Path] = []

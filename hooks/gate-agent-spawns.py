@@ -87,7 +87,9 @@ def decide(event: object) -> str | None:
     if not isinstance(tool_input, dict):
         return None
     role = role_of(tool_input)
-    run = run_dir(tool_input.get("prompt")) if role else None
+    if not role:
+        return None
+    run = run_dir(tool_input.get("prompt"))
     if run is None:
         return None
     gap = run_state.spawn_gap(run_state.Run(run), role)

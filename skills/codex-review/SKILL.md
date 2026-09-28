@@ -1,8 +1,8 @@
 ---
 name: codex-review
-description: 'Have Codex independently review a finished /teamlead:delegate run with its full task, plan, and diff context, then triage every finding in Claude Code. Use when the user says "review this run", "/teamlead:delegate --review", asks for a Codex review of teamlead work, or pastes back findings from another agent.'
-user-invocable: true
-argument-hint: "[run dir | repo/worktree path] [--list] [--base SHA] [--with-diff] [--out DIR] [--package-only] [--timeout-minutes N]"
+description: 'Have Codex independently review a finished /teamlead:delegate run with its full task, plan, and diff context, then triage every finding in Claude Code. Use when the user says "review this run", "/teamlead:delegate --review", asks for a Codex review of teamlead work, or pastes back findings from another agent. With opusCodeReview=fallback, an Opus reviewer stands in when Codex cannot run.'
+metadata:
+  argument-hint: "[run dir | repo/worktree path] [--list] [--base SHA] [--with-diff] [--out DIR] [--package-only] [--timeout-minutes N] [--opus-code-review=off|fallback]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/review_package.py *), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run_codex_review.py *)
 ---
 
@@ -11,7 +11,8 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/review_package.py *), 
 **`$PLUGIN` is the plugin root** — two levels above this skill's base directory, which the harness names when it loads this file. Resolve it yourself in the commands below; a `${...}` reaches your Bash unexpanded.
 
 Four jobs, in order. Do not perform the initial review yourself — Codex is the
-independent reviewer. Your job on the way back is the opposite one: make sure
+independent reviewer, and when it cannot run, the `teamlead:code-reviewer` agent is
+(step 2b), never you. Your job on the way back is the opposite one: make sure
 nothing it found is lost, and reject a finding only on evidence.
 
 ## 1. Build the package
@@ -43,6 +44,11 @@ Keep the base SHA, commit/file counts, package path, and **every WARNING the scr
 printed verbatim** for the final report. A base warning means the review may cover the
 wrong range — never suppress it. If the script exits 1, report the error and stop; the
 usual fix is `--base <sha>` or `--out <dir>`.
+
+Keep its `opus    : opusCodeReview=<value>  (<source>)` line too. It decides step 2b, and
+it is resolved now, before the wait, so the fallback is a setting someone chose rather
+than a call made after Codex has already failed. Pass the user's `--opus-code-review=<v>`
+through to `review_package.py` when they gave one; it outranks the config tiers.
 
 If the user passed `--package-only`, retain the old manual handoff: report the base SHA
 and commit/file counts, every warning, and then copy the script's final
@@ -120,9 +126,10 @@ the retained JSONL path, so a hung review cannot outlive the cap.
 
 Do not start an interactive login, retry with `--dangerously-bypass-approvals-and-sandbox`
 or any other weakening beyond what the runner already sets, or fall back to reviewing the
-change yourself. If authentication is unavailable, report the runner's
-login instruction and stop. If Codex fails or times out, report the error and retained
-JSONL path and stop. Never add `--with-diff` merely because Codex is a separate process;
+change yourself. When the runner exits non-zero — Codex not installed, no saved login,
+a failed run, or a timeout — report its error (and the retained JSONL path, when it
+printed one). Then `opusCodeReview=off` → stop there; `opusCodeReview=fallback` → go to
+step 2b. Never add `--with-diff` merely because Codex is a separate process;
 it runs on the same machine and reads the repository directly.
 
 Codex loads skills from `~/.agents/skills` on its own. Nothing named `codex-review`
@@ -132,6 +139,48 @@ codex-review skill" before starting the review.
 
 When the runner succeeds, read `codex-review-rN.md` in full and continue directly to
 triage. Do not ask the user to copy or paste the review.
+
+## 2b. The Opus stand-in — only with `opusCodeReview=fallback`
+
+The same triggers as `opusPlanReview=fallback` on the plan side: the runner failed for
+any reason. Without this, the change ends its cycle with no independent review at all,
+and the only trace is one error line nobody acts on.
+
+First record the live tree, since this reviewer works in it rather than in a disposable
+checkout. Snapshot everything its contract (`agents/code-reviewer.md`) forbids it to
+touch: tracked and untracked files, `HEAD`, every ref (the stash included), local config
+and hooks:
+
+```bash
+{ git -C <repo> rev-parse HEAD; git -C <repo> status --porcelain;
+  git -C <repo> for-each-ref --format='%(objectname) %(refname)';
+  git -C <repo> config --local --list;
+  ls -lA "$(git -C <repo> rev-parse --path-format=absolute --git-path hooks)"; } \
+  > <abs dir of PROMPT.md>/tree-before-rN.txt
+```
+
+Ignored files are left out on purpose: the contract lets the reviewer run the test
+commands `PROMPT.md` names, and those write build output there on every run, so a
+comparison including them would warn every time and the warning would stop meaning
+anything. Then spawn `teamlead:code-reviewer` in the foreground with exactly this prompt:
+
+```
+PROMPT.md: <abs path of review-package/PROMPT.md>
+Repo: <abs repo path from the package output>
+Answer: <abs dir of PROMPT.md>/opus-review-rN.md   (N = the first number not yet taken)
+Codex could not run (<the runner's error line, verbatim>), so this is the only review of this change.
+```
+
+If that agent type is not registered — the plugin gained it after this session started —
+spawn `general-purpose` with `model: opus` instead, and put
+`Read $PLUGIN/agents/code-reviewer.md first; it is your instruction set.` above those
+four lines.
+
+When it returns, run the same block into `tree-after-rN.txt` and `diff` the two files.
+Any difference means the reviewer changed the live tree: report the diff as a `WARNING:`,
+exactly as you would a runner warning, and do not revert anything yourself. Then read the
+answer file in full and triage it (step 3) exactly as you would a Codex answer. The file
+has the same contract, and the ledger's first line says who wrote it.
 
 ## 3. Triage the Codex findings
 
@@ -178,11 +227,18 @@ most valuable row in the last real review this workflow received.
 Then report the **ledger**, which is the whole point of this step:
 
 ```
+Reviewer: Codex | Opus (fallback — Codex <the runner's error, short>) | pasted: <who>
+
 | # | row (verbatim) | verdict | evidence |
 |---|---|---|---|
 
-CONFIRMED n · PLAN-DEFECT n · OUT-OF-SCOPE n · PRE-EXISTING n (n in rewritten subsystems) · WRONG n · OPEN n
+CONFIRMED n · PLAN-DEFECT n · OUT-OF-SCOPE n · PRE-EXISTING n (n in rewritten subsystems) · WRONG n · OPEN n · reviewer: Codex | Opus fallback | pasted
 ```
+
+The reviewer appears twice because the counts line travels alone, into the cycle's closing
+report and into chat, and an Opus review is not the cross-vendor read a Codex one is. It
+shares a model family with the agents that built the change, so a reader weighing "0
+CONFIRMED" needs to know which of the two said it.
 
 Every row the reviewer sent appears exactly once, quoted as they wrote it. Nothing is
 summarised away: a reader must be able to see what was asked and what became of it, which

@@ -13,21 +13,14 @@ No pytest dependency — the skill's scripts run with bare python3.
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import io
 import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-# Loaded by path rather than imported: a plain `import` here has to follow a
-# `sys.path` edit, which is the E402 the house linter refuses to have
-# silenced.
-_SPEC = importlib.util.spec_from_file_location(
-    "corpus_ab", Path(__file__).resolve().parent / "corpus_ab.py"
-)
-ab = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(ab)
+# A plain import: `python3 scripts/<suite>.py` puts scripts/ first on sys.path.
+import corpus_ab as ab
 
 MANIFEST_FIELD_SEP = "  "
 

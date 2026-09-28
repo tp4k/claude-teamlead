@@ -200,6 +200,7 @@ The **Turns on** column names the diagram node the option controls.
 | `securityReview` | `--security-review=<v>`, `--no-security-review` | `off` · `when-needed` · `on` | 9 security review | The security reviewer at the end. `when-needed` spawns it only for workstreams the planner tagged as attacker-reachable. |
 | `perfReview` | `--perf-review=<v>`, `--no-perf-review` | `off` · `when-needed` · `on` | 9 performance review | The performance reviewer. `when-needed` spawns it only for workstreams the planner tagged as on a hot path. |
 | `codexCodeReview` | `--codex-code-review` | `off` · `on` | 11 one-liner | Whether the closing report hands you the `/teamlead:codex-review` one-liner for the finished tree. |
+| `opusCodeReview` | `/teamlead:codex-review --opus-code-review=<v>` | `off` · `fallback` | codex-review 2b | When the Codex code review cannot run (no install, no login, a failure, a timeout), `teamlead:code-reviewer` reviews the same package instead. The ledger says which reviewer wrote it. |
 | `adr` | `--adr` | `off` · `on` | 11 ADR writer | Whether the run records its decisions as an ADR. Reading ADRs is always on and needs no setting. |
 
 `code-review` is never optional and has no setting — it is the one reviewer with
@@ -231,7 +232,7 @@ unfenced run cannot tell you which files a workstream will touch.
 
 ## What gets installed
 
-Six agents. Each pins its own model and tool set, so the coordinator passes none:
+Seven agents. Each pins its own model and tool set, so the coordinator passes none:
 
 | Agent | Model | Writes |
 | --- | --- | --- |
@@ -241,11 +242,12 @@ Six agents. Each pins its own model and tool set, so the coordinator passes none
 | `teamlead:implementer` | sonnet | the code, its commits, its own report |
 | `teamlead:verifier` | sonnet | `verifier-rN.md` |
 | `teamlead:writer` | sonnet | `plan-human.md`, the living plan sections, an ADR, the deferred-work rows |
+| `teamlead:code-reviewer` | opus | `opus-review-rN.md` — only when `/teamlead:codex-review` falls back because Codex could not run |
 
 The reviewers at step 9 are harness agent types (`code-review`,
 `performance-engineer`, `security-review`), chosen per run.
 
-And four hooks the plugin carries itself, so that no one has to hand-edit
+And five hooks the plugin carries itself, so that no one has to hand-edit
 `~/.claude/settings.json`:
 
 - **`PreToolUse` (allow)** pre-approves the report writes every teamlead agent
@@ -260,10 +262,14 @@ And four hooks the plugin carries itself, so that no one has to hand-edit
   no `config.json`, a promised plan review never started, no validation or relay
   before dispatch. It answers only for those roles on a real `$RUN`, so any other
   spawn is untouched. A Codex review that fails never blocks.
+- **`PreToolUse` (worktree)** pre-approves `/teamlead:cycle`'s one
+  `EnterWorktree` switch, into the linked worktree its handover file in
+  `$TEAMLEAD_HOME/tasks/` names, and only for the session that wrote it. Any
+  other switch, or any other session, gets no decision.
 - **`UserPromptSubmit`** names the session after the run. It never overwrites a
   title you chose yourself.
 
-Hooks are installed user-wide, so all four are written to stay silent outside a
+Hooks are installed user-wide, so all five are written to stay silent outside a
 teamlead run.
 
 ## Safety rails
@@ -360,6 +366,7 @@ and nothing reseeds them.
 | --- | --- |
 | `Agent type 'planner' not found` | The agent types are namespaced like the commands: `teamlead:planner`. The bare name is not registered. |
 | The plan design review never appears | Codex has no saved login, or is not on `PATH`. The run reports it and continues by design — set `CODEX_BIN`, or run `codex login`. Set `opusPlanReview=fallback` so the review happens anyway. |
+| `/teamlead:codex-review` stops with a Codex login or timeout error | Same cause, at the end of the cycle. Set `opusCodeReview=fallback` and an Opus review of the same package stands in; its ledger is labelled `reviewer: Opus fallback`. |
 | A specialist review is missing from the report | `when-needed` with the planner's tag at `no` deletes that review rather than shrinking it. The final report names every specialist that did not run, and the tag that decided it. |
 | Runs vanished from a path you had bookmarked | They live under `$TEAMLEAD_HOME`, and old ones are pruned at kickoff by `maxAgeDays` / `keepLastPerRepo`. |
 | Kickoff says `REFUSED: another copy of this plugin` | A second directory under `~/.claude/skills/` (usually a worktree of this repo) registers as a plugin with the same name, and a session may load either copy's skills. Move it out (`git worktree move`), load test branches with `claude --plugin-dir <path>`, then start a new session. |

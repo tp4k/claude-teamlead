@@ -44,11 +44,12 @@ class CorpusRefused(Exception):
 def load_module(name: str, path: Path) -> ModuleType:
     """Load `path` as a module named `name`, without touching `sys.path`.
 
-    The same in-process mechanism `test_run_codex_review.py:40-44` uses: a
-    plain `import` here would have to follow a `sys.path` edit, which is the
-    E402 the house linter refuses to have silenced.
+    The before/after packagers are arbitrary files, often two copies of one
+    module name, so a plain `import` cannot tell them apart.
     """
     spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise CorpusRefused(f"cannot load {path} as a Python module")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

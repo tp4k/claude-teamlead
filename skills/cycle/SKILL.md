@@ -1,8 +1,8 @@
 ---
 name: cycle
 description: 'One delivery cycle from one free-text task, in one session: a fresh worktree off origin/main, bootstrapped, the session moved into it and named after the work, then /teamlead:delegate with the plan reviewed by Codex before anything is built, then a full /teamlead:codex-review with its findings ledger. Four decision points, not zero. Use when the user says "cycle this", "full teamlead cycle", "fresh tree + teamlead", or hands over a task and wants the worktree, the run and the review packaged together.'
-user-invocable: true
-argument-hint: "<task description> [--slug NAME] [--base REF] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--with-human-readable-plan=off|generate|pause] [--adr] | --resume <slug>"
+metadata:
+  argument-hint: "<task description> [--slug NAME] [--base REF] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--with-human-readable-plan=off|generate|pause] [--adr] | --resume <slug>"
 allowed-tools: Bash(git worktree list), Bash(git rev-parse *), Bash(git show-ref *), Bash(git check-ignore *), Bash(git log *), Bash(git status *), Bash(git fetch *), EnterWorktree, AskUserQuestion
 ---
 
@@ -163,6 +163,7 @@ slug: <slug>
 repo: <abs repo>
 worktree: <abs worktree>
 branch: <branch>
+session: <`echo "$CLAUDE_CODE_SESSION_ID"` — this session's id>
 base: <base>@<sha>
 flags: <the user's own flags, plus --codex-plan-review=always --with-human-readable-plan=generate>
 bootstrap: <the command step 5 ran>
@@ -180,6 +181,13 @@ write it even though the normal path never reads it back.
 ```
 EnterWorktree({ path: "<worktree>" })
 ```
+
+The plugin's `allow-cycle-worktree.py` hook pre-approves this call because the task file from
+step 6 names the tree *and this session*, so write that file first and pass the same absolute
+path here. `$TEAMLEAD_HOME` is shared across sessions; the `session:` line is what keeps the
+grant from reaching any other one. The hook also wants the tree from step 3 to be under 30
+minutes old, so a slow bootstrap or a long wait on a card between steps 3 and 7 means the
+switch prompts. A missing or wrong id, or a late switch, costs only the prompt.
 
 One call, and the session's cwd, its write access and its workspace roots are all inside the
 worktree; the worktree's own `CLAUDE.md` and settings load with it. Report one line and
@@ -251,6 +259,11 @@ every finding into a verdict ledger where each row appears exactly once with the
 that settled it. Pass `--no-network` to review in the hard read-only sandbox instead —
 right when nothing in the change needs `gh`, a PR or a CI run to settle it.
 
+If Codex cannot run, the review stops there unless `opusCodeReview=fallback` is set in a
+config tier; then `teamlead:code-reviewer` reviews the same package on Opus (its step 2b)
+and the ledger says so. Do not pass `--opus-code-review` yourself — which reviewer stands
+in is the user's setting, not a cycle default.
+
 Its output is that ledger plus the counts line, then it asks which `CONFIRMED`,
 `PLAN-DEFECT` and `PRE-EXISTING-SUBSYSTEM-REWRITTEN` rows to act on, writes
 `<run>/review-followup.md`, and hands over `/teamlead:delegate <run>/review-followup.md`.
@@ -262,7 +275,8 @@ line as the result.
 ## 11. Closing report
 
 One message: worktree path, branch, base SHA, run directory, commit count, the plan design
-review's counts line, the `$RUN/plan-human.md` path, the code review ledger's counts line, the
+review's counts line, the `$RUN/plan-human.md` path, the code review ledger's counts line (its `reviewer:` field
+included — an Opus fallback reads differently from a Codex review), the
 `review-followup.md` path, the `/teamlead:delegate <path>` one-liner, and the deferred-work rows
 added if any.
 

@@ -172,6 +172,24 @@ def case_two_handovers_for_one_tree_do_not_shadow(tmp: Path) -> None:
           enter(str(tree), session="sess-b"), home, allow=True)
 
 
+def case_only_a_newly_created_tree_is_granted(tmp: Path) -> None:
+    """A forged fresh handover must not reach an old, long-registered worktree."""
+    _, tree, home = cycle_fixture(tmp)
+    commondir = tmp / "repo" / ".git" / "worktrees" / tree.name / "commondir"
+    task = home / "tasks" / "slug.md"
+    now = time.time()
+    os.utime(commondir, (now - 3600, now - 3600))
+    check("a worktree created before the freshness window is not granted",
+          enter(str(tree)), home, allow=False)
+    os.utime(commondir, (now - 60, now - 60))
+    os.utime(task, (now - 120, now - 120))
+    check("a handover written before its tree existed is not granted",
+          enter(str(tree)), home, allow=False)
+    os.utime(task, (now - 30, now - 30))
+    check("a handover written after a fresh tree is granted", enter(str(tree)),
+          home, allow=True)
+
+
 CASES = [
     case_the_handed_over_tree_is_allowed,
     case_everything_else_gets_no_decision,
@@ -180,6 +198,7 @@ CASES = [
     case_extra_inputs_get_no_decision,
     case_the_grant_belongs_to_the_session_that_wrote_it,
     case_two_handovers_for_one_tree_do_not_shadow,
+    case_only_a_newly_created_tree_is_granted,
 ]
 
 

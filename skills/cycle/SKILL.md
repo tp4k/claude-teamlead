@@ -185,7 +185,9 @@ EnterWorktree({ path: "<worktree>" })
 The plugin's `allow-cycle-worktree.py` hook pre-approves this call because the task file from
 step 6 names the tree *and this session*, so write that file first and pass the same absolute
 path here. `$TEAMLEAD_HOME` is shared across sessions; the `session:` line is what keeps the
-grant from reaching any other one. A missing or wrong id costs only the prompt.
+grant from reaching any other one. The hook also wants the tree from step 3 to be under 30
+minutes old, so a slow bootstrap or a long wait on a card between steps 3 and 7 means the
+switch prompts. A missing or wrong id, or a late switch, costs only the prompt.
 
 One call, and the session's cwd, its write access and its workspace roots are all inside the
 worktree; the worktree's own `CLAUDE.md` and settings load with it. Report one line and

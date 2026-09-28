@@ -21,14 +21,20 @@ must be the `worktree:` line of a handover file in `$TEAMLEAD_HOME/tasks/` that:
   switch, and `--resume` starts in the tree without switching, so an older file
   has no legitimate switch left to grant;
 - names the branch the worktree is actually on, and the target is a linked
-  worktree (its `.git` is a file pointing at a gitdir with that `HEAD`).
+  worktree (its `.git` is a file pointing at a gitdir with that `HEAD`);
+- targets a worktree git created within `FRESH_SECONDS`, and was itself written
+  after that creation — the cycle makes the tree in step 3 and hands it over in
+  step 6, so an older tree was not made by this cycle.
 
-A primary checkout, an arbitrary directory, a stale handover, or a `{name}` call
-that creates a new tree gets no decision. The tasks directory is itself
-auto-writable (`allow-run-writes.py`), so a fresh file forged *by the session
-that then switches* is the residual risk; what it can buy that session is a
-switch into an already-registered worktree, which is the same thing the prompt
-would have offered it.
+A primary checkout, an arbitrary directory, an older worktree, a stale handover,
+or a `{name}` call that creates a new tree gets no decision.
+
+What no hook can close: the tasks directory is auto-writable
+(`allow-run-writes.py`), and a file the cycle writes and one the same model
+forges are the same Write from the same session. The last check bounds what a
+forgery buys to a switch into a worktree created in the last half hour, rather
+than any registered tree; closing it fully needs a human click somewhere, which
+is the prompt this hook exists to remove.
 
 Like its sibling it only ever *grants*: anything it does not recognise produces no
 output and falls through to the normal permission flow.
@@ -60,18 +66,32 @@ def resolved(p: str) -> Path | None:
         return None
 
 
-def branch_of(tree: Path) -> str | None:
-    """The branch a linked worktree has checked out, read without running git."""
+def linked_tree(tree: Path) -> tuple[str, float] | None:
+    """`(branch, created)` for a linked worktree, read without running git.
+
+    `created` is the mtime of the admin dir's `commondir`: `git worktree add`
+    writes it once and nothing afterwards touches it, where `HEAD` and `index`
+    move with every checkout.
+    """
     try:
-        gitdir = (tree / ".git").read_text().strip().removeprefix("gitdir:").strip()
-        head = (tree / gitdir / "HEAD").read_text().strip()
+        pointer = (tree / ".git").read_text().strip().removeprefix("gitdir:")
+        gitdir = tree / pointer.strip()
+        head = (gitdir / "HEAD").read_text().strip()
+        created = (gitdir / "commondir").stat().st_mtime
     except OSError:
         return None
-    return head.removeprefix("ref: refs/heads/") if head.startswith("ref: ") else None
+    if not head.startswith("ref: refs/heads/"):
+        return None
+    return head.removeprefix("ref: refs/heads/"), created
 
 
-def handed_over(tasks: Path, now: float) -> set[tuple[Path, str, str]]:
+def handed_over(tasks: Path, now: float,
+                since: float) -> set[tuple[Path, str, str]]:
     """`(worktree, branch, session)` for every fresh, complete cycle handover file.
+
+    Fresh means written within `FRESH_SECONDS` of `now` and not before `since`,
+    the target tree's creation: step 6 follows the tree step 3 made, so a file
+    that predates the tree was not written for it.
 
     A set, not a map keyed by worktree: two files naming one tree must not
     shadow each other, or which session gets the grant would depend on sort order.
@@ -79,7 +99,8 @@ def handed_over(tasks: Path, now: float) -> set[tuple[Path, str, str]]:
     found: set[tuple[Path, str, str]] = set()
     for f in sorted(tasks.glob("*.md")) if tasks.is_dir() else []:
         try:
-            if now - f.stat().st_mtime > FRESH_SECONDS:
+            written = f.stat().st_mtime
+            if now - written > FRESH_SECONDS or written < since:
                 continue
             head = f.read_text(errors="replace").partition("\n# Task")[0]
         except OSError:
@@ -112,13 +133,16 @@ def main() -> int:
     target = resolved(raw) if isinstance(raw, str) else None
     if not isinstance(session, str) or not session or target is None:
         return 0
-    branch = branch_of(target) if (target / ".git").is_file() else None
-    if branch is None:
+    linked = linked_tree(target) if (target / ".git").is_file() else None
+    now = time.time()
+    if linked is None or now - linked[1] > FRESH_SECONDS:
         return 0
+    branch, created = linked
     sys.path.insert(0, str(SCRIPTS))
     import paths
 
-    if (target, branch, session) not in handed_over(paths.tasks_dir(), time.time()):
+    grants = handed_over(paths.tasks_dir(), now, since=created)
+    if (target, branch, session) not in grants:
         return 0
     json.dump(
         {

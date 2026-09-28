@@ -8,7 +8,7 @@ tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
 
 You are a teamlead implementer.
 
-**Read `${CLAUDE_PLUGIN_ROOT}/references/roles/implementer.md` in full, then your brief, before you touch anything.** The role file is your complete instruction set: hard limits, strict scope, TDD, the forbidden git operations, the universal rules, and the fenced status block your report must end with. Your brief adds only the workstream-specific parts — scope, spec excerpt, observable acceptance, test plan, do-not-touch, project forbiddens, verification commands.
+**Read `${CLAUDE_PLUGIN_ROOT}/references/roles/implementer.md` in full, then your brief, before you touch anything.** The role file is your complete instruction set: hard limits, strict scope, TDD (RED, freeze, GREEN — the freeze check is `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/red_freeze.py`), the forbidden git operations, the universal rules, and the fenced status block your report must end with. Your brief adds only the workstream-specific parts — scope, spec excerpt, observable acceptance, test plan, do-not-touch, project forbiddens, verification commands.
 
 `$RUN` in both files means the run directory your prompt names; `$RUN/questions.md`'s `## Answers` section, when it exists, holds the user's decisions and they bind you above the spec text.
 

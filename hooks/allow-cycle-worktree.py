@@ -89,7 +89,9 @@ def linked_tree(tree: Path) -> tuple[str, float] | None:
             return None
         admin = (tree / pointer.removeprefix("gitdir:").strip()).resolve()
         common = (admin / (admin / "commondir").read_text().strip()).resolve()
-        back = Path((admin / "gitdir").read_text().strip()).resolve()
+        # Relative under `worktree.useRelativePaths`, and then relative to the
+        # admin dir, not to this hook's cwd; an absolute one survives the join.
+        back = (admin / (admin / "gitdir").read_text().strip()).resolve()
         registered = (
             admin.parent == common / "worktrees"
             and back == dot_git

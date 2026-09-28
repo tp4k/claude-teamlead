@@ -220,6 +220,20 @@ def case_fabricated_git_files_are_not_a_worktree(tmp: Path) -> None:
           enter(str(tree)), home, allow=True)
 
 
+def case_a_relative_path_worktree_is_granted(tmp: Path) -> None:
+    """The PR #5 review: `worktree.useRelativePaths` writes both links relative."""
+    repo, _, home = cycle_fixture(tmp)
+    rel = tmp / "repo-rel"
+    git("-C", str(repo), "-c", "worktree.useRelativePaths=true", "worktree", "add",
+        "-q", "-b", "feat/rel", str(rel))
+    (home / "tasks" / "rel.md").write_text(
+        f"slug: rel\nrepo: {repo}\nworktree: {rel}\nbranch: feat/rel\n"
+        f"session: {SESSION}\n\n# Task\nx\n"
+    )
+    check("a worktree made with relative links is granted", enter(str(rel)), home,
+          allow=True)
+
+
 CASES = [
     case_the_handed_over_tree_is_allowed,
     case_everything_else_gets_no_decision,
@@ -230,6 +244,7 @@ CASES = [
     case_two_handovers_for_one_tree_do_not_shadow,
     case_only_a_newly_created_tree_is_granted,
     case_fabricated_git_files_are_not_a_worktree,
+    case_a_relative_path_worktree_is_granted,
 ]
 
 

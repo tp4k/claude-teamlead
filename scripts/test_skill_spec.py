@@ -25,9 +25,37 @@ ALLOWED = {"name", "description", "license", "allowed-tools", "metadata",
 results: list[tuple[str, bool, str]] = []
 
 
-NON_STRING_WORDS = {"true", "false", "yes", "no", "on", "off", "null", "~"}
-NUMBER = re.compile(r"[-+]?(\d[\d_]*(\.\d*)?|\.\d+)([eE][-+]?\d+)?|0x[0-9a-fA-F]+"
-                    r"|[-+]?\.(inf|Inf|INF)|\.(nan|NaN|NAN)")
+# PyYAML 6.0.2's implicit resolvers (`yaml.resolver.Resolver`), copied verbatim
+# in re.X form: a plain scalar matching any of these loads as that type, not as
+# a string. Copied rather than approximated because the approximation missed
+# timestamps (PR #5 review); `scripts/` runs on bare python3, so no import.
+YAML_IMPLICIT = {
+    "bool": r"""^(?:yes|Yes|YES|no|No|NO
+                    |true|True|TRUE|false|False|FALSE
+                    |on|On|ON|off|Off|OFF)$""",
+    "null": r"""^(?: ~
+                    |null|Null|NULL
+                    | )$""",
+    "float": r"""^(?:[-+]?(?:[0-9][0-9_]*)\.[0-9_]*(?:[eE][-+][0-9]+)?
+                    |\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?
+                    |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*
+                    |[-+]?\.(?:inf|Inf|INF)
+                    |\.(?:nan|NaN|NAN))$""",
+    "int": r"""^(?:[-+]?0b[0-1_]+
+                    |[-+]?0[0-7_]+
+                    |[-+]?(?:0|[1-9][0-9_]*)
+                    |[-+]?0x[0-9a-fA-F_]+
+                    |[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$""",
+    "timestamp": r"""^(?:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]
+                    |[0-9][0-9][0-9][0-9] -[0-9][0-9]? -[0-9][0-9]?
+                     (?:[Tt]|[ \t]+)[0-9][0-9]?
+                     :[0-9][0-9] :[0-9][0-9] (?:\.[0-9]*)?
+                     (?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?)$""",
+    "merge": r"^(?:<<)$",
+    "value": r"^(?:=)$",
+    "yaml": r"^(?:!|&|\*)$",
+}
+NON_STRING = [re.compile(p, re.X) for p in YAML_IMPLICIT.values()]
 
 
 def frontmatter(text: str) -> tuple[dict[str, str], dict[str, str]]:
@@ -56,16 +84,20 @@ def is_yaml_string(raw: str) -> bool:
     """Would YAML load this plain scalar as a non-empty string?
 
     Quoted is always a string. Unquoted, YAML 1.1 (what PyYAML, and so most
-    validators, speak) turns empty into null, `true`/`yes`/`on` and friends into
-    booleans, digits into numbers, and `[`/`{` into collections.
+    validators, speak) resolves it by `NON_STRING` — null, bool, int, float,
+    timestamp and the rest — and a leading indicator makes it a collection,
+    alias, tag or block scalar instead. A `: ` inside, a trailing `:`, or a
+    leading `- `/`? ` is not a value at all: the frontmatter stops parsing.
     """
     if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
         return len(raw) > 2
     return (
         bool(raw)
-        and raw.lower() not in NON_STRING_WORDS
-        and not NUMBER.fullmatch(raw)
-        and raw[0] not in "[{&*!|>"
+        and not any(rx.match(raw) for rx in NON_STRING)
+        and raw[0] not in "[{&*!|>%@`"
+        and ": " not in raw
+        and not raw.endswith(":")
+        and not raw.startswith(("- ", "? "))
     )
 
 
@@ -96,9 +128,12 @@ def check_skill(skill_md: Path) -> None:
 
 def check_the_string_check() -> None:
     """`is_yaml_string` must be able to fail, or the metadata row proves nothing."""
-    for raw in ('"a b"', "'1'", "<issue> [--flag]", "plain words"):
+    for raw in ('"a b"', "'1'", "<issue> [--flag]", "plain words", '"2020-01-01"',
+                "YeS", "0o17", "v1.2.3", "2020-01"):
         results.append((f"string check accepts {raw!r}", is_yaml_string(raw), raw))
-    for raw in ("", '""', "1", "3.5", "true", "Yes", "null", "~", "[a]", "{a: 1}"):
+    for raw in ("", '""', "1", "3.5", "true", "Yes", "null", "~", "[a]", "{a: 1}",
+                "2020-01-01", "2001-12-14t21:59:43.10-05:00", "1:30", "0b101",
+                "1_000", ".inf", "<<", "="):
         results.append((f"string check rejects {raw!r}", not is_yaml_string(raw),
                         raw))
 

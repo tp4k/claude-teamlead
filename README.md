@@ -157,6 +157,37 @@ files under one of the session's workspace roots — cwd alone does not do it �
 coordinator still rooted in the primary checkout hands every subagent a workspace
 the worktree is not inside.
 
+### How tests get written
+
+One implementer writes both the tests and the code, so the discipline is a
+boundary rather than a second agent:
+
+1. **The planner names behaviour, not tests.** Each `new:` test-plan line is an
+   observable obligation — "the 3rd request inside the window gets 429" — never
+   a code step like "calls `INCR`". Assertions, fixtures and mocks are the
+   implementer's.
+2. **RED.** The implementer writes the smallest test set that tells the right
+   code from a plausible wrong one, names that wrong implementation per test,
+   picks inputs that only the clause under test can refuse, and confirms each
+   test fails *on an assertion* — an import or fixture error is broken setup,
+   not RED. Roughly 0–5 new tests per workstream; coverage is never the reason
+   for one.
+3. **Freeze.** The tests go in one commit, alone. From there to `done`, every
+   line that commit added is frozen: `scripts/red_freeze.py` reports any that no
+   longer exist as written, and with `--run` re-runs the RED commit so the
+   report quotes what RED failed on, not a later probe. Adding tests is fine —
+   each needs the wrong implementation it rejects and why the others miss it.
+4. **GREEN**, then a **self-probe**: for each criterion, break the code the way
+   the RED test claimed to catch and check that it does. A survivor gets a new
+   test; the frozen one stays.
+5. **Independent checks stay independent.** The verifier re-runs the commands and
+   nothing else. The code reviewer re-runs `red_freeze.py`, probes two or three
+   criteria itself, and files a test gap only with all three parts: the wrong
+   implementation, the test that would still pass it, and the missing assertion.
+
+Changes with no behaviour to watch — docs, formatting, a pure rename — report
+`tdd: NOT_APPLICABLE` with the reason instead.
+
 ## Where it stops for you
 
 Four times in a full cycle, and you can see all four in the diagram above:
@@ -283,6 +314,8 @@ teamlead run.
   and deleting commits.
 - **The author is never the witness.** A verifier that did not write the code
   re-runs the tests; reviewers spawn only on a verified PASS.
+- **Tests are frozen before the code exists.** The RED commit's lines must survive
+  GREEN as written; the reviewer checks it with `scripts/red_freeze.py`.
 - **The plan never becomes a repo file.** A run leaves no untracked plan behind;
   the only repo files it may create are an ADR and `docs/deferred-work.md`.
 

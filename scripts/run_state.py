@@ -442,7 +442,7 @@ def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
     if gap:
         return gap
     if not (r.run / "plan-validation.md").exists():
-        return (4, "plan unvalidated", "spawn the opus PLAN VALIDATOR (brief V)", False)
+        return (4, "plan unvalidated", "spawn the PLAN VALIDATOR (brief V)", False)
     pv = verdict(r.run / "plan-validation.md")
     if pv == "PLAN_NEEDS_FIX" and "## Fix log" not in r.text("plan.md"):
         return (5, "plan needs fixing", "spawn a fresh opus planner in Fix mode "

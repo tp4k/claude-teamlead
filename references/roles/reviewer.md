@@ -144,7 +144,7 @@ A rework round is not a fresh change — most of the diff has already been revie
 - Re-check **only** the rows you raised last round and the lines the rework changed. Get those lines from `git show` of the rework commits named in your prompt — those hashes and nothing older; the round-1 diff was reviewed by round 1.
 - Do **not** reopen round-1 Notes. They were not gates then and they are not gates now.
 - **Test-only rework: read the diff's `-` lines first.** A removed assertion is a regression until proven subsumed by a stronger one. That read *replaces* mutation probes: there is no production line to mutate.
-- Verification commands once, then stop. A re-review should be the shortest agent in the round; if you are past ten tool calls, you are re-reviewing round 1.
+- Do not re-run the suite; the verifier's PASS is your evidence. A re-review should be the shortest agent in the round; if you are past ten tool calls, you are re-reviewing round 1.
 
 ## Output
 

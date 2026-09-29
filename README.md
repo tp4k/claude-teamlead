@@ -269,7 +269,7 @@ Seven agents. Each pins its own model and tool set, so the coordinator passes no
 | --- | --- | --- |
 | `teamlead:planner` | opus | `plan.md`, the round-1 briefs, `questions.md` |
 | `teamlead:plan-reviewer` | opus | `plan-design-review.md` |
-| `teamlead:plan-validator` | opus | `plan-validation.md` |
+| `teamlead:plan-validator` | sonnet | `plan-validation.md` |
 | `teamlead:implementer` | sonnet | the code, its commits, its own report |
 | `teamlead:verifier` | sonnet | `verifier-rN.md` |
 | `teamlead:writer` | sonnet | `plan-human.md`, the living plan sections, an ADR, the deferred-work rows |

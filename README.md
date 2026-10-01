@@ -291,8 +291,9 @@ And five hooks the plugin carries itself, so that no one has to hand-edit
 - **`PreToolUse` (step gate)** refuses a `teamlead:` planner, plan validator or
   implementer spawn while the run directory shows an earlier step still owed —
   no `config.json`, a promised plan review never started, a human-readable plan
-  not yet written, an unanswered relay before the validator (it runs at 6c, after
-  the user has answered), no validation or unanswered scope card before dispatch.
+  not yet written, an unanswered relay or an unrun design Fix round before the
+  validator (it runs at 6c, on the plan the user's answers produced), no
+  validation or unanswered scope card before dispatch.
   It reads the same step order as `run_state.py`, so a resume and the gate never
   disagree. It answers only for those roles on a real `$RUN`, so any other spawn
   is untouched. A Codex review that fails never blocks, and `--autopilot` skips

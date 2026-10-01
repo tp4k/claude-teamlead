@@ -165,6 +165,49 @@ def case_reported_validator_before_human_plan(tmp: Path) -> None:
            "6c", "VALIDATOR", 0)
 
 
+def case_design_fold_before_validation(tmp: Path) -> None:
+    """Step 6b: a CONFIRMED design row is always folded, and an answer other than
+    an accepted recommendation changes the plan. The validator grades the plan
+    after that round, so until `## Fix log` exists it is not the next step."""
+    none_asked = "# Open questions\n\nNo open questions.\n"
+    picked = QUESTIONS + "\n## Answers\n1. no — keep rounding half-even\n"
+    rows: list[tuple[str, dict[str, str | None], str, str, int]] = [
+        ("CONFIRMED rows, nothing asked, no Fix log → 6b Fix round",
+         {"questions.md": none_asked, "plan-triage.md": "CONFIRMED 2 · WRONG 0 · "
+          "SETTLED 0 · OPEN 0\n"}, "6b", "2 CONFIRMED design row(s)", 0),
+        ("an accepted recommendation folds nothing → 6c validator",
+         {"questions.md": ANSWERED}, "6c", "VALIDATOR", 0),
+        ("a non-recommended answer, no Fix log → 6b Fix round",
+         {"questions.md": picked}, "6b", "keep rounding half-even", 0),
+        ("CONFIRMED rows with a Fix log → 6c validator",
+         {"questions.md": none_asked, "plan.md": PLAN + "\n## Fix log\nx → y\n"
+          "PLAN_FIXED fixed=1 new_paths=no\n",
+          "plan-triage.md": "CONFIRMED 1 · WRONG 0 · SETTLED 0 · OPEN 0\n"},
+         "6c", "VALIDATOR", 0),
+    ]
+    for i, (name, files, step, needle, code) in enumerate(rows):
+        run = mkrun(tmp / str(i), {"task.md": TASK, "plan.md": PLAN, **files})
+        expect(name, run, step, needle, code)
+
+
+def case_autopilot_skips_user_stops_on_resume(tmp: Path) -> None:
+    """`--autopilot` skips the relay and the scope card. The spawn gate reads
+    plan_next, so a resume that still parked on them would tell the coordinator
+    to ask what the gate lets it skip."""
+    auto = json.loads(config())
+    auto["autopilot"] = True
+    expect("autopilot: unanswered relay → on to the validator",
+           mkrun(tmp / "a", {"config.json": json.dumps(auto), "task.md": TASK,
+                             "plan.md": PLAN, "questions.md": QUESTIONS}),
+           "6c", "VALIDATOR", 0)
+    expect("autopilot: unanswered scope cut → dispatch",
+           mkrun(tmp / "b", {"config.json": json.dumps(auto), "task.md": TASK,
+                             "plan.md": PLAN, "questions.md": ANSWERED,
+                             "plan-validation.md": SCOPE_CUT,
+                             "briefs/impl-ws1-r1.md": BRIEF}),
+           "7", "FRESH sonnet implementer", 0)
+
+
 def case_needs_fix_without_fix_log(tmp: Path) -> None:
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": ANSWERED,
                       "plan-validation.md": NEEDS_FIX})
@@ -868,6 +911,8 @@ CASES = [
     case_questions_without_validation,
     case_answered_without_validation,
     case_reported_validator_before_human_plan,
+    case_design_fold_before_validation,
+    case_autopilot_skips_user_stops_on_resume,
     case_needs_fix_without_fix_log,
     case_fix_log_present_moves_on,
     case_scope_cut_gets_its_own_card,

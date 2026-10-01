@@ -423,6 +423,36 @@ def design_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     return None
 
 
+def autopilot(r: Run) -> bool:
+    """`--autopilot`: skip the stops that wait on the user (SKILL.md 6, 6d).
+
+    An explicit humanReadablePlan=pause is the one hold it keeps; nothing this
+    script models is that hold, so every user stop here is skippable.
+    """
+    return paths.read_json(r.run / "config.json").get("autopilot") is True
+
+
+def fold_owed(r: Run, q: str) -> str:
+    """Why step 6b's planner Fix round is owed and has not run, else "".
+
+    Only what the skill makes certain counts, since a gate that guesses blocks
+    real runs: any CONFIRMED design row is always folded, and so is an answer
+    other than an accepted recommendation — the one answer that may restate the
+    plan and need no round. Every Fix round appends `## Fix log`, and before the
+    validator has run, none other can have.
+    """
+    if "## Fix log" in r.text("plan.md"):
+        return ""
+    counts = re.findall(r"CONFIRMED\s+(\d+)\s*·", r.text("plan-triage.md"))
+    confirmed = int(counts[-1]) if counts else 0
+    owed = [f"{confirmed} CONFIRMED design row(s)"] if confirmed else []
+    answers = q.partition("## Answers")[2]
+    owed += [ln.strip() for ln in answers.splitlines()
+             if re.match(r"(\d+\.|design:)\s", ln.strip())
+             and not ln.strip().lower().endswith("recommendation accepted")]
+    return "; ".join(owed)
+
+
 def pre_validation_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     """Steps 3 to 6: everything the plan validator has to come after.
 
@@ -461,11 +491,17 @@ def pre_validation_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     # sends the go line and continues in the same turn, so there is nothing to append.
     # Three of ten recorded runs look exactly like this, and reading them as "the user
     # has not replied yet" would park a resume on a decision point that never existed.
-    if "## Answers" not in q and "No open questions." not in q:
+    if "## Answers" not in q and "No open questions." not in q and not autopilot(r):
         return (6, "user relay outstanding", "send the ONE relay turn: plan summary "
                 "and the plan-triage counts as text, then ONE AskUserQuestion call — "
                 "one card per CONFIRMED design choice, then one per question in "
                 "questions.md, options labelled with their own words", True)
+    fold = fold_owed(r, q)
+    if fold:
+        return ("6b", "plan Fix round not run", "spawn a fresh opus planner in Fix "
+                f"mode (brief F) folding {fold}, then wait with --rewritten "
+                "$RUN/plan.md --expect $RUN/plan.md PLAN_FIXED — the validator "
+                "grades the plan after this round, not before it", False)
     return None
 
 
@@ -489,7 +525,7 @@ def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
     q = r.text("questions.md")
     cut = scope_cut(r)
     chosen = next((ln for ln in q.splitlines() if ln.startswith("scope:")), "")
-    if cut and not chosen:
+    if cut and not chosen and not autopilot(r):
         return ("6d", "scope cut unanswered", f"ask the scope selection ({cut}) "
                 "on ONE AskUserQuestion card, one option per A)/B)/C) line, and "
                 "append its `scope:` line to questions.md's ## Answers", True)
@@ -509,9 +545,6 @@ def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
 # the run directory before they start. Reviewers, verifiers and writers are
 # spawned at many points and prove nothing about what came before them.
 GATED_ROLES = ("planner", "plan-validator", "implementer")
-# The user-facing turns `--autopilot` skips (SKILL.md 6, 6d). An explicit
-# humanReadablePlan=pause is the one hold it keeps, and no label here is that.
-AUTOPILOT_SKIPS = ("user relay outstanding", "scope cut unanswered")
 
 
 def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
@@ -520,10 +553,10 @@ def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     The same reading of the run directory as plan_next, cut at the point each
     role belongs to: a planner needs the options resolved, a plan validator
     everything up to its own step 6c — the design reviews config.json promised
-    and the relay — and an implementer the whole pre-dispatch half. A Fix-mode
-    planner passes too, since it comes after everything a planner needs.
-    Autopilot skips the turns that wait on the user — the relay and the scope
-    card — so a spawn is allowed past those there, and nothing else.
+    the relay and the design Fix round — and an implementer the whole
+    pre-dispatch half. A Fix-mode planner passes too, since it comes after
+    everything a planner needs. Autopilot is applied inside plan_next, so a
+    resume and this gate skip the same stops.
     """
     if role not in GATED_ROLES:
         return None
@@ -532,11 +565,7 @@ def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     gap = cycle_gap(r)
     if gap or role == "planner":
         return gap
-    state = pre_validation_gap(r) if role == "plan-validator" else plan_next(r)
-    if state and state[1] in AUTOPILOT_SKIPS \
-            and paths.read_json(r.run / "config.json").get("autopilot") is True:
-        return None
-    return state
+    return pre_validation_gap(r) if role == "plan-validator" else plan_next(r)
 
 
 def main(argv: list[str]) -> int:

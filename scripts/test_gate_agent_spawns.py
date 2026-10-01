@@ -197,6 +197,14 @@ def case_validator_owes_the_relay(tmp: Path) -> None:
                 spawn("teamlead:plan-validator", run), "step 6", "relay")
 
 
+def case_validator_owes_the_design_fold(tmp: Path) -> None:
+    """Step 6b: CONFIRMED rows are folded before the validator grades the plan."""
+    run = mkrun(tmp, UNVALIDATED | {
+        "plan-triage.md": "CONFIRMED 1 · WRONG 0 · SETTLED 0 · OPEN 0\n"})
+    expect_deny("validator refused until the design Fix round ran",
+                spawn("teamlead:plan-validator", run), "step 6b", "Fix mode")
+
+
 def case_validator_after_relay_allowed(tmp: Path) -> None:
     run = mkrun(tmp, UNVALIDATED)
     expect_silent("a validator after the relay is allowed",

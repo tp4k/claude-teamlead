@@ -413,8 +413,9 @@ def design_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
                 False)
     if human in ("generate", "pause") and not (r.run / "plan-human.md").exists():
         return (4, "human-readable plan missing", f"humanReadablePlan={human}: "
-                "spawn teamlead:writer for $RUN/plan-human.md (brief H) — step 4a",
-                False)
+                "spawn teamlead:writer for $RUN/plan-human.md (brief H) — step 4a. "
+                "If that writer is already running, do not spawn another: wait "
+                "with wait_for.py $RUN/plan-human.md", False)
     if (answered or opus_file.exists()) and not (r.run / "plan-triage.md").exists():
         return (5, "plan triage not written", "you write $RUN/plan-triage.md: "
                 "every row of every returned design review, verbatim, with its "
@@ -422,8 +423,17 @@ def design_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     return None
 
 
-def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
-    """The pre-dispatch half of the loop: steps 3 to 6a."""
+def pre_validation_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
+    """Steps 3 to 6: everything the plan validator has to come after.
+
+    The validator runs at 6c, after the relay and any Fix round it triggers,
+    because its word has to be on the plan that will be built: every claim a Fix
+    round rewrites is a claim nobody has checked. This half used to end at the
+    design reviews and put the validator straight after them, at "step 4" —
+    the order the skill had before the plan design review existed — so a resume
+    or a spawn gate read off it sent the coordinator to validate a plan the
+    user had not seen yet.
+    """
     if not (r.run / "task.md").exists():
         return (3, "kickoff incomplete", "write $RUN/task.md: the task verbatim, flags "
                 "stripped, plus its `flags:` line", False)
@@ -447,34 +457,49 @@ def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
     gap = design_gap(r)
     if gap:
         return gap
-    if not (r.run / "plan-validation.md").exists():
-        return (4, "plan unvalidated", "spawn the PLAN VALIDATOR (brief V)", False)
-    pv = verdict(r.run / "plan-validation.md")
-    if pv == "PLAN_NEEDS_FIX" and "## Fix log" not in r.text("plan.md"):
-        return (5, "plan needs fixing", "spawn a fresh opus planner in Fix mode "
-                "(brief F), then wait with --rewritten $RUN/plan.md "
-                "--expect $RUN/plan.md PLAN_FIXED", False)
-    cut = scope_cut(r)
     # A relay with nothing in it to answer often leaves no `## Answers` behind: step 6
     # sends the go line and continues in the same turn, so there is nothing to append.
     # Three of ten recorded runs look exactly like this, and reading them as "the user
     # has not replied yet" would park a resume on a decision point that never existed.
-    # A scope cut is a real decision, so it still holds even with no questions.
-    nothing_asked = "No open questions." in q and not cut
-    if "## Answers" not in q and not nothing_asked:
-        scope = f"the scope selection ({cut}) FIRST, " if cut else ""
+    if "## Answers" not in q and "No open questions." not in q:
         return (6, "user relay outstanding", "send the ONE relay turn: plan summary "
-                "and validator verdict as text, then ONE AskUserQuestion call — "
-                f"{scope}then one card per question in questions.md, options "
-                "labelled with their own words", True)
+                "and the plan-triage counts as text, then ONE AskUserQuestion call — "
+                "one card per CONFIRMED design choice, then one per question in "
+                "questions.md, options labelled with their own words", True)
+    return None
+
+
+def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
+    """The pre-dispatch half of the loop: steps 3 to 6d."""
+    gap = pre_validation_gap(r)
+    if gap:
+        return gap
+    if not (r.run / "plan-validation.md").exists():
+        return ("6c", "plan unvalidated", "fold any answer that changes the plan "
+                "into ONE planner Fix round first (step 6b, brief F), then spawn "
+                "the PLAN VALIDATOR (brief V)", False)
+    pv = verdict(r.run / "plan-validation.md")
+    if pv == "PLAN_NEEDS_FIX" and "## Fix log" not in r.text("plan.md"):
+        return ("6c", "plan needs fixing", "spawn a fresh opus planner in Fix mode "
+                "(brief F), then wait with --rewritten $RUN/plan.md "
+                "--expect $RUN/plan.md PLAN_FIXED", False)
+    # The validator's `Smaller:` cut is only known now, after the relay, so it is
+    # asked on its own card at the hold gate — and a cut is a real decision, so
+    # it holds even on a run that had no questions.
+    q = r.text("questions.md")
+    cut = scope_cut(r)
+    chosen = next((ln for ln in q.splitlines() if ln.startswith("scope:")), "")
+    if cut and not chosen:
+        return ("6d", "scope cut unanswered", f"ask the scope selection ({cut}) "
+                "on ONE AskUserQuestion card, one option per A)/B)/C) line, and "
+                "append its `scope:` line to questions.md's ## Answers", True)
     # A cut the user accepted and nobody applied is the exact failure the selection
     # exists to prevent, and it is derivable: Fix mode logs `scope: chose …` into
     # plan.md, so an accepted letter with no such line means the round never ran.
-    chosen = next((ln for ln in q.splitlines() if ln.startswith("scope:")), "")
     if chosen and not chosen[7:].lstrip().startswith("A") \
             and "scope: chose" not in r.text("plan.md"):
-        return (6, "accepted scope cut not applied", "spawn a fresh opus planner in "
-                f"Fix mode (brief F) with `Scope decision: {chosen[7:].strip()}`, "
+        return ("6d", "accepted scope cut not applied", "spawn a fresh opus planner "
+                f"in Fix mode (brief F) with `Scope decision: {chosen[7:].strip()}`, "
                 "then wait with --rewritten $RUN/plan.md "
                 "--expect $RUN/plan.md PLAN_FIXED", False)
     return None
@@ -484,17 +509,21 @@ def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
 # the run directory before they start. Reviewers, verifiers and writers are
 # spawned at many points and prove nothing about what came before them.
 GATED_ROLES = ("planner", "plan-validator", "implementer")
+# The user-facing turns `--autopilot` skips (SKILL.md 6, 6d). An explicit
+# humanReadablePlan=pause is the one hold it keeps, and no label here is that.
+AUTOPILOT_SKIPS = ("user relay outstanding", "scope cut unanswered")
 
 
 def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     """What the run still owes before `role` may be spawned, or None.
 
     The same reading of the run directory as plan_next, cut at the point each
-    role belongs to: a planner needs the options resolved, a plan validator also
-    needs the design reviews config.json promised, and an implementer needs the
-    whole pre-dispatch half done. A Fix-mode planner passes too, since it comes
-    after everything a planner needs. Autopilot skips the relay turn, so an
-    implementer is allowed past an unanswered one there — nothing else.
+    role belongs to: a planner needs the options resolved, a plan validator
+    everything up to its own step 6c — the design reviews config.json promised
+    and the relay — and an implementer the whole pre-dispatch half. A Fix-mode
+    planner passes too, since it comes after everything a planner needs.
+    Autopilot skips the turns that wait on the user — the relay and the scope
+    card — so a spawn is allowed past those there, and nothing else.
     """
     if role not in GATED_ROLES:
         return None
@@ -503,14 +532,8 @@ def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     gap = cycle_gap(r)
     if gap or role == "planner":
         return gap
-    if role == "plan-validator":
-        # questions.md is written last: without it the plan is unfinished, and
-        # plan_next names the planner spawn that is owed instead.
-        if not (r.run / "questions.md").exists():
-            return plan_next(r)
-        return design_gap(r)
-    state = plan_next(r)
-    if state and state[1] == "user relay outstanding" \
+    state = pre_validation_gap(r) if role == "plan-validator" else plan_next(r)
+    if state and state[1] in AUTOPILOT_SKIPS \
             and paths.read_json(r.run / "config.json").get("autopilot") is True:
         return None
     return state

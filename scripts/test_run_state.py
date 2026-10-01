@@ -137,25 +137,49 @@ def case_plan_without_questions(tmp: Path) -> None:
 
 
 def case_questions_without_validation(tmp: Path) -> None:
+    """The validator runs at 6c, after the relay — its word has to be on the plan
+    the user's answers may still change, not on the draft they were asked about."""
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS})
-    expect("plan complete, unvalidated → step 4, spawn the validator", run,
-           "4", "VALIDATOR", 0)
+    expect("plan complete, questions unanswered → step 6, the relay, not the "
+           "validator", run, "6", "relay", 1)
+
+
+def case_answered_without_validation(tmp: Path) -> None:
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": ANSWERED})
+    expect("answers in, unvalidated → step 6c, spawn the validator", run,
+           "6c", "VALIDATOR", 0)
+
+
+def case_reported_validator_before_human_plan(tmp: Path) -> None:
+    """The run that hit the spawn gate: pause, no questions, plan-human.md landed.
+    Its next step is the validator at 6c — the old order called it step 4 and
+    sent the coordinator there before the human-readable plan existed."""
+    files: dict[str, str | None] = {
+             "config.json": config(humanReadablePlan="pause"), "task.md": TASK,
+             "plan.md": PLAN,
+             "questions.md": "# Open questions\n\nNo open questions.\n"}
+    expect("pause and no plan-human.md → step 4, writer — or wait if running",
+           mkrun(tmp / "a", files), "4", "already running", 0)
+    expect("pause, plan-human.md written, nothing to ask → step 6c, validator",
+           mkrun(tmp / "b", files | {"plan-human.md": "# The plan\n"}),
+           "6c", "VALIDATOR", 0)
 
 
 def case_needs_fix_without_fix_log(tmp: Path) -> None:
-    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": ANSWERED,
                       "plan-validation.md": NEEDS_FIX})
-    expect("PLAN_NEEDS_FIX and no Fix log → step 5, Fix mode", run,
-           "5", "Fix mode", 0)
+    expect("PLAN_NEEDS_FIX and no Fix log → step 6c, Fix mode", run,
+           "6c", "Fix mode", 0)
 
 
 def case_fix_log_present_moves_on(tmp: Path) -> None:
     """A `## Fix log` in plan.md is what distinguishes "needs fixing" from "was
     fixed"; without it the resume would loop on a fix that already happened."""
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN + "\n## Fix log\nclaim → fix\n",
-                      "questions.md": QUESTIONS, "plan-validation.md": NEEDS_FIX})
-    expect("PLAN_NEEDS_FIX with a Fix log → step 6, the relay", run,
-           "6", "relay", 1)
+                      "questions.md": ANSWERED, "plan-validation.md": NEEDS_FIX,
+                      "briefs/impl-ws1-r1.md": BRIEF})
+    expect("PLAN_NEEDS_FIX with a Fix log → step 7, dispatch", run,
+           "7", "FRESH sonnet implementer", 0)
 
 
 SCOPE_CUT = ("# Plan validation\n\nVerdict: PLAN_VALID\n\n## Smaller / none\n\n"
@@ -166,14 +190,15 @@ SCOPE_CUT = ("# Plan validation\n\nVerdict: PLAN_VALID\n\n## Smaller / none\n\n"
              "Smaller: fold WS-2 into WS-1\n")
 
 
-def case_scope_cut_leads_the_relay(tmp: Path) -> None:
-    """A named cut has to arrive in the relay as something to answer. The paired
+def case_scope_cut_gets_its_own_card(tmp: Path) -> None:
+    """A named cut has to reach the user as something to answer — at the hold
+    gate, since the validator that names it now runs after the relay. The paired
     `Smaller: none` case below is what makes this row mean anything: identical
-    files, one word apart, and the relay text has to differ."""
-    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
-                      "plan-validation.md": SCOPE_CUT})
-    expect("a `Smaller:` cut leads the relay, named", run,
-           "6", "scope selection (fold WS-2 into WS-1) FIRST", 1)
+    files, one word apart, and only this one may stop."""
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": ANSWERED,
+                      "plan-validation.md": SCOPE_CUT, "briefs/impl-ws1-r1.md": BRIEF})
+    expect("a `Smaller:` cut is asked at 6d, named", run,
+           "6d", "scope selection (fold WS-2 into WS-1)", 1)
 
 
 def case_smaller_none_is_not_a_decision(tmp: Path) -> None:
@@ -181,12 +206,12 @@ def case_smaller_none_is_not_a_decision(tmp: Path) -> None:
     would make every run ask the user a question with one real option."""
     pv = SCOPE_CUT.replace("Smaller: fold WS-2 into WS-1",
                            "Smaller: none — already minimal, both streams are named")
-    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
-                      "plan-validation.md": pv})
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": ANSWERED,
+                      "plan-validation.md": pv, "briefs/impl-ws1-r1.md": BRIEF})
     r = state(run)
-    ok = (r.returncode == 1 and "step: 6" in r.stdout
+    ok = (r.returncode == 0 and "step: 7" in r.stdout
           and "scope selection" not in r.stdout)
-    check("`Smaller: none` adds nothing to the relay", ok,
+    check("`Smaller: none` asks nothing and dispatches", ok,
           f"exit={r.returncode} out={r.stdout.strip()!r}")
 
 
@@ -199,7 +224,7 @@ def case_accepted_cut_that_was_never_applied(tmp: Path) -> None:
                       "plan-validation.md": SCOPE_CUT,
                       "briefs/impl-ws1-r1.md": BRIEF, "briefs/impl-ws2-r1.md": BRIEF})
     expect("an accepted cut with no Fix-log entry routes to Fix mode, not dispatch",
-           run, "6", "Scope decision: B — fold WS-2 into WS-1", 0)
+           run, "6d", "Scope decision: B — fold WS-2 into WS-1", 0)
 
 
 def case_applied_cut_dispatches(tmp: Path) -> None:
@@ -242,7 +267,7 @@ def case_a_cut_holds_even_with_no_questions(tmp: Path) -> None:
                       "questions.md": "# Open questions\n\nNo open questions.\n",
                       "plan-validation.md": SCOPE_CUT, "briefs/impl-ws1-r1.md": BRIEF})
     expect("a scope cut still blocks a run with no questions", run,
-           "6", "scope selection (fold WS-2 into WS-1) FIRST", 1)
+           "6d", "scope selection (fold WS-2 into WS-1)", 1)
 
 
 def case_answers_then_no_report(tmp: Path) -> None:
@@ -647,8 +672,8 @@ def case_codex_hard_on_a_simple_plan(tmp: Path) -> None:
     """`hard` means complex=yes only; a simple plan owes no review."""
     run = mkrun(tmp, {"config.json": config(codexPlanReview="hard"),
                       "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS})
-    expect("codexPlanReview=hard, complex=no → straight to the validator", run,
-           "4", "VALIDATOR", 0)
+    expect("codexPlanReview=hard, complex=no → no review owed, on to the relay", run,
+           "6", "relay", 1)
 
 
 def case_codex_hard_on_a_complex_plan(tmp: Path) -> None:
@@ -677,8 +702,8 @@ def case_codex_failure_does_not_block(tmp: Path) -> None:
                       "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
                       "plan-review-package/PROMPT.md": "review this plan\n",
                       "plan-review-package/plan-review-attempts.log": ATTEMPT_FAILED})
-    expect("a started Codex review with no answer (opus off) → validator", run,
-           "4", "VALIDATOR", 0)
+    expect("a started Codex review with no answer (opus off) → on to the relay", run,
+           "6", "relay", 1)
 
 
 def case_codex_failed_fallback_owed(tmp: Path) -> None:
@@ -706,7 +731,7 @@ def case_triaged_review_moves_on(tmp: Path) -> None:
                       "plan-review-package/PROMPT.md": "review this plan\n",
                       "plan-review-package/plan-review-r1.md": "1. WS-1 too big\n",
                       "plan-triage.md": "CONFIRMED 0 · WRONG 1 · SETTLED 0 · OPEN 0\n"})
-    expect("reviewed and triaged → the validator", run, "4", "VALIDATOR", 0)
+    expect("reviewed and triaged → on to the relay", run, "6", "relay", 1)
 
 
 def case_opus_always_is_owed(tmp: Path) -> None:
@@ -841,9 +866,11 @@ CASES = [
     case_kickoff_without_task,
     case_plan_without_questions,
     case_questions_without_validation,
+    case_answered_without_validation,
+    case_reported_validator_before_human_plan,
     case_needs_fix_without_fix_log,
     case_fix_log_present_moves_on,
-    case_scope_cut_leads_the_relay,
+    case_scope_cut_gets_its_own_card,
     case_smaller_none_is_not_a_decision,
     case_accepted_cut_that_was_never_applied,
     case_applied_cut_dispatches,

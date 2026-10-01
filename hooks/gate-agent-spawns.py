@@ -12,8 +12,11 @@ So the same reading is applied at the three spawns that mark a step boundary:
 
   planner         needs config.json (step 3a), and a cycle's own options in it
   plan-validator  also needs the design reviews config.json promised (4a, 5)
-  implementer     needs everything before dispatch: validation, the relay
-                  turn (unless autopilot), an accepted scope cut applied
+                  and the relay turn (6) — it runs at 6c, on the final plan
+  implementer     needs everything before dispatch: validation, the scope
+                  card answered and an accepted cut applied (6d)
+
+Autopilot skips the relay and the scope card, for either role, and nothing else.
 
 A Codex review that failed never blocks anything — only *starting* it is owed,
 exactly as the skill says; see run_state.design_gap.

@@ -178,6 +178,59 @@ def case_autopilot_skips_relay(tmp: Path) -> None:
                   spawn("teamlead:implementer", run))
 
 
+UNVALIDATED = {k: v for k, v in REVIEWED.items() if k != "plan-validation.md"}
+SCOPE_CUT = VALID.replace("Smaller: none", "Smaller: fold WS-2 into WS-1")
+
+
+def case_validator_while_human_plan_is_written(tmp: Path) -> None:
+    """The reported deny: writer and validator spawned in one message. The deny
+    stands, but it must not send the coordinator to spawn a second writer."""
+    run = mkrun(tmp, UNVALIDATED | {"config.json": config(humanReadablePlan="pause")})
+    expect_deny("validator refused while plan-human.md is owed — wait, not respawn",
+                spawn("teamlead:plan-validator", run), "step 4", "already running")
+
+
+def case_validator_owes_the_relay(tmp: Path) -> None:
+    """The validator runs at 6c, so an unanswered relay comes before it."""
+    run = mkrun(tmp, UNVALIDATED | {"questions.md": QUESTIONS})
+    expect_deny("validator refused while the relay is outstanding",
+                spawn("teamlead:plan-validator", run), "step 6", "relay")
+
+
+def case_validator_owes_the_design_fold(tmp: Path) -> None:
+    """Step 6b: CONFIRMED rows are folded before the validator grades the plan."""
+    run = mkrun(tmp, UNVALIDATED | {
+        "plan-triage.md": "CONFIRMED 1 · WRONG 0 · SETTLED 0 · OPEN 0\n"})
+    expect_deny("validator refused until the design Fix round ran",
+                spawn("teamlead:plan-validator", run), "step 6b", "Fix mode")
+
+
+def case_validator_after_relay_allowed(tmp: Path) -> None:
+    run = mkrun(tmp, UNVALIDATED)
+    expect_silent("a validator after the relay is allowed",
+                  spawn("teamlead:plan-validator", run))
+
+
+def case_autopilot_validator_skips_relay(tmp: Path) -> None:
+    run = mkrun(tmp, UNVALIDATED | {"questions.md": QUESTIONS,
+                                    "config.json": config(autopilot=True)})
+    expect_silent("autopilot lets the validator past the relay turn",
+                  spawn("teamlead:plan-validator", run))
+
+
+def case_scope_card_owed(tmp: Path) -> None:
+    run = mkrun(tmp, REVIEWED | {"plan-validation.md": SCOPE_CUT})
+    expect_deny("an unanswered scope cut refuses the implementer at 6d",
+                spawn("teamlead:implementer", run), "step 6d", "fold WS-2")
+
+
+def case_autopilot_skips_scope_card(tmp: Path) -> None:
+    run = mkrun(tmp, REVIEWED | {"plan-validation.md": SCOPE_CUT,
+                                 "config.json": config(autopilot=True)})
+    expect_silent("autopilot skips the scope card too",
+                  spawn("teamlead:implementer", run))
+
+
 def case_planner_after_3a_allowed(tmp: Path) -> None:
     run = mkrun(tmp, {"task.md": TASK, "config.json": config()})
     expect_silent("a planner after step 3a is allowed", spawn("teamlead:planner", run))

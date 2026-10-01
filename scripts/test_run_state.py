@@ -93,6 +93,16 @@ def mkrun(tmp: Path, files: dict[str, str | None]) -> Path:
     return run
 
 
+def rewrite_after(later: Path, earlier: Path) -> None:
+    """Give `later` an mtime one second past `earlier`'s, as a later write would.
+
+    mkrun writes its files in dict order within the same instant, so any case
+    that turns on which file was written last says so explicitly.
+    """
+    t = earlier.stat().st_mtime_ns + 1_000_000_000
+    os.utime(later, ns=(t, t))
+
+
 def state(run: Path, home: Path | None = None) -> subprocess.CompletedProcess[str]:
     """Run run_state.py against `run`, with $TEAMLEAD_HOME pointed somewhere empty.
 
@@ -221,7 +231,26 @@ def case_fix_log_present_moves_on(tmp: Path) -> None:
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN + "\n## Fix log\nclaim → fix\n",
                       "questions.md": ANSWERED, "plan-validation.md": NEEDS_FIX,
                       "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(run / "plan.md", run / "plan-validation.md")
     expect("PLAN_NEEDS_FIX with a Fix log → step 7, dispatch", run,
+           "7", "FRESH sonnet implementer", 0)
+
+
+def case_design_fix_log_does_not_answer_the_validator(tmp: Path) -> None:
+    """The 6b design round writes `## Fix log` before the validator runs. A
+    PLAN_NEEDS_FIX after it is still owed its own round: only a plan rewritten
+    after the validation can have answered it — and once it is, the run moves on."""
+    plan = PLAN + "\n## Fix log\ndesign 1 → split WS-1\nPLAN_FIXED fixed=1\n"
+    files: dict[str, str | None] = {
+        "task.md": TASK, "plan.md": plan, "questions.md": ANSWERED,
+        "plan-triage.md": "CONFIRMED 1 · WRONG 0 · SETTLED 0 · OPEN 0\n",
+        "plan-validation.md": NEEDS_FIX, "briefs/impl-ws1-r1.md": BRIEF}
+    run = mkrun(tmp, files)
+    rewrite_after(run / "plan-validation.md", run / "plan.md")
+    expect("6b Fix log, then PLAN_NEEDS_FIX → step 6c, Fix mode", run,
+           "6c", "Fix mode", 0)
+    rewrite_after(run / "plan.md", run / "plan-validation.md")
+    expect("…and once plan.md is rewritten after it → step 7, dispatch", run,
            "7", "FRESH sonnet implementer", 0)
 
 
@@ -915,6 +944,7 @@ CASES = [
     case_autopilot_skips_user_stops_on_resume,
     case_needs_fix_without_fix_log,
     case_fix_log_present_moves_on,
+    case_design_fix_log_does_not_answer_the_validator,
     case_scope_cut_gets_its_own_card,
     case_smaller_none_is_not_a_decision,
     case_accepted_cut_that_was_never_applied,

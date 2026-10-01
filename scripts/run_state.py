@@ -453,6 +453,22 @@ def fold_owed(r: Run, q: str) -> str:
     return "; ".join(owed)
 
 
+def validator_fix_applied(r: Run) -> bool:
+    """Whether plan.md carries a Fix round for the validator's findings.
+
+    `## Fix log` alone cannot say so: the 6b design round writes one before the
+    validator runs, and a 6c round appends to the same section with the same
+    PLAN_FIXED line. What tells them apart is order — only a round that ran
+    after plan-validation.md was written can have answered it.
+    """
+    plan, pv = r.run / "plan.md", r.run / "plan-validation.md"
+    try:
+        newer = plan.stat().st_mtime_ns > pv.stat().st_mtime_ns
+    except OSError:
+        return False
+    return newer and "## Fix log" in r.text("plan.md")
+
+
 def pre_validation_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     """Steps 3 to 6: everything the plan validator has to come after.
 
@@ -515,7 +531,7 @@ def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
                 "into ONE planner Fix round first (step 6b, brief F), then spawn "
                 "the PLAN VALIDATOR (brief V)", False)
     pv = verdict(r.run / "plan-validation.md")
-    if pv == "PLAN_NEEDS_FIX" and "## Fix log" not in r.text("plan.md"):
+    if pv == "PLAN_NEEDS_FIX" and not validator_fix_applied(r):
         return ("6c", "plan needs fixing", "spawn a fresh opus planner in Fix mode "
                 "(brief F), then wait with --rewritten $RUN/plan.md "
                 "--expect $RUN/plan.md PLAN_FIXED", False)

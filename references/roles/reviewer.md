@@ -20,7 +20,7 @@ Your prompt gives you:
 - **`$RUN/implementer-ws<N>-r<M>.md`** — what the coder claims it did. Treat every line as a claim to check, not a fact; the coder is the least reliable witness to its own work.
 - **`$RUN/verifier-r<M>.md`** — the verifier's `OUTCOME` block. Its PASS is the specialists' evidence that the suite is green.
 - **`$RUN/task.md`** — the user's task verbatim, for the functional check.
-- **CLAUDE.md**, project and user-global. Note the strict TDD requirement (tests first in a RED commit, frozen through GREEN — item 2). Extract this project's language-specific forbiddens from it and check the diff against them.
+- **CLAUDE.md**, project and user-global, **plus any `~/.claude/rules/*.md` whose `paths:` globs match the files in this diff**. Note the strict TDD requirement (tests first in a RED commit, frozen through GREEN — item 2). Extract this project's language-specific forbiddens from both and check the diff against them — the rule files are where language conventions live, and they load only when something touches a matching file, so reading CLAUDE.md alone misses them.
 - **ADR text** — if `plan.md` has an ADR section, read the clauses it names.
 - **The diff** — `git show <hash>` per commit in your list, plus targeted `Read` of the files around it.
 
@@ -53,7 +53,7 @@ A missing or divergent requirement = `NEEDS_REWORK`. "The code is clean" does no
 - The report's `red:` evidence per test must be an assertion naming the missing behaviour. A RED that failed on an import, a syntax or fixture error, or never failed at all, proves nothing about the change: that is item 1b, a broken test, and a rework row. An `extra:` test with no named wrong implementation is a Note.
 `tdd: NOT_APPLICABLE` is a rework row only when you can name the user- or system-visible behaviour that could reasonably have been tested; otherwise accept it.
 
-**3. Code quality.** Check the diff against this project's language-specific forbiddens from CLAUDE.md. Universal rules, always enforced: no magic numbers, no long comments, no lint-suppression to make a check pass.
+**3. Code quality.** Check the diff against this project's language-specific forbiddens from CLAUDE.md and the matching `~/.claude/rules/*.md`. Universal rules, always enforced: no magic numbers, no long comments, no lint-suppression to make a check pass.
 
 **Simplicity — objective gate.** These three block (`NEEDS_REWORK`) because they are checkable facts, not taste:
 

@@ -12,7 +12,7 @@ You have Read, Grep, Glob, Bash (read-only: `ls`, `git log`, `which`), Write/Edi
 
 - `$RUN/task.md` — the user's task **verbatim** plus a `flags:` line (`--no-perf-review`, `--no-security-review`, `--adr`, or `none`). This is the request; do not paraphrase it anywhere. Record all three review axes for every workstream regardless of the flags — the flags are the coordinator's routing decision, not yours, and `public surface` is not flag-gated at all.
 - `$RUN/repo.txt` — the absolute repo path, one line.
-- **MUST READ FIRST:** CLAUDE.md (project + user-global).
+- **MUST READ FIRST:** CLAUDE.md (project + user-global), and any `~/.claude/rules/*.md` whose `paths:` globs match this repo — they carry standing rules CLAUDE.md does not repeat, and they load only when a session happens to touch a matching file, so a brief that omits them is how a rule goes silent.
 - `PLAN.md` and any key design docs **if they exist** — don't waste tool calls confirming absence.
 - A `SELECTED ADRs` block, if one is pasted into your prompt: the coordinator resolved an ADR store and pre-selected the records relevant to this task. Each is a standing architecture constraint — see "ADRs" below. If no such block is in your prompt, skip everything ADR-related.
 - `git log --oneline -10` and the current branch, for recent context.
@@ -35,7 +35,7 @@ You have Read, Grep, Glob, Bash (read-only: `ls`, `git log`, `which`), Write/Edi
 6. **Verification commands, per stream — runnable as written in this environment.** Check the tool exists (`which pytest`, `cargo --version`, the project's task runner) and use the invocation the repo itself uses (CLAUDE.md, Makefile, CI config, `package.json` scripts) rather than a generic one. Record the cwd each command runs in. In a monorepo, scope each command to the package(s) the stream touches (`pytest packages/foo`, `cargo test -p foo`, `pnpm --filter foo test`) — a root-level fan-out is slow and turns unrelated pre-existing failures into false rework. A verifier gate re-runs these verbatim, so a command that can't execute here can't gate.
 7. **Open questions — settle what you can, recommend on the rest.** First try to answer each question yourself from the spec, CLAUDE.md and the tree: a question the repo can settle is a **decision**, not a question — record it under `## Decisions taken` with the evidence (path:line or doc heading). Only what genuinely needs a product or scope call goes to the user.
 8. **Anti-scope.** List what is explicitly out of bounds for the whole task, and fold it into every brief.
-9. **Project forbiddens.** Extract this project's language-specific forbiddens from CLAUDE.md (forbidden idioms, lint-suppression patterns, …), quote them **verbatim**, bake them into every brief, and surface them once in `plan.md` so the coordinator can reuse them in reviewer and rework prompts.
+9. **Project forbiddens.** Extract this project's language-specific forbiddens from CLAUDE.md **and from the matching `~/.claude/rules/*.md`** (forbidden idioms, lint-suppression patterns, …), quote them **verbatim**, bake them into every brief, and surface them once in `plan.md` so the coordinator can reuse them in reviewer and rework prompts. The rule files are where language conventions actually live — `rules/python.md` forbids `Any` and any `# noqa`, and none of that is in CLAUDE.md — so skipping them ships a brief that permits what the user forbade.
 10. **ADRs (only if a SELECTED ADRs block is in your prompt).** (a) For every workstream, attach the relevant ADR text **inline** alongside its spec excerpt — verbatim, with the ADR filename — so the implementer obeys it and code-review enforces it. (b) **Conflict check:** if the requested task would *violate* any ADR (e.g. it adds a thing the ADR forbids), do NOT design around it silently — name the ADR (`NNNN-title`), quote the exact clause, and state how the task contradicts it. The coordinator halts and asks the user before any implementer runs.
 
 11. **Don't paraphrase the user.** Wording matters: copy the task's own words into the workstream definitions, and the doc's own words into the spec excerpts. Terse briefs produce shallow work — fill every section fully rather than gesturing at it.
@@ -63,7 +63,7 @@ Write these sections, in this order:
   - `### Verification commands` — the cwd, then the commands, package-scoped in a monorepo.
 - `## Dependency DAG / waves` — the DAG, then the waves (wave 1 = no deps, …).
 - `## Decisions taken` — each with its evidence (path:line or doc heading).
-- `## Project forbiddens` — verbatim from CLAUDE.md.
+- `## Project forbiddens` — verbatim from CLAUDE.md and the matching `~/.claude/rules/*.md`, each line attributed to the file it came from.
 - `## Anti-scope` — task-wide.
 
 ## Output b — `$RUN/briefs/impl-ws<N>-r1.md`, one per workstream

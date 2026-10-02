@@ -667,6 +667,8 @@ def tree_warnings(
     return warnings
 
 
+# Sanity caps, not tuned values: they only keep a backup from taking up
+# lots of disk space. Hitting either one warns rather than silently truncating.
 BACKUP_MAX_FILES = 500
 BACKUP_MAX_BYTES = 50 * 1024 * 1024
 

@@ -117,6 +117,8 @@ def check(repo: str, head: str, reds: list[str]) -> tuple[list[str], list[str], 
     return missing, notes, frozen
 
 
+# Was 40, which cut tests out of the block — and a test absent from it reads as
+# one that passed at RED (PR #6 review).
 TAIL = 200
 
 

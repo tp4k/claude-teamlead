@@ -1,6 +1,6 @@
 ---
 name: codex-review
-description: 'Have Codex independently review a finished /teamlead:delegate run with its full task, plan, and diff context, then triage every finding in Claude Code. Use when the user says "review this run", "/teamlead:delegate --review", asks for a Codex review of teamlead work, or pastes back findings from another agent. With opusCodeReview=fallback, an Opus reviewer stands in when Codex cannot run.'
+description: 'Has Codex independently review a finished /teamlead:delegate run with its full task, plan, and diff context, then triages every finding in Claude Code. Use when the user says "review this run", "/teamlead:delegate --review", asks for a Codex review of teamlead work, or pastes back findings from another agent. With opusCodeReview=fallback, an Opus reviewer stands in when Codex cannot run.'
 metadata:
   argument-hint: "[run dir | repo/worktree path] [--list] [--base SHA] [--with-diff] [--out DIR] [--package-only] [--timeout-minutes N] [--opus-code-review=off|fallback]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/review_package.py *), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run_codex_review.py *)

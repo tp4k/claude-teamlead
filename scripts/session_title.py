@@ -33,6 +33,8 @@ from pathlib import Path
 
 import paths
 
+# new_run.py's cap on a run slug, so a name derived here has the shape of the
+# run directory it is named after (see `slugify`).
 MAX_LEN = 40
 SAFE_ID = re.compile(r"\A[0-9a-fA-F][0-9a-fA-F-]{7,63}\Z")
 # The `teamlead:` prefix is required, unlike the bare `/teamlead` this once

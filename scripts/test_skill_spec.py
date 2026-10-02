@@ -101,6 +101,17 @@ def is_yaml_string(raw: str) -> bool:
     )
 
 
+# Anthropic's skill-authoring guide: the description is injected into the system
+# prompt, so it reads as third person ("Coordinates …"), not an order to the
+# model ("Act as …") or a voice ("You can …", "I help …"). Only the opener is
+# checked; trigger phrases quoted later ("act as teamlead") are the user's words.
+IMPERATIVE_OPENERS = ("Act ", "Have ", "You ", "I ")
+
+
+def is_third_person(desc: str) -> bool:
+    return not desc.startswith(IMPERATIVE_OPENERS)
+
+
 def check_skill(skill_md: Path) -> None:
     top, meta = frontmatter(skill_md.read_text())
     name = unquoted(top.get("name", ""))
@@ -118,7 +129,9 @@ def check_skill(skill_md: Path) -> None:
     ))
     results.append((f"{who}: description is 1-1024 chars", 0 < len(desc) <= 1024,
                     f"len={len(desc)}"))
-    bad = sorted(k for k, v in meta.items() if not is_yaml_string(v))
+    results.append((f"{who}: description is in third person",
+                    is_third_person(desc), f"opens with {desc[:30]!r}"))
+    bad =sorted(k for k, v in meta.items() if not is_yaml_string(v))
     results.append((f"{who}: metadata values are strings", not bad,
                     f"non-string metadata={bad}"))
     body = skill_md.read_text().split("\n")
@@ -138,8 +151,21 @@ def check_the_string_check() -> None:
                         raw))
 
 
+def check_the_person_check() -> None:
+    """`is_third_person` must be able to fail, or the description row proves nothing."""
+    for desc in ("Coordinates a task", "Has Codex review", "Runs one cycle",
+                 "Ideal for audits", "Haves and have-nots"):
+        results.append((f"person check accepts {desc!r}", is_third_person(desc),
+                        desc))
+    for desc in ("Act as a coordinator", "Have Codex review", "You can review",
+                 "I help with"):
+        results.append((f"person check rejects {desc!r}",
+                        not is_third_person(desc), desc))
+
+
 def main() -> int:
     check_the_string_check()
+    check_the_person_check()
     skills = sorted(SKILLS.glob("*/SKILL.md"))
     results.append(("skills were found", bool(skills), str(SKILLS)))
     for skill_md in skills:

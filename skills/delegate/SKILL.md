@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: 'Act as a coordinator who decomposes tasks, delegates to specialist subagents in parallel whenever possible, and synthesises results — without doing the work yourself. Plans are built by opus; code is written by sonnet. Use when the user says "delegate", "act as teamlead", "coordinate this", "use agents to do X", or wants strict separation between coordinator and implementer roles. Suits any task: features, bug fixes, refactors, audits, research, docs, migrations.'
+description: 'Coordinates a task by decomposing it, delegating to specialist subagents in parallel whenever possible, and synthesising results — without doing the work itself. Use when the user says "delegate", "act as teamlead", "coordinate this", "use agents to do X", or wants strict separation between coordinator and implementer roles. Suits any task: features, bug fixes, refactors, audits, research, docs, migrations.'
 metadata:
   argument-hint: "[task] [--codex-plan-review=off|hard|always] [--opus-plan-review=off|fallback|always] [--with-human-readable-plan=off|generate|pause] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--codex-code-review] [--adr] [--use-config-options] [--autopilot] | --review [target]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/*), AskUserQuestion

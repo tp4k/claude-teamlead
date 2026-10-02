@@ -105,11 +105,17 @@ def is_yaml_string(raw: str) -> bool:
 # prompt, so it reads as third person ("Coordinates …"), not an order to the
 # model ("Act as …") or a voice ("You can …", "I help …"). Only the opener is
 # checked; trigger phrases quoted later ("act as teamlead") are the user's words.
-IMPERATIVE_OPENERS = ("Act ", "Have ", "You ", "I ")
+# The opener must be a third-person verb: one ending in "s", but not "ss", which
+# is an imperative ("Process …", "Address …"). A noun phrase ("One cycle …")
+# fails too, so a description always says what the skill does.
 
 
 def is_third_person(desc: str) -> bool:
-    return not desc.startswith(IMPERATIVE_OPENERS)
+    words = desc.split(maxsplit=1)
+    if not words:
+        return False
+    opener = words[0].lower()
+    return opener.endswith("s") and not opener.endswith("ss")
 
 
 def check_skill(skill_md: Path) -> None:
@@ -154,11 +160,13 @@ def check_the_string_check() -> None:
 def check_the_person_check() -> None:
     """`is_third_person` must be able to fail, or the description row proves nothing."""
     for desc in ("Coordinates a task", "Has Codex review", "Runs one cycle",
-                 "Ideal for audits", "Haves and have-nots"):
+                 " runs one cycle"):
         results.append((f"person check accepts {desc!r}", is_third_person(desc),
                         desc))
     for desc in ("Act as a coordinator", "Have Codex review", "You can review",
-                 "I help with"):
+                 "I help with", "Run a review", "act as a coordinator",
+                 " Act as a coordinator", "Process the run", "One delivery cycle",
+                 ""):
         results.append((f"person check rejects {desc!r}",
                         not is_third_person(desc), desc))
 

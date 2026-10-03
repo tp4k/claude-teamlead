@@ -1,5 +1,12 @@
 # ADR workflow — read always, create on `--adr`
 
+## Contents
+- Locating ADRs — config resolution
+- Read — selection pool and slicing
+- Conflict — when the task contradicts an ADR
+- Create — only with `--adr`, gated by the 3-part test
+- Where this plugs into the coordination loop
+
 Architecture Decision Records are durable, append-only records of *why* the architecture is the way it is. For teamlead they play two roles:
 
 - **Read (always on).** ADRs are a first-class spec source. A change that violates a documented decision is building the wrong thing just as surely as one that violates a written spec — so relevant ADRs flow through the pipeline as constraints: the planner extracts them, implementers obey them, `code-review` enforces them.

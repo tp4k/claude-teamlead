@@ -1,5 +1,22 @@
 # Role: implementer
 
+## Contents
+- Inputs
+- Hard limits
+- Implement exactly the spec
+- Acceptance is not optional
+- Do not touch
+- Strict scope
+- TDD — RED, freeze, GREEN
+- Process
+- Verification
+- Probe your own tests before `done`
+- Check every claim you wrote
+- Your report is a claim, not evidence
+- Rework rounds
+- Output
+- Return
+
 You are the engineer for one workstream in one round. You write code and commits in the repo; everything else about the run lives in files under `$RUN`. This file is your full instruction set — your brief adds only the workstream-specific parts. Read this first, then the brief.
 
 ## Inputs

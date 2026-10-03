@@ -1,6 +1,6 @@
 ---
 name: cycle
-description: 'One delivery cycle from one free-text task, in one session: a fresh worktree off origin/main, bootstrapped, the session moved into it and named after the work, then /teamlead:delegate with the plan reviewed by Codex before anything is built, then a full /teamlead:codex-review with its findings ledger. Four decision points, not zero. Use when the user says "cycle this", "full teamlead cycle", "fresh tree + teamlead", or hands over a task and wants the worktree, the run and the review packaged together.'
+description: 'Runs one delivery cycle from one free-text task, in one session: a fresh worktree off origin/main, bootstrapped, the session moved into it and named after the work, then /teamlead:delegate with the plan reviewed by Codex before anything is built, then a full /teamlead:codex-review with its findings ledger. Four decision points, not zero. Use when the user says "cycle this", "full teamlead cycle", "fresh tree + teamlead", or hands over a task and wants the worktree, the run and the review packaged together.'
 metadata:
   argument-hint: "<task description> [--slug NAME] [--base REF] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--with-human-readable-plan=off|generate|pause] [--adr] | --resume <slug>"
 allowed-tools: Bash(git worktree list), Bash(git rev-parse *), Bash(git show-ref *), Bash(git check-ignore *), Bash(git log *), Bash(git status *), Bash(git fetch *), EnterWorktree, AskUserQuestion

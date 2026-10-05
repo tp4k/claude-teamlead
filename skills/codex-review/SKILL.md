@@ -258,6 +258,19 @@ Show the user the ledger and ask which `CONFIRMED`, `PLAN-DEFECT` and
 `PRE-EXISTING-SUBSYSTEM-REWRITTEN` rows to act on. For the ones they pick, write
 `<run>/review-followup.md`:
 
+- A header first, exactly these four lines — `/teamlead:delegate` reads them to know that its
+  run is closing this review, and reruns it on the fixed tree at its step 11:
+
+  ```
+  <!-- teamlead:review-followup -->
+  Reviewer: Codex | Opus fallback
+  Target: <abs path of the repo/worktree you reviewed>
+  Review package: <abs path of review-package/PROMPT.md>
+  ```
+
+  `Reviewer:` is the one that wrote the answer you just triaged, on its own: `Codex` or
+  `Opus fallback`, nothing after it. A pasted review gets `Codex` — the rerun has no paste
+  to wait for, so it goes to the default reviewer.
 - `# Task` — one paragraph naming the repo, the worktree and the base SHA, and saying
   these are verified findings from an external review of that range.
 - `## Findings to fix` — the accepted rows verbatim, each with the lines you read and the
@@ -267,6 +280,10 @@ Show the user the ledger and ask which `CONFIRMED`, `PLAN-DEFECT` and
   so the fix run does not re-open a settled row or re-derive a rejection.
 
 Then hand the user the one-liner: `/teamlead:delegate <run>/review-followup.md`. That is the
-handoff — fixing is out of scope here, and a confirmed finding that ends its life in a
-chat message is the same loss as one that was never reported. Fix rows directly only if
+handoff, and the fix run brings its result back here: it ends by invoking this skill on the
+same tree, so the fixes get the same independent read the findings came from. This step is
+also where that chain stops. No rows picked → no `review-followup.md` → nothing reruns, so
+every lap costs one answer from the user and the loop never goes on by itself.
+
+Fixing is out of scope here, and a confirmed finding that ends its life in a chat message is the same loss as one that was never reported. Fix rows directly only if
 the user explicitly asks you to.

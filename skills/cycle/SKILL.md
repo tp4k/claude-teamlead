@@ -283,7 +283,8 @@ added if any.
 The fix round is deliberately **not** part of the cycle. Fixing confirmed findings is a fresh
 `/teamlead:delegate` run with its own plan, its own questions and its own reviewers; folding it in
 would hide a second full round of cost behind one command and give that round no independent
-review of its own.
+review of its own. That run supplies the review itself: its task is a `review-followup.md`,
+so its step 11 reruns `/teamlead:codex-review` on the fixed tree with the same reviewer.
 
 ---
 

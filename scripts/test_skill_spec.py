@@ -171,9 +171,34 @@ def check_the_person_check() -> None:
                         not is_third_person(desc), desc))
 
 
+FOLLOWUP_MARKER = "<!-- teamlead:review-followup -->"
+
+
+def check_followup_contract() -> None:
+    """codex-review writes the follow-up header that delegate step 11 routes on.
+
+    The two halves live in different skills and nothing else ties them
+    together: rename the marker or a `Reviewer:` value on one side and the fix
+    run silently ends with a one-liner instead of its re-review.
+    """
+    writer = (SKILLS / "codex-review" / "SKILL.md").read_text(encoding="utf-8")
+    reader = (SKILLS / "delegate" / "SKILL.md").read_text(encoding="utf-8")
+    for name, text in (("codex-review", writer), ("delegate", reader)):
+        results.append((f"{name} names the follow-up marker",
+                        FOLLOWUP_MARKER in text, FOLLOWUP_MARKER))
+    results.append(("codex-review's header lists both reviewer values",
+                    "Reviewer: Codex | Opus fallback" in writer,
+                    "Reviewer: Codex | Opus fallback"))
+    for needle in ("followup-of:", "followup-reviewer:", "`Opus fallback`",
+                   "--opus-code-review=fallback"):
+        results.append((f"delegate routes the re-review on {needle!r}",
+                        needle in reader, needle))
+
+
 def main() -> int:
     check_the_string_check()
     check_the_person_check()
+    check_followup_contract()
     skills = sorted(SKILLS.glob("*/SKILL.md"))
     results.append(("skills were found", bool(skills), str(SKILLS)))
     for skill_md in skills:

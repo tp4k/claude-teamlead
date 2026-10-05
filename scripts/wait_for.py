@@ -73,6 +73,8 @@ from pathlib import Path
 ROUTING = re.compile(r"^\s*(?:\*\*)?(?:(OUTCOME|VERDICT|status)(?:\*\*)?[ \t]*:"
                      r"|(PLAN_WRITTEN|PLAN_FIXED|PLAN_VALID|PLAN_NEEDS_FIX)\b)", re.I)
 EARLY = re.compile(r"status:\s*(blocked|partial)|OUTCOME:\s*CANNOT_RUN", re.I)
+# Baseline carried for a --rewritten file absent at the first call: any mtime is newer.
+FIRST_WRITE_NS = 0
 
 
 def routing_line(path: Path) -> str:
@@ -204,8 +206,8 @@ def main() -> int:
             for f_arg, token in a.expect:
                 retry += ["--expect", f_arg, token]
             for f_arg in a.rewritten:
-                if Path(f_arg) in start_mtime_ns:
-                    retry += ["--baseline", f_arg, str(start_mtime_ns[Path(f_arg)])]
+                baseline = start_mtime_ns.get(Path(f_arg), FIRST_WRITE_NS)
+                retry += ["--baseline", f_arg, str(baseline)]
             retry += a.files
             print("RETRY: " + shlex.join(retry))
             return 2

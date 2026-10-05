@@ -348,8 +348,13 @@ def baseline_of(argv: list[str], f: Path) -> int:
 # write is then fixed by construction, not by how the scheduler treats a 0.5 s
 # margin. Under a real clock that write is another process's; here it lands
 # between two polls, which is the only thing the waiter can observe either way.
+# The fake clock does not move the filesystem's: on a filesystem with 1-2 s mtime
+# resolution the rewrite could share the old file's mtime and look stale, so a
+# write that did not land newer is stamped MTIME_STEP_NS after the old mtime, as
+# an agent finishing seconds after the dispatch would be.
 SCRIPTED = """
-import sys, pathlib, time
+import os, sys, pathlib, time
+MTIME_STEP_NS = 2_000_000_000
 sys.path.insert(0, sys.argv[1])
 import wait_for
 target, body, at = pathlib.Path(sys.argv[2]), sys.argv[3], int(sys.argv[4])
@@ -358,7 +363,10 @@ sleeps = [0]
 def sleep(s):
     sleeps[0] += 1
     if sleeps[0] == at:
+        before = target.stat().st_mtime_ns if target.exists() else -1
         target.write_text(body)
+        if before >= 0 and target.stat().st_mtime_ns <= before:
+            os.utime(target, ns=(before + MTIME_STEP_NS, before + MTIME_STEP_NS))
     clock[0] += s
 time.monotonic = lambda: clock[0]
 time.sleep = sleep

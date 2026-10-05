@@ -584,6 +584,41 @@ def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     return pre_validation_gap(r) if role == "plan-validator" else plan_next(r)
 
 
+FOLLOWUP_OF = re.compile(r"^followup-of:\s*(\S.*)$", re.M)
+FOLLOWUP_REVIEWER = re.compile(r"^followup-reviewer:\s*(\S.*?)\s*$", re.M)
+
+
+def followup_rereview_owed(r: Run) -> str | None:
+    """The step-11 re-review a review-followup run still owes, or None.
+
+    A run whose `task.md` carries `followup-of:` closes a /teamlead:codex-review,
+    and its step 11 reruns that review after the final report is sent — so the
+    report alone does not finish it. Step 11 names this run as the review
+    target, so `$RUN/review-package/` is where the evidence lands, and only
+    evidence newer than the report is that rerun's. As with the plan review,
+    only *starting* it is owed: the runner's attempts log is written before
+    Codex is resolved, so a Codex that is missing or failed still leaves the
+    record, and an Opus fallback answer counts too.
+    """
+    task = r.text("task.md")
+    if not FOLLOWUP_OF.search(task):
+        return None
+    pkg = r.run / "review-package"
+    report = (r.run / "final-report.md").stat().st_mtime
+    evidence = ([pkg / "codex-review-attempts.log"]
+                + sorted(pkg.glob("codex-review-r*.md"))
+                + sorted(pkg.glob("opus-review-r*.md"))) if pkg.is_dir() else []
+    # Only a start *after* the report is the step-11 rerun; a review of the same
+    # run that ran mid-loop wrote the same files earlier and settles nothing.
+    if any(f.exists() and f.stat().st_mtime >= report for f in evidence):
+        return None
+    reviewer = FOLLOWUP_REVIEWER.search(task)
+    flag = (" --opus-code-review=fallback"
+            if reviewer and reviewer.group(1) == "Opus fallback" else "")
+    return (f"task.md has followup-of: — invoke /teamlead:codex-review "
+            f"{r.run}{flag} (Skill tool), as step 11 says")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print(__doc__)
@@ -598,6 +633,11 @@ def main(argv: list[str]) -> int:
     print(f"repo={(run / 'repo.txt').read_text().strip()}")
 
     if (run / "final-report.md").exists():
+        owed = followup_rereview_owed(r)
+        if owed:
+            print("step: 11 — final report written; the re-review is still owed")
+            print(f"next: {owed}")
+            return 0
         print("step: 11 — final report written; the loop is complete")
         print("next: send $RUN/final-report.md to the user if you have not already")
         return 0

@@ -72,6 +72,9 @@ Strip the flag text out of the task before writing `task.md`, and record the fla
     Exit 3 / `REFUSED: another copy of this plugin` → STOP and relay it verbatim: a second copy of the plugin
     under ~/.claude/skills means this session may be running the wrong copy's skills. Never work around it.
     Write $RUN/task.md: the task VERBATIM (flags stripped) + `flags: <flags|none>`.
+    The task is (or names) a file whose first line is `<!-- teamlead:review-followup -->` → this run closes
+    a /teamlead:codex-review; also write `followup-of: <abs path of that file>` and
+    `followup-reviewer: <its Reviewer: value>` to task.md. Step 11 reads those lines, not this transcript.
     ADR store found → select the relevant ADRs, write their text to $RUN/adrs.md under `# SELECTED ADRs`.
 3a. RUN OPTIONS, before anything is planned:
       python3 $PLUGIN/scripts/run_config.py <repo> --flags "<the task text, verbatim>" --out $RUN/config.json
@@ -224,9 +227,19 @@ Strip the flag text out of the task before writing `task.md`, and record the fla
     Write $RUN/final-report.md following references/roles/scribe.md and send its text to the user
     (+ refactor decisions, created ADRs, the ledger path and its row count, and every specialist that
     `when-needed` left unspawned, with the tag that decided it).
-    codexCodeReview=on → end with the one-liner `/teamlead:codex-review <worktree>` rather than running it:
-    an independent review of a finished diff is its own 10–20 minute loop with its own findings triage, and
-    folding it in here would hide a second round of cost behind one command.
+    task.md has `followup-of:` → RE-REVIEW: invoke `/teamlead:codex-review <abs $RUN>` yourself (Skill tool),
+      naming this run, not the worktree — a worktree resolves to its newest run, which may not be this one;
+      adding `--opus-code-review=fallback` when `followup-reviewer:` is `Opus fallback`; `codexCodeReview`
+      does not gate it. This run's fixes answer that review's findings, so the same review path reads them
+      next — Codex first, as always, with the Opus fallback still available when it wrote the closed review.
+      It is not the same review again: the package starts at the head the closed review read, ships its
+      findings, and asks whether each one is fixed and whether this run's commits are sound on their own.
+      With no rerun, a fix nobody independently checked would be reported as closed.
+      Run it after the final report is sent; its ledger, and the new review-followup.md if the user picks
+      rows, end the run. A Codex failure there follows codex-review's own rules (report it, or fall back).
+    otherwise, codexCodeReview=on → end with the one-liner `/teamlead:codex-review <worktree>` rather than
+      running it: an independent review of a finished diff is its own 10–20 minute loop with its own
+      findings triage, and folding it in here would hide a second round of cost behind one command.
 ```
 
 ## Pointer briefs — the only prompts you write

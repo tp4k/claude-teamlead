@@ -189,6 +189,15 @@ The Codex prompt asks for five parts: a findings table, `## Blocking`, `## Per a
 you which findings were derived from something the reviewer actually ran, and that
 changes how much work each row's verification takes, not whether it gets one.
 
+A package built for a follow-up run (the script prints a `closes  :` line) asks for a sixth
+part, `## Earlier findings`: FIXED, PARTIAL or NOT FIXED for every row of the review that
+run closed. Its range is that run's commits alone — the base is the head the earlier review
+read — and the table holds what the reviewer found in those commits as a change of their
+own. Give every PARTIAL and NOT FIXED line a verdict as if it were a table row (`CONFIRMED`
+means the finding is still open) and list it in the ledger, prefixed `earlier:`; a FIXED line
+needs no verdict, but its count goes on the closing line, so "3 of 3 fixed" is visible
+beside whatever new rows the fixes brought.
+
 If the user instead pasted findings from another agent, skip package creation and the
 Codex run and triage that pasted review using the same rules below.
 
@@ -258,6 +267,23 @@ Show the user the ledger and ask which `CONFIRMED`, `PLAN-DEFECT` and
 `PRE-EXISTING-SUBSYSTEM-REWRITTEN` rows to act on. For the ones they pick, write
 `<run>/review-followup.md`:
 
+- A header first, exactly these five lines — `/teamlead:delegate` reads them to know that its
+  run is closing this review, and reruns it on the fixed tree at its step 11:
+
+  ```
+  <!-- teamlead:review-followup -->
+  Reviewer: Codex | Opus fallback
+  Target: <abs path of the repo/worktree you reviewed>
+  Review package: <abs path of review-package/PROMPT.md>
+  Reviewed head: <the full head SHA the package script printed>
+  ```
+
+  `Reviewer:` is the one that wrote the answer you just triaged, on its own: `Codex` or
+  `Opus fallback`, nothing after it. A pasted review gets `Codex` — the rerun has no paste
+  to wait for, so it goes to the default reviewer. `Reviewed head:` is what makes the rerun
+  a review of the fixes rather than a repeat: the fix run's package starts its range there,
+  so the reviewer reads only the new commits, and checks each row below against them.
+  A pasted review with no package gets `git rev-parse HEAD` of the tree it was about.
 - `# Task` — one paragraph naming the repo, the worktree and the base SHA, and saying
   these are verified findings from an external review of that range.
 - `## Findings to fix` — the accepted rows verbatim, each with the lines you read and the
@@ -267,6 +293,11 @@ Show the user the ledger and ask which `CONFIRMED`, `PLAN-DEFECT` and
   so the fix run does not re-open a settled row or re-derive a rejection.
 
 Then hand the user the one-liner: `/teamlead:delegate <run>/review-followup.md`. That is the
-handoff — fixing is out of scope here, and a confirmed finding that ends its life in a
-chat message is the same loss as one that was never reported. Fix rows directly only if
+handoff, and the fix run brings its result back here: it ends by invoking this skill on its own
+run directory (the fixed tree), so the fixes go through the same independent review the findings came from —
+Codex first, and `--opus-code-review=fallback` when `Reviewer:` says the fallback wrote them. This step is
+also where that chain stops. No rows picked → no `review-followup.md` → nothing reruns, so
+every lap costs one answer from the user and the loop never goes on by itself.
+
+Fixing is out of scope here, and a confirmed finding that ends its life in a chat message is the same loss as one that was never reported. Fix rows directly only if
 the user explicitly asks you to.

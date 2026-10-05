@@ -171,9 +171,61 @@ def check_the_person_check() -> None:
                         not is_third_person(desc), desc))
 
 
+FOLLOWUP_MARKER = "<!-- teamlead:review-followup -->"
+
+
+def check_followup_contract() -> None:
+    """codex-review writes the follow-up header that delegate step 11 routes on.
+
+    The two halves live in different skills and nothing else ties them
+    together: rename the marker or a `Reviewer:` value on one side and the fix
+    run silently ends with a one-liner instead of its re-review.
+
+    Each check reads only the step that owns the token: the same key written in
+    step 3 and read in step 11 would otherwise mask a rename on either side.
+    """
+    writer = section(SKILLS / "codex-review" / "SKILL.md",
+                     "## 4. Route the accepted rows back", None)
+    delegate = SKILLS / "delegate" / "SKILL.md"
+    kickoff = section(delegate, "3.  KICKOFF:", "3a. RUN OPTIONS")
+    step11 = section(delegate, "11. Any demoted row", "```")
+    results.append(("codex-review step 4 writes the follow-up marker",
+                    FOLLOWUP_MARKER in writer, FOLLOWUP_MARKER))
+    results.append(("codex-review's header lists both reviewer values",
+                    "Reviewer: Codex | Opus fallback" in writer,
+                    "Reviewer: Codex | Opus fallback"))
+    results.append(("codex-review's header records the head the packager starts at",
+                    "Reviewed head: <" in writer, "Reviewed head: <"))
+    results.append(("codex-review triages the follow-up's `## Earlier findings`",
+                    "`## Earlier findings`" in section(
+                        SKILLS / "codex-review" / "SKILL.md",
+                        "## 3. Triage the Codex findings", "## 4."),
+                    "`## Earlier findings`"))
+    for needle in (FOLLOWUP_MARKER, "followup-of:", "followup-reviewer:"):
+        results.append((f"delegate step 3 records {needle!r}",
+                        needle in kickoff, needle))
+    for needle in ("task.md has `followup-of:`", "`followup-reviewer:` is "
+                   "`Opus fallback`", "--opus-code-review=fallback",
+                   "invoke `/teamlead:codex-review <abs $RUN>` yourself (Skill "
+                   "tool)"):
+        results.append((f"delegate step 11 routes the re-review on {needle!r}",
+                        needle in " ".join(step11.split()), needle))
+
+
+def section(path: Path, start: str, end: str | None) -> str:
+    """The text of `path` from `start` up to the next `end` (or EOF); '' if absent."""
+    text = path.read_text(encoding="utf-8")
+    begin = text.find(start)
+    if begin < 0:
+        return ""
+    stop = text.find(end, begin + len(start)) if end else -1
+    return text[begin:stop if stop >= 0 else len(text)]
+
+
 def main() -> int:
     check_the_string_check()
     check_the_person_check()
+    check_followup_contract()
     skills = sorted(SKILLS.glob("*/SKILL.md"))
     results.append(("skills were found", bool(skills), str(SKILLS)))
     for skill_md in skills:

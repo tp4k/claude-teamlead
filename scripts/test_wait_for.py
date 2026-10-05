@@ -436,6 +436,16 @@ def case_baseline_not_in_rewritten_exits_2(tmp: Path) -> None:
           ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
 
 
+def case_retry_keeps_first_write_for_absent_rewritten_file(tmp: Path) -> None:
+    f = tmp / "review.md"
+    r1 = run(tmp, "--poll", "1", "--timeout", "2", "--rewritten", str(f), str(f))
+    f.write_text("VERDICT: APPROVED\n")
+    r2 = run_retry(tmp, retry_argv(r1.stdout))
+    ok = r1.returncode == 2 and r2.returncode == 0 and "VERDICT: APPROVED" in r2.stdout
+    check("a RETRY for a file absent at the first call accepts the file written since",
+          ok, f"r1={r1.returncode} r2={r2.returncode} {r2.stdout.strip()!r}")
+
+
 CASES = [
     case_spec_quote_routes_on_verdict,
     case_outcome_at_top,
@@ -460,6 +470,7 @@ CASES = [
     case_second_round_does_not_accept_round_one_file,
     case_abandoned_wait_redispatch_does_not_accept_late_file,
     case_baseline_not_in_rewritten_exits_2,
+    case_retry_keeps_first_write_for_absent_rewritten_file,
 ]
 
 

@@ -229,8 +229,9 @@ Strip the flag text out of the task before writing `task.md`, and record the fla
     `when-needed` left unspawned, with the tag that decided it).
     task.md has `followup-of:` → RE-REVIEW: invoke `/teamlead:codex-review <worktree>` yourself (Skill tool),
       adding `--opus-code-review=fallback` when `followup-reviewer:` is `Opus fallback`; `codexCodeReview`
-      does not gate it. This run's fixes answer that review's findings, so the reviewer who raised them
-      reads them next — with no rerun, a fix nobody independently checked would be reported as closed.
+      does not gate it. This run's fixes answer that review's findings, so the same review path reads them
+      next — Codex first, as always, with the Opus fallback still available when it wrote the closed review.
+      With no rerun, a fix nobody independently checked would be reported as closed.
       Run it after the final report is sent; its ledger, and the new review-followup.md if the user picks
       rows, end the run. A Codex failure there follows codex-review's own rules (report it, or fall back).
     otherwise, codexCodeReview=on → end with the one-liner `/teamlead:codex-review <worktree>` rather than

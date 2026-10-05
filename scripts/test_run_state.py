@@ -713,6 +713,55 @@ def case_final_report_ends_the_loop(tmp: Path) -> None:
     expect("final-report.md → the loop is complete", run, "11", "complete", 0)
 
 
+FOLLOWUP_TASK = ("<!-- teamlead:review-followup -->\nReviewer: Codex\n\n"
+                 "flags: none\nfollowup-of: /wt/.teamlead/runs/x/review-followup.md\n"
+                 "followup-reviewer: {reviewer}\n")
+
+
+def followup_done_run(tmp: Path, reviewer: str = "Codex") -> Path:
+    run = approved_run(tmp, "# Triage\n\nVERDICT: APPROVED rows=0\n")
+    (run / "task.md").write_text(FOLLOWUP_TASK.format(reviewer=reviewer))
+    (run / "final-report.md").write_text("# Done\n\nFixed row 1.\n")
+    return run
+
+
+def case_followup_report_owes_the_rereview(tmp: Path) -> None:
+    """A review-followup run is not finished by its report: step 11 reruns the
+    review it closes, and a resume that called it complete would skip that."""
+    run = followup_done_run(tmp)
+    expect("follow-up run with a report but no re-review → re-review owed", run,
+           "11", "invoke /teamlead:codex-review <worktree> (Skill tool)", 0)
+    r = state(run)
+    check("a Codex-origin follow-up does not add the fallback flag",
+          "--opus-code-review" not in r.stdout and "complete" not in r.stdout,
+          r.stdout.strip())
+
+
+def case_followup_opus_origin_keeps_the_fallback(tmp: Path) -> None:
+    run = followup_done_run(tmp, "Opus fallback")
+    expect("an Opus-fallback follow-up reruns with the fallback kept", run,
+           "11", "<worktree> --opus-code-review=fallback", 0)
+
+
+def case_followup_rereview_started_ends_the_loop(tmp: Path) -> None:
+    """Only starting the re-review is owed: the runner's attempts log is written
+    before Codex is resolved, so even a failed Codex settles it."""
+    run = followup_done_run(tmp)
+    (run / "review-package").mkdir()
+    (run / "review-package" / "codex-review-attempts.log").write_text(
+        "2026-10-05T10:00:00Z started\n")
+    expect("follow-up run whose re-review started → complete", run,
+           "11", "the loop is complete", 0)
+
+
+def case_followup_opus_answer_ends_the_loop(tmp: Path) -> None:
+    run = followup_done_run(tmp, "Opus fallback")
+    (run / "review-package").mkdir()
+    (run / "review-package" / "opus-review-r1.md").write_text("| severity |\n")
+    expect("follow-up run with an Opus re-review answer → complete", run,
+           "11", "the loop is complete", 0)
+
+
 # --- step 3a, 4a and 5: the steps a stale skill copy silently did not have ---
 
 COMPLEX_Q = QUESTIONS.replace("PLAN_WRITTEN ws=1",
@@ -976,6 +1025,10 @@ CASES = [
     case_unadjudicated_verifier_fail_still_stops,
     case_triage_closes_the_review_phase,
     case_final_report_ends_the_loop,
+    case_followup_report_owes_the_rereview,
+    case_followup_opus_origin_keeps_the_fallback,
+    case_followup_rereview_started_ends_the_loop,
+    case_followup_opus_answer_ends_the_loop,
 ]
 
 

@@ -180,19 +180,39 @@ def check_followup_contract() -> None:
     The two halves live in different skills and nothing else ties them
     together: rename the marker or a `Reviewer:` value on one side and the fix
     run silently ends with a one-liner instead of its re-review.
+
+    Each check reads only the step that owns the token: the same key written in
+    step 3 and read in step 11 would otherwise mask a rename on either side.
     """
-    writer = (SKILLS / "codex-review" / "SKILL.md").read_text(encoding="utf-8")
-    reader = (SKILLS / "delegate" / "SKILL.md").read_text(encoding="utf-8")
-    for name, text in (("codex-review", writer), ("delegate", reader)):
-        results.append((f"{name} names the follow-up marker",
-                        FOLLOWUP_MARKER in text, FOLLOWUP_MARKER))
+    writer = section(SKILLS / "codex-review" / "SKILL.md",
+                     "## 4. Route the accepted rows back", None)
+    delegate = SKILLS / "delegate" / "SKILL.md"
+    kickoff = section(delegate, "3.  KICKOFF:", "3a. RUN OPTIONS")
+    step11 = section(delegate, "11. Any demoted row", "```")
+    results.append(("codex-review step 4 writes the follow-up marker",
+                    FOLLOWUP_MARKER in writer, FOLLOWUP_MARKER))
     results.append(("codex-review's header lists both reviewer values",
                     "Reviewer: Codex | Opus fallback" in writer,
                     "Reviewer: Codex | Opus fallback"))
-    for needle in ("followup-of:", "followup-reviewer:", "`Opus fallback`",
-                   "--opus-code-review=fallback"):
-        results.append((f"delegate routes the re-review on {needle!r}",
-                        needle in reader, needle))
+    for needle in (FOLLOWUP_MARKER, "followup-of:", "followup-reviewer:"):
+        results.append((f"delegate step 3 records {needle!r}",
+                        needle in kickoff, needle))
+    for needle in ("task.md has `followup-of:`", "`followup-reviewer:` is "
+                   "`Opus fallback`", "--opus-code-review=fallback",
+                   "invoke `/teamlead:codex-review <worktree>` yourself (Skill "
+                   "tool)"):
+        results.append((f"delegate step 11 routes the re-review on {needle!r}",
+                        needle in " ".join(step11.split()), needle))
+
+
+def section(path: Path, start: str, end: str | None) -> str:
+    """The text of `path` from `start` up to the next `end` (or EOF); '' if absent."""
+    text = path.read_text(encoding="utf-8")
+    begin = text.find(start)
+    if begin < 0:
+        return ""
+    stop = text.find(end, begin + len(start)) if end else -1
+    return text[begin:stop if stop >= 0 else len(text)]
 
 
 def main() -> int:

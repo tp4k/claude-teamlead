@@ -281,7 +281,8 @@ Show the user the ledger and ask which `CONFIRMED`, `PLAN-DEFECT` and
 
 Then hand the user the one-liner: `/teamlead:delegate <run>/review-followup.md`. That is the
 handoff, and the fix run brings its result back here: it ends by invoking this skill on the
-same tree, so the fixes get the same independent read the findings came from. This step is
+same tree, so the fixes go through the same independent review the findings came from —
+Codex first, and `--opus-code-review=fallback` when `Reviewer:` says the fallback wrote them. This step is
 also where that chain stops. No rows picked → no `review-followup.md` → nothing reruns, so
 every lap costs one answer from the user and the loop never goes on by itself.
 

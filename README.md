@@ -81,7 +81,7 @@ flowchart TD
     ADRW["teamlead:writer · a new ADR"]
     LEDGER["teamlead:writer · docs/deferred-work.md"]
     CXR(["prints the /teamlead:codex-review one-liner"])
-    RERUN["runs /teamlead:codex-review again<br/>same reviewer as the review it closes"]
+    RERUN["runs /teamlead:codex-review again<br/>Codex first · fallback kept if it was used"]
 
     GO --> CFG
     CFG --> CARD
@@ -232,7 +232,7 @@ The **Turns on** column names the diagram node the option controls.
 | `humanReadablePlan` | `--with-human-readable-plan=<v>` | `off` · `generate` · `pause` | 4a writer, and the 6d gate | Writes `$RUN/plan-human.md` — the plan as prose, for reading rather than for dispatch. `pause` also holds the run until you have read it. |
 | `securityReview` | `--security-review=<v>`, `--no-security-review` | `off` · `when-needed` · `on` | 9 security review | The security reviewer at the end. `when-needed` spawns it only for workstreams the planner tagged as attacker-reachable. |
 | `perfReview` | `--perf-review=<v>`, `--no-perf-review` | `off` · `when-needed` · `on` | 9 performance review | The performance reviewer. `when-needed` spawns it only for workstreams the planner tagged as on a hot path. |
-| `codexCodeReview` | `--codex-code-review` | `off` · `on` | 11 one-liner | Whether the closing report hands you the `/teamlead:codex-review` one-liner for the finished tree. A run whose task is a `review-followup.md` skips the one-liner and reruns the review itself, whatever this says: Codex, or the Opus fallback when that wrote the review being closed. |
+| `codexCodeReview` | `--codex-code-review` | `off` · `on` | 11 one-liner | Whether the closing report hands you the `/teamlead:codex-review` one-liner for the finished tree. A run whose task is a `review-followup.md` skips the one-liner and reruns the review itself, whatever this says: Codex first, with the Opus fallback kept available when it wrote the review being closed. |
 | `opusCodeReview` | `/teamlead:codex-review --opus-code-review=<v>` | `off` · `fallback` | codex-review 2b | When the Codex code review cannot run (no install, no login, a failure, a timeout), `teamlead:code-reviewer` reviews the same package instead. The ledger says which reviewer wrote it. |
 | `adr` | `--adr` | `off` · `on` | 11 ADR writer | Whether the run records its decisions as an ADR. Reading ADRs is always on and needs no setting. |
 

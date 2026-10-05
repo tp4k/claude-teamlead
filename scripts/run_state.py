@@ -584,6 +584,38 @@ def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     return pre_validation_gap(r) if role == "plan-validator" else plan_next(r)
 
 
+FOLLOWUP_OF = re.compile(r"^followup-of:\s*(\S.*)$", re.M)
+FOLLOWUP_REVIEWER = re.compile(r"^followup-reviewer:\s*(\S.*?)\s*$", re.M)
+
+
+def followup_rereview_owed(r: Run) -> str | None:
+    """The step-11 re-review a review-followup run still owes, or None.
+
+    A run whose `task.md` carries `followup-of:` closes a /teamlead:codex-review,
+    and its step 11 reruns that review after the final report is sent — so the
+    report alone does not finish it. codex-review packages the worktree into
+    the newest run for that repo, which is this one, so `$RUN/review-package/`
+    is where the evidence lands. As with the plan review, only *starting* it
+    is owed: the runner's attempts log is written before Codex is resolved, so
+    a Codex that is missing or failed still leaves the record, and an Opus
+    fallback answer counts too.
+    """
+    task = r.text("task.md")
+    if not FOLLOWUP_OF.search(task):
+        return None
+    pkg = r.run / "review-package"
+    if pkg.is_dir() and (
+            (pkg / "codex-review-attempts.log").exists()
+            or any(pkg.glob("codex-review-r*.md"))
+            or any(pkg.glob("opus-review-r*.md"))):
+        return None
+    reviewer = FOLLOWUP_REVIEWER.search(task)
+    flag = (" --opus-code-review=fallback"
+            if reviewer and reviewer.group(1) == "Opus fallback" else "")
+    return (f"task.md has followup-of: — invoke /teamlead:codex-review "
+            f"<worktree>{flag} (Skill tool), as step 11 says")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print(__doc__)
@@ -598,6 +630,11 @@ def main(argv: list[str]) -> int:
     print(f"repo={(run / 'repo.txt').read_text().strip()}")
 
     if (run / "final-report.md").exists():
+        owed = followup_rereview_owed(r)
+        if owed:
+            print("step: 11 — final report written; the re-review is still owed")
+            print(f"next: {owed}")
+            return 0
         print("step: 11 — final report written; the loop is complete")
         print("next: send $RUN/final-report.md to the user if you have not already")
         return 0

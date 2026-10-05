@@ -13,6 +13,9 @@ Every case here is a bug that shipped, so the file doubles as the record of what
     `status:` field routed on the quotation (search from the end);
   * the early-exit scan read the whole file, so that same quotation produced a
     false `EARLY_EXIT` on a healthy phase (scan the routing line only);
+  * a follow-up call for the same rewrite re-snapshotted the mtime baseline after the
+    agent had already finished, so it could never succeed and blamed "the
+    pre-dispatch copy" for a file that held the token (`--baseline`, `RETRY:`);
   * the routing keyword matched on its own, so a `Verdict on scope:` line closing
     the plan-validator's newest section outranked the real verdict — and only
     when the validator happened to phrase it that way, so it mis-routed about one
@@ -23,6 +26,7 @@ that needs an install is a suite nobody runs.
 """
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -295,6 +299,139 @@ def case_two_files_one_call(tmp: Path) -> None:
     check("one call blocks on the slower of two files and prints both",
           ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
 
+# The observed 2026-10-05 timelines: a rewrite that lands under one poll interval
+# before the deadline is seen by the final poll only, so it is not yet size-stable.
+CHUNK = 4
+LANDS_BEFORE_DEADLINE = 3.5
+PLAN_OLD = "PLAN_WRITTEN ws=2 paths=src/a.py\n"
+PLAN_FIXED_3 = "# Plan\n\n## Fix log\nPLAN_FIXED fixed=3 new_paths=yes\n"
+PLAN_FIXED_1 = "# Plan\n\n## Fix log\nPLAN_FIXED fixed=1 new_paths=none\n"
+PLAN_FIXED_2 = "# Plan\n\n## Fix log\nround two\nPLAN_FIXED fixed=2 new_paths=none\n"
+RETRY_PREFIX = "RETRY: "
+
+
+def plan_args(f: Path, timeout: int) -> list[str]:
+    return ["--poll", "1", "--timeout", str(timeout), "--rewritten", str(f),
+            "--expect", str(f), "PLAN_FIXED", str(f)]
+
+
+def retry_argv(out: str) -> list[str]:
+    for line in out.splitlines():
+        if line.startswith(RETRY_PREFIX):
+            return shlex.split(line[len(RETRY_PREFIX):])
+    return []
+
+
+def run_retry(cwd: Path, argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a printed RETRY command; its interpreter and script path are checked."""
+    if len(argv) < 2 or argv[1] != str(WAIT_FOR):
+        return subprocess.CompletedProcess(argv, 99, "", "bad RETRY command")
+    return run(cwd, *argv[2:])
+
+
+def baseline_of(argv: list[str]) -> int:
+    i = argv.index("--baseline")
+    return int(argv[i + 2])
+
+
+def timed_out_first_call(tmp: Path, f: Path, body: str) -> subprocess.CompletedProcess[str]:
+    """A wait whose rewrite lands 0.5 s before the deadline, after the last poll."""
+    w = delayed_write(f, body, LANDS_BEFORE_DEADLINE)
+    r = run(tmp, *plan_args(f, CHUNK))
+    w.wait()
+    return r
+
+
+def case_observed_wait1_finish_just_before_deadline(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r = timed_out_first_call(tmp, f, PLAN_FIXED_3)
+    argv = retry_argv(r.stdout)
+    ok = (r.returncode == 2
+          and "not yet size-stable" in r.stdout
+          and "still the pre-dispatch copy" not in r.stdout
+          and "--baseline" in argv and str(f) in argv)
+    check("a rewrite landing just before the deadline is size-unstable, with a RETRY line",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
+
+
+def case_observed_wait2_retry_keeps_first_baseline(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r = timed_out_first_call(tmp, f, PLAN_FIXED_3)
+    rr = run_retry(tmp, retry_argv(r.stdout))
+    ok = (r.returncode == 2 and rr.returncode == 0
+          and "plan.md: PLAN_FIXED fixed=3 new_paths=yes" in rr.stdout)
+    check("the printed RETRY command accepts the file finished between calls",
+          ok, f"exit={rr.returncode} out={rr.stdout.strip()!r}")
+
+
+def case_followup_without_baseline_names_token_present(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    timed_out_first_call(tmp, f, PLAN_FIXED_3)
+    r = run(tmp, *plan_args(f, 3))
+    ok = (r.returncode == 2
+          and "has PLAN_FIXED but its mtime is not newer than the baseline" in r.stdout
+          and "still the pre-dispatch copy" not in r.stdout)
+    check("a baseline-less re-run on a finished file says the token is present",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
+
+
+def case_retry_chain_keeps_first_baseline(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    first_ns = f.stat().st_mtime_ns
+    r1 = timed_out_first_call(tmp, f, MID_EDIT)
+    argv1 = retry_argv(r1.stdout)
+    w = delayed_write(f, FINISHED_EDIT, LANDS_BEFORE_DEADLINE)
+    r2 = run_retry(tmp, argv1)
+    w.wait()
+    argv2 = retry_argv(r2.stdout)
+    ok = (r1.returncode == 2 and r2.returncode == 2 and bool(argv1) and bool(argv2)
+          and baseline_of(argv1) == first_ns and baseline_of(argv2) == first_ns)
+    check("a chained timeout carries the first call's baseline forward",
+          ok, f"r1={r1.stdout.strip()!r} r2={r2.stdout.strip()!r}")
+
+
+def case_second_round_does_not_accept_round_one_file(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r1 = timed_out_first_call(tmp, f, PLAN_FIXED_1)
+    done1 = run_retry(tmp, retry_argv(r1.stdout))
+    stale = run(tmp, *plan_args(f, 3))
+    w = delayed_write(f, PLAN_FIXED_2, 2.0)
+    fresh = run(tmp, *FAST, *plan_args(f, 12)[4:])
+    w.wait()
+    ok = (done1.returncode == 0 and stale.returncode == 2
+          and fresh.returncode == 0 and "fixed=2" in fresh.stdout)
+    check("round 2's fresh wait rejects round 1's file and accepts round 2's",
+          ok, f"done1={done1.returncode} stale={stale.returncode} "
+              f"fresh={fresh.returncode} {fresh.stdout.strip()!r}")
+
+
+def case_abandoned_wait_redispatch_does_not_accept_late_file(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r1 = run(tmp, *plan_args(f, 3))
+    f.write_text(PLAN_FIXED_3)
+    r2 = run(tmp, *plan_args(f, 3))
+    ok = RETRY_PREFIX in r1.stdout and r2.returncode == 2
+    check("a re-dispatch's fresh wait rejects a file an abandoned wait never saw",
+          ok, f"r1={r1.stdout.strip()!r} r2={r2.returncode} {r2.stdout.strip()!r}")
+
+
+def case_baseline_not_in_rewritten_exits_2(tmp: Path) -> None:
+    a = tmp / "plan.md"
+    a.write_text(PLAN_OLD)
+    b = tmp / "review-code.md"
+    b.write_text("VERDICT: APPROVE\n")
+    r = run(tmp, *FAST, "--rewritten", str(a), "--baseline", str(b), "123",
+            str(a), str(b))
+    ok = r.returncode == 2 and "nothing waits on it" in r.stdout
+    check("--baseline naming a file that is not --rewritten exits 2 immediately",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
+
 
 CASES = [
     case_spec_quote_routes_on_verdict,
@@ -313,6 +450,13 @@ CASES = [
     case_scope_label_does_not_shadow_verdict,
     case_plan_needs_fix_is_a_routing_token,
     case_two_files_one_call,
+    case_observed_wait1_finish_just_before_deadline,
+    case_observed_wait2_retry_keeps_first_baseline,
+    case_followup_without_baseline_names_token_present,
+    case_retry_chain_keeps_first_baseline,
+    case_second_round_does_not_accept_round_one_file,
+    case_abandoned_wait_redispatch_does_not_accept_late_file,
+    case_baseline_not_in_rewritten_exits_2,
 ]
 
 

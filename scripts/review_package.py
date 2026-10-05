@@ -521,7 +521,9 @@ def followup_source(task: str) -> tuple[Path | None, str | None, list[str]]:
             f"followup-of: {src} does not start with {FOLLOWUP_MARKER} — "
             "not treated as an earlier review."
         ]
-    head = REVIEWED_HEAD_RE.search(text)
+    # The header is the block before the first blank line; a finding quoting
+    # a header line further down must not move the base.
+    head = REVIEWED_HEAD_RE.search(text.split("\n\n", 1)[0])
     if head is None:
         return src, None, [
             f"{src.name} has no `Reviewed head:` line, so this iteration's "
@@ -1033,14 +1035,13 @@ def main(argv: list[str]) -> int:
     recorded = recorded_commits(run_dir, repo)
     followup, followup_head, followup_warnings = followup_source(task)
     base_override = args.base
-    from_followup = False
     if followup_head and not base_override:
         if subprocess.run(
             ["git", "-C", str(repo), "merge-base", "--is-ancestor",
              followup_head, head_sha],
             capture_output=True,
         ).returncode == 0:
-            base_override, from_followup = followup_head, True
+            base_override = followup_head
         else:
             followup_warnings.append(
                 f"The earlier review read {followup_head[:12]}, which is not an "
@@ -1049,6 +1050,11 @@ def main(argv: list[str]) -> int:
             followup_head = None
     base, warnings = resolve_base(repo, head_sha, recorded, base_override)
     warnings = followup_warnings + warnings
+    # Compared by commit, not by origin: a --base naming the reviewed head is
+    # the same range and earns the same prompt.
+    from_followup = bool(followup_head) and base == git(
+        repo, "rev-parse", "--verify", f"{followup_head}^{{commit}}", check=False
+    )
 
     rows = numstat(repo, base, head_sha)
     commits, commit_counts = commits_in_scope(

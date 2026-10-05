@@ -1055,7 +1055,37 @@ def case_reviewed_head_off_the_branch_warns(tmp: Path) -> None:
     )
 
 
+def case_a_quoted_header_line_does_not_move_the_base(tmp: Path) -> None:
+    repo, run, branch_base, _ = followup_scaffold(tmp, header_head=False)
+    head = git(repo, "rev-parse", "HEAD").strip()
+    earlier = tmp / "earlier-run" / "review-followup.md"
+    earlier.write_text(
+        earlier.read_text() + f"\n```\nReviewed head: {head}\n```\n"
+    )
+    _, proc = package_derived(tmp, run)
+    check(
+        "a Reviewed head: line below the header is evidence, not the header",
+        f"base    : {branch_base}" in proc.stdout
+        and "no `Reviewed head:` line" in proc.stdout,
+        f"rc={proc.returncode} out={proc.stdout[-500:]} err={proc.stderr[-300:]}",
+    )
+
+
+def case_a_base_equal_to_the_reviewed_head_is_the_iteration(tmp: Path) -> None:
+    _, run, _, reviewed = followup_scaffold(tmp)
+    out, _ = package(tmp, run, reviewed)
+    prompt = (out / "PROMPT.md").read_text()
+    check(
+        "--base naming the reviewed head gets the this-iteration wording",
+        "is this iteration alone" in prompt
+        and "does not start at the head" not in prompt,
+        prompt[-800:],
+    )
+
+
 CASES = [
+    case_a_quoted_header_line_does_not_move_the_base,
+    case_a_base_equal_to_the_reviewed_head_is_the_iteration,
     case_followup_base_is_the_reviewed_head,
     case_followup_ships_the_earlier_findings,
     case_followup_prompt_asks_for_both_jobs,

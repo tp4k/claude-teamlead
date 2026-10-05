@@ -227,7 +227,8 @@ Strip the flag text out of the task before writing `task.md`, and record the fla
     Write $RUN/final-report.md following references/roles/scribe.md and send its text to the user
     (+ refactor decisions, created ADRs, the ledger path and its row count, and every specialist that
     `when-needed` left unspawned, with the tag that decided it).
-    task.md has `followup-of:` → RE-REVIEW: invoke `/teamlead:codex-review <worktree>` yourself (Skill tool),
+    task.md has `followup-of:` → RE-REVIEW: invoke `/teamlead:codex-review <abs $RUN>` yourself (Skill tool),
+      naming this run, not the worktree — a worktree resolves to its newest run, which may not be this one;
       adding `--opus-code-review=fallback` when `followup-reviewer:` is `Opus fallback`; `codexCodeReview`
       does not gate it. This run's fixes answer that review's findings, so the same review path reads them
       next — Codex first, as always, with the Opus fallback still available when it wrote the closed review.

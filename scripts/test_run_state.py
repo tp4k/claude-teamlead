@@ -730,7 +730,7 @@ def case_followup_report_owes_the_rereview(tmp: Path) -> None:
     review it closes, and a resume that called it complete would skip that."""
     run = followup_done_run(tmp)
     expect("follow-up run with a report but no re-review → re-review owed", run,
-           "11", "invoke /teamlead:codex-review <worktree> (Skill tool)", 0)
+           "11", f"invoke /teamlead:codex-review {run} (Skill tool)", 0)
     r = state(run)
     check("a Codex-origin follow-up does not add the fallback flag",
           "--opus-code-review" not in r.stdout and "complete" not in r.stdout,
@@ -740,7 +740,7 @@ def case_followup_report_owes_the_rereview(tmp: Path) -> None:
 def case_followup_opus_origin_keeps_the_fallback(tmp: Path) -> None:
     run = followup_done_run(tmp, "Opus fallback")
     expect("an Opus-fallback follow-up reruns with the fallback kept", run,
-           "11", "<worktree> --opus-code-review=fallback", 0)
+           "11", f"{run} --opus-code-review=fallback", 0)
 
 
 def case_followup_rereview_started_ends_the_loop(tmp: Path) -> None:
@@ -752,6 +752,19 @@ def case_followup_rereview_started_ends_the_loop(tmp: Path) -> None:
         "2026-10-05T10:00:00Z started\n")
     expect("follow-up run whose re-review started → complete", run,
            "11", "the loop is complete", 0)
+
+
+def case_followup_review_before_report_is_not_the_rerun(tmp: Path) -> None:
+    """A review of this run that ran mid-loop leaves the same files, but earlier
+    than the report — it is not step 11's rerun, so the rerun is still owed."""
+    run = followup_done_run(tmp)
+    (run / "review-package").mkdir()
+    log = run / "review-package" / "codex-review-attempts.log"
+    log.write_text("2026-10-05T09:00:00Z started\n")
+    report = (run / "final-report.md").stat().st_mtime
+    os.utime(log, (report - 60, report - 60))
+    expect("a review package older than the report → re-review still owed", run,
+           "11", "re-review is still owed", 0)
 
 
 def case_followup_opus_answer_ends_the_loop(tmp: Path) -> None:
@@ -1028,6 +1041,7 @@ CASES = [
     case_followup_report_owes_the_rereview,
     case_followup_opus_origin_keeps_the_fallback,
     case_followup_rereview_started_ends_the_loop,
+    case_followup_review_before_report_is_not_the_rerun,
     case_followup_opus_answer_ends_the_loop,
 ]
 

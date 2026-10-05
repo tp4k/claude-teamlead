@@ -199,7 +199,7 @@ def check_followup_contract() -> None:
                         needle in kickoff, needle))
     for needle in ("task.md has `followup-of:`", "`followup-reviewer:` is "
                    "`Opus fallback`", "--opus-code-review=fallback",
-                   "invoke `/teamlead:codex-review <worktree>` yourself (Skill "
+                   "invoke `/teamlead:codex-review <abs $RUN>` yourself (Skill "
                    "tool)"):
         results.append((f"delegate step 11 routes the re-review on {needle!r}",
                         needle in " ".join(step11.split()), needle))

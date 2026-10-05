@@ -194,6 +194,13 @@ def check_followup_contract() -> None:
     results.append(("codex-review's header lists both reviewer values",
                     "Reviewer: Codex | Opus fallback" in writer,
                     "Reviewer: Codex | Opus fallback"))
+    results.append(("codex-review's header records the head the packager starts at",
+                    "Reviewed head: <" in writer, "Reviewed head: <"))
+    results.append(("codex-review triages the follow-up's `## Earlier findings`",
+                    "`## Earlier findings`" in section(
+                        SKILLS / "codex-review" / "SKILL.md",
+                        "## 3. Triage the Codex findings", "## 4."),
+                    "`## Earlier findings`"))
     for needle in (FOLLOWUP_MARKER, "followup-of:", "followup-reviewer:"):
         results.append((f"delegate step 3 records {needle!r}",
                         needle in kickoff, needle))

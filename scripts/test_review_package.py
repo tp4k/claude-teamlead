@@ -923,7 +923,146 @@ def case_opus_fallback_typo_is_skipped(tmp: Path) -> None:
           "opusCodeReview=off" in line and "(default)" in line, f"line={line!r}")
 
 
+FINDINGS = "## Findings to fix\n\n1. HIGH a.txt:1 says two\n"
+
+
+def followup_scaffold(
+    tmp: Path, header_head: bool = True
+) -> tuple[Path, Path, str, str]:
+    """A follow-up run: base, the reviewed change, then the fix commit."""
+    repo, run, branch_base = scaffold(tmp, None)
+    # The fallback when no reviewed head applies is the merge-base with origin.
+    git(repo, "update-ref", "refs/remotes/origin/main", branch_base)
+    reviewed = git(repo, "rev-parse", "HEAD").strip()
+    (repo / "a.txt").write_text("three\n")
+    git(repo, "add", "a.txt")
+    git(repo, "commit", "-qm", "fix")
+    earlier = tmp / "earlier-run"
+    earlier.mkdir()
+    head_line = f"Reviewed head: {reviewed}\n" if header_head else ""
+    (earlier / "review-followup.md").write_text(
+        f"{rp.FOLLOWUP_MARKER}\nReviewer: Codex\nTarget: {repo}\n"
+        f"Review package: {earlier}/review-package/PROMPT.md\n{head_line}"
+        f"\n# Task\n\nFix it.\n\n{FINDINGS}"
+    )
+    (run / "task.md").write_text(
+        f"Fix {earlier}/review-followup.md\n\n"
+        f"followup-of: {earlier / 'review-followup.md'}\n"
+        "followup-reviewer: Codex\n"
+    )
+    return repo, run, branch_base, reviewed
+
+
+def package_derived(
+    tmp: Path, run: Path
+) -> tuple[Path, subprocess.CompletedProcess[str]]:
+    """Like package(), but leaves the base to the packager."""
+    out = tmp / "pkg"
+    env = dict(os.environ, TEAMLEAD_HOME=str(tmp / "home"))
+    proc = subprocess.run(
+        [sys.executable, str(PACKAGER), str(run), "--out", str(out)],
+        capture_output=True, text=True, env=env,
+    )
+    return out, proc
+
+
+def case_followup_base_is_the_reviewed_head(tmp: Path) -> None:
+    _, run, _, reviewed = followup_scaffold(tmp)
+    out, proc = package_derived(tmp, run)
+    check(
+        "a follow-up's base is the head the earlier review read",
+        f"base    : {reviewed}" in proc.stdout,
+        f"rc={proc.returncode} out={proc.stdout[-400:]} err={proc.stderr[-300:]}",
+    )
+
+
+def case_followup_ships_the_earlier_findings(tmp: Path) -> None:
+    _, run, _, _ = followup_scaffold(tmp)
+    out, proc = package_derived(tmp, run)
+    copied = out / "review-followup.md"
+    body = copied.read_text() if copied.is_file() else ""
+    prompt = (out / "PROMPT.md").read_text() if (out / "PROMPT.md").is_file() else ""
+    check(
+        "a follow-up package carries the earlier findings, and the prompt names them",
+        FINDINGS in body and str(copied) in prompt,
+        f"rc={proc.returncode} body={body[-200:]!r} err={proc.stderr[-300:]}",
+    )
+
+
+def case_followup_prompt_asks_for_both_jobs(tmp: Path) -> None:
+    _, run, _, _ = followup_scaffold(tmp)
+    out, _ = package_derived(tmp, run)
+    prompt = (out / "PROMPT.md").read_text()
+    check(
+        "a follow-up prompt asks whether each finding was fixed AND reviews "
+        "the iteration",
+        "## This change closes an earlier review" in prompt
+        and "**Were the findings fixed?**" in prompt
+        and "**Is the new iteration itself sound?**" in prompt
+        and "**6. `## Earlier findings`**" in prompt
+        and "Six parts" in prompt,
+        prompt[-600:],
+    )
+
+
+def case_a_plain_run_gets_no_followup_section(tmp: Path) -> None:
+    _, run, base = scaffold(tmp, None)
+    out, _ = package(tmp, run, base)
+    prompt = (out / "PROMPT.md").read_text()
+    check(
+        "a run with no followup-of: keeps five parts and no follow-up section",
+        "closes an earlier review" not in prompt and "Five parts" in prompt
+        and not (out / "review-followup.md").exists(),
+        prompt[:300],
+    )
+
+
+def case_followup_without_reviewed_head_warns(tmp: Path) -> None:
+    _, run, branch_base, _ = followup_scaffold(tmp, header_head=False)
+    out, proc = package_derived(tmp, run)
+    prompt = (out / "PROMPT.md").read_text() if (out / "PROMPT.md").is_file() else ""
+    check(
+        "a header with no Reviewed head: warns and still asks for both jobs",
+        "WARNING:" in proc.stdout and "no `Reviewed head:` line" in proc.stdout
+        and f"base    : {branch_base}" in proc.stdout
+        and "does not start at the head that review read" in prompt,
+        f"rc={proc.returncode} out={proc.stdout[-500:]} err={proc.stderr[-300:]}",
+    )
+
+
+def case_explicit_base_outranks_the_reviewed_head(tmp: Path) -> None:
+    _, run, branch_base, _ = followup_scaffold(tmp)
+    out, proc = package(tmp, run, branch_base)
+    check(
+        "--base outranks the reviewed head",
+        f"base    : {branch_base}" in proc.stdout,
+        f"rc={proc.returncode} out={proc.stdout[-400:]}",
+    )
+
+
+def case_reviewed_head_off_the_branch_warns(tmp: Path) -> None:
+    repo, run, _, reviewed = followup_scaffold(tmp)
+    git(repo, "checkout", "-q", "-b", "elsewhere", f"{reviewed}~1")
+    (repo / "b.txt").write_text("x\n")
+    git(repo, "add", "b.txt")
+    git(repo, "commit", "-qm", "other")
+    out, proc = package_derived(tmp, run)
+    check(
+        "a reviewed head that is not an ancestor of head is not used as base",
+        "is not an ancestor" in proc.stdout
+        and f"base    : {reviewed}" not in proc.stdout,
+        f"rc={proc.returncode} out={proc.stdout[-500:]} err={proc.stderr[-300:]}",
+    )
+
+
 CASES = [
+    case_followup_base_is_the_reviewed_head,
+    case_followup_ships_the_earlier_findings,
+    case_followup_prompt_asks_for_both_jobs,
+    case_a_plain_run_gets_no_followup_section,
+    case_followup_without_reviewed_head_warns,
+    case_explicit_base_outranks_the_reviewed_head,
+    case_reviewed_head_off_the_branch_warns,
     case_opus_fallback_defaults_off,
     case_opus_fallback_from_global_config,
     case_opus_fallback_repo_beats_global,

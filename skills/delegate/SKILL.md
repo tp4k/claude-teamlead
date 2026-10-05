@@ -232,6 +232,8 @@ Strip the flag text out of the task before writing `task.md`, and record the fla
       adding `--opus-code-review=fallback` when `followup-reviewer:` is `Opus fallback`; `codexCodeReview`
       does not gate it. This run's fixes answer that review's findings, so the same review path reads them
       next — Codex first, as always, with the Opus fallback still available when it wrote the closed review.
+      It is not the same review again: the package starts at the head the closed review read, ships its
+      findings, and asks whether each one is fixed and whether this run's commits are sound on their own.
       With no rerun, a fix nobody independently checked would be reported as closed.
       Run it after the final report is sent; its ledger, and the new review-followup.md if the user picks
       rows, end the run. A Codex failure there follows codex-review's own rules (report it, or fall back).

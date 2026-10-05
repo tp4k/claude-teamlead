@@ -81,7 +81,7 @@ flowchart TD
     ADRW["teamlead:writer · a new ADR"]
     LEDGER["teamlead:writer · docs/deferred-work.md"]
     CXR(["prints the /teamlead:codex-review one-liner"])
-    RERUN["runs /teamlead:codex-review again<br/>Codex first · fallback kept if it was used"]
+    RERUN["runs /teamlead:codex-review on the fix commits<br/>were the findings fixed? · is the fix sound?<br/>Codex first · fallback kept if it was used"]
 
     GO --> CFG
     CFG --> CARD

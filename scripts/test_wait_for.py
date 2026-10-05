@@ -13,6 +13,9 @@ Every case here is a bug that shipped, so the file doubles as the record of what
     `status:` field routed on the quotation (search from the end);
   * the early-exit scan read the whole file, so that same quotation produced a
     false `EARLY_EXIT` on a healthy phase (scan the routing line only);
+  * a follow-up call for the same rewrite re-snapshotted the mtime baseline after the
+    agent had already finished, so it could never succeed and blamed "the
+    pre-dispatch copy" for a file that held the token (`--baseline`, `RETRY:`);
   * the routing keyword matched on its own, so a `Verdict on scope:` line closing
     the plan-validator's newest section outranked the real verdict — and only
     when the validator happened to phrase it that way, so it mis-routed about one
@@ -23,6 +26,7 @@ that needs an install is a suite nobody runs.
 """
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -295,6 +299,255 @@ def case_two_files_one_call(tmp: Path) -> None:
     check("one call blocks on the slower of two files and prints both",
           ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
 
+# The observed 2026-10-05 timelines: a rewrite that lands under one poll interval
+# before the deadline is seen by the final poll only, so it is not yet size-stable.
+CHUNK = 4
+PLAN_OLD = "PLAN_WRITTEN ws=2 paths=src/a.py\n"
+PLAN_FIXED_3 = "# Plan\n\n## Fix log\nPLAN_FIXED fixed=3 new_paths=yes\n"
+PLAN_FIXED_1 = "# Plan\n\n## Fix log\nPLAN_FIXED fixed=1 new_paths=none\n"
+PLAN_FIXED_2 = "# Plan\n\n## Fix log\nround two\nPLAN_FIXED fixed=2 new_paths=none\n"
+RETRY_PREFIX = "RETRY: "
+
+
+def plan_args(f: Path, timeout: int) -> list[str]:
+    return ["--poll", "1", "--timeout", str(timeout), "--rewritten", str(f),
+            "--expect", str(f), "PLAN_FIXED", str(f)]
+
+
+def retry_argv(out: str) -> list[str]:
+    for line in out.splitlines():
+        if line.startswith(RETRY_PREFIX):
+            return shlex.split(line[len(RETRY_PREFIX):])
+    return []
+
+
+def run_retry(cwd: Path, argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a printed RETRY command exactly as printed, interpreter included."""
+    if len(argv) < 2 or argv[1] != str(WAIT_FOR):
+        return subprocess.CompletedProcess(argv, 99, "", "bad RETRY command")
+    try:
+        return subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+                              check=False)
+    except OSError as e:
+        return subprocess.CompletedProcess(argv, 98, "", str(e))
+
+
+def baseline_of(argv: list[str], f: Path) -> int:
+    """The NS that RETRY's `--baseline` gives `f`, or -1 when it names no such file."""
+    for i, tok in enumerate(argv[:-2]):
+        if tok == "--baseline" and argv[i + 1] == str(f):
+            try:
+                return int(argv[i + 2])
+            except ValueError:
+                return -1
+    return -1
+
+
+# Runs wait_for.main() on a fake clock: each time.sleep(s) advances monotonic()
+# by s, and sleep number AT writes BODY to TARGET first. The poll that sees the
+# write is then fixed by construction, not by how the scheduler treats a 0.5 s
+# margin. Under a real clock that write is another process's; here it lands
+# between two polls, which is the only thing the waiter can observe either way.
+# The fake clock does not move the filesystem's: on a filesystem with 1-2 s mtime
+# resolution the rewrite could share the old file's mtime and look stale, so a
+# write that did not land newer is stamped MTIME_STEP_NS after the old mtime, as
+# an agent finishing seconds after the dispatch would be.
+SCRIPTED = """
+import os, sys, pathlib, time
+MTIME_STEP_NS = 2_000_000_000
+sys.path.insert(0, sys.argv[1])
+import wait_for
+target, body, at = pathlib.Path(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+clock = [0.0]
+sleeps = [0]
+def sleep(s):
+    sleeps[0] += 1
+    if sleeps[0] == at:
+        before = target.stat().st_mtime_ns if target.exists() else -1
+        target.write_text(body)
+        if before >= 0 and target.stat().st_mtime_ns <= before:
+            os.utime(target, ns=(before + MTIME_STEP_NS, before + MTIME_STEP_NS))
+    clock[0] += s
+time.monotonic = lambda: clock[0]
+time.sleep = sleep
+sys.argv = [wait_for.__file__, *sys.argv[5:]]
+sys.exit(wait_for.main())
+"""
+
+
+def run_scripted(cwd: Path, f: Path, body: str, at: int,
+                 *args: str) -> subprocess.CompletedProcess[str]:
+    argv = [sys.executable, "-c", SCRIPTED, str(WAIT_FOR.parent), str(f), body,
+            str(at), *args]
+    return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
+
+
+def timed_out_first_call(
+    tmp: Path, f: Path, body: str
+) -> subprocess.CompletedProcess[str]:
+    """A wait whose rewrite lands after the second-to-last poll: only the final,
+    deadline poll sees it, so it is not yet size-stable."""
+    return run_scripted(tmp, f, body, CHUNK, *plan_args(f, CHUNK))
+
+
+def case_observed_wait1_finish_just_before_deadline(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    first_ns = f.stat().st_mtime_ns
+    r = timed_out_first_call(tmp, f, PLAN_FIXED_3)
+    argv = retry_argv(r.stdout)
+    ok = (r.returncode == 2
+          and "not yet size-stable" in r.stdout
+          and "still the pre-dispatch copy" not in r.stdout
+          and baseline_of(argv, f) == first_ns)
+    check("a rewrite landing just before the deadline is size-unstable, "
+          "with a RETRY line",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
+
+
+def case_observed_wait2_retry_keeps_first_baseline(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r = timed_out_first_call(tmp, f, PLAN_FIXED_3)
+    rr = run_retry(tmp, retry_argv(r.stdout))
+    ok = (r.returncode == 2 and rr.returncode == 0
+          and "plan.md: PLAN_FIXED fixed=3 new_paths=yes" in rr.stdout)
+    check("the printed RETRY command accepts the file finished between calls",
+          ok, f"exit={rr.returncode} out={rr.stdout.strip()!r}")
+
+
+def case_followup_without_baseline_names_token_present(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    timed_out_first_call(tmp, f, PLAN_FIXED_3)
+    r = run(tmp, *plan_args(f, 3))
+    ok = (r.returncode == 2
+          and "has PLAN_FIXED but its mtime is not newer than the baseline" in r.stdout
+          and "still the pre-dispatch copy" not in r.stdout)
+    check("a baseline-less re-run on a finished file says the token is present",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
+
+
+def case_retry_chain_keeps_first_baseline(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    first_ns = f.stat().st_mtime_ns
+    r1 = timed_out_first_call(tmp, f, MID_EDIT)
+    argv1 = retry_argv(r1.stdout)
+    # The printed interpreter and script are checked by run_retry elsewhere;
+    # here only the arguments matter, replayed on the fake clock.
+    r2 = run_scripted(tmp, f, FINISHED_EDIT, CHUNK, *argv1[2:])
+    argv2 = retry_argv(r2.stdout)
+    ok = (r1.returncode == 2 and r2.returncode == 2 and bool(argv1) and bool(argv2)
+          and baseline_of(argv1, f) == first_ns
+          and baseline_of(argv2, f) == first_ns)
+    check("a chained timeout carries the first call's baseline forward",
+          ok, f"r1={r1.stdout.strip()!r} r2={r2.stdout.strip()!r}")
+
+
+def case_second_round_does_not_accept_round_one_file(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r1 = timed_out_first_call(tmp, f, PLAN_FIXED_1)
+    done1 = run_retry(tmp, retry_argv(r1.stdout))
+    stale = run(tmp, *plan_args(f, 3))
+    w = delayed_write(f, PLAN_FIXED_2, 2.0)
+    fresh = run(tmp, *FAST, *plan_args(f, 12)[4:])
+    w.wait()
+    ok = (done1.returncode == 0 and stale.returncode == 2
+          and fresh.returncode == 0 and "fixed=2" in fresh.stdout)
+    check("round 2's fresh wait rejects round 1's file and accepts round 2's",
+          ok, f"done1={done1.returncode} stale={stale.returncode} "
+              f"fresh={fresh.returncode} {fresh.stdout.strip()!r}")
+
+
+def case_abandoned_wait_redispatch_does_not_accept_late_file(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r1 = run(tmp, *plan_args(f, 3))
+    f.write_text(PLAN_FIXED_3)
+    r2 = run(tmp, *plan_args(f, 3))
+    ok = RETRY_PREFIX in r1.stdout and r2.returncode == 2
+    check("a re-dispatch's fresh wait rejects a file an abandoned wait never saw",
+          ok, f"r1={r1.stdout.strip()!r} r2={r2.returncode} {r2.stdout.strip()!r}")
+
+
+def case_baseline_not_in_rewritten_exits_2(tmp: Path) -> None:
+    a = tmp / "plan.md"
+    a.write_text(PLAN_OLD)
+    b = tmp / "review-code.md"
+    b.write_text("VERDICT: APPROVE\n")
+    r = run(tmp, *FAST, "--rewritten", str(a), "--baseline", str(b), "123",
+            str(a), str(b))
+    ok = r.returncode == 2 and "nothing waits on it" in r.stdout
+    check("--baseline naming a file that is not --rewritten exits 2 immediately",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
+
+
+def case_retry_keeps_first_write_for_absent_rewritten_file(tmp: Path) -> None:
+    f = tmp / "review.md"
+    r1 = run(tmp, "--poll", "1", "--timeout", "2", "--rewritten", str(f), str(f))
+    f.write_text("VERDICT: APPROVED\n")
+    r2 = run_retry(tmp, retry_argv(r1.stdout))
+    ok = r1.returncode == 2 and r2.returncode == 0 and "VERDICT: APPROVED" in r2.stdout
+    check("a RETRY for a file absent at the first call accepts the file written since",
+          ok, f"r1={r1.returncode} r2={r2.returncode} {r2.stdout.strip()!r}")
+
+
+def case_retry_keeps_dash_separator(tmp: Path) -> None:
+    """A wait-list file starting with `-` needs `--`; RETRY must keep it."""
+    r = run(tmp, "--timeout", "0", "--", "-plan.md")
+    rr = run_retry(tmp, retry_argv(r.stdout))
+    ok = (r.returncode == 2 and rr.returncode == 2
+          and "-plan.md" in rr.stdout and "usage:" not in rr.stderr)
+    check("RETRY for a `-`-leading file runs as a timeout, not an argparse error",
+          ok, f"first={r.stdout.strip()!r} retry={rr.returncode} "
+              f"err={rr.stderr.strip()[:200]!r}")
+
+
+def case_empty_file_reason(tmp: Path) -> None:
+    """A stable zero-byte file is never ready; say empty, not size-unstable."""
+    f = tmp / "empty.md"
+    f.write_text("")
+    r = run(tmp, "--poll", "1", "--timeout", "2", str(f))
+    ok = (r.returncode == 2 and "empty.md (exists but is empty)" in r.stdout
+          and "size-stable" not in r.stdout)
+    check("a stable empty file times out naming it empty",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
+
+
+# token_present is called once per poll and once more by the timeout diagnosis;
+# deleting the file just before that last call is the race, made deterministic.
+VANISH = """
+import sys
+sys.path.insert(0, sys.argv[1])
+import wait_for
+real = wait_for.token_present
+calls = [0]
+def token_present(path, token):
+    calls[0] += 1
+    if calls[0] == 2:
+        path.unlink()
+    return real(path, token)
+wait_for.token_present = token_present
+sys.argv = [wait_for.__file__, *sys.argv[2:]]
+sys.exit(wait_for.main())
+"""
+
+
+def case_file_vanishing_during_diagnosis_still_prints_retry(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r = subprocess.run(
+        [sys.executable, "-c", VANISH, str(WAIT_FOR.parent), "--timeout", "0",
+         "--expect", str(f), "PLAN_FIXED", str(f)],
+        cwd=tmp, capture_output=True, text=True, check=False)
+    ok = (r.returncode == 2 and "missing: plan.md" in r.stdout
+          and bool(retry_argv(r.stdout)) and "Traceback" not in r.stderr)
+    check("a file deleted mid-diagnosis is reported missing, RETRY still printed",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r} "
+              f"err={r.stderr.strip()[-200:]!r}")
+
 
 CASES = [
     case_spec_quote_routes_on_verdict,
@@ -313,6 +566,17 @@ CASES = [
     case_scope_label_does_not_shadow_verdict,
     case_plan_needs_fix_is_a_routing_token,
     case_two_files_one_call,
+    case_observed_wait1_finish_just_before_deadline,
+    case_observed_wait2_retry_keeps_first_baseline,
+    case_followup_without_baseline_names_token_present,
+    case_retry_chain_keeps_first_baseline,
+    case_second_round_does_not_accept_round_one_file,
+    case_abandoned_wait_redispatch_does_not_accept_late_file,
+    case_baseline_not_in_rewritten_exits_2,
+    case_retry_keeps_first_write_for_absent_rewritten_file,
+    case_retry_keeps_dash_separator,
+    case_empty_file_reason,
+    case_file_vanishing_during_diagnosis_still_prints_retry,
 ]
 
 

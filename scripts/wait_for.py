@@ -185,6 +185,14 @@ def main() -> int:
             # One reason per pending file; "not rewritten yet", "token present
             # but not newer" and "not there at all" need different follow-ups.
             def why(f: Path) -> str:
+                # A writer can replace or remove the file between these checks;
+                # report it as missing rather than lose the RETRY line below.
+                try:
+                    return reason(f)
+                except OSError:
+                    return f.name
+
+            def reason(f: Path) -> str:
                 if not f.exists():
                     return f.name
                 if f.stat().st_size == 0:

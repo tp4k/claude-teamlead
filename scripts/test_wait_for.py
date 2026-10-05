@@ -302,7 +302,6 @@ def case_two_files_one_call(tmp: Path) -> None:
 # The observed 2026-10-05 timelines: a rewrite that lands under one poll interval
 # before the deadline is seen by the final poll only, so it is not yet size-stable.
 CHUNK = 4
-LANDS_BEFORE_DEADLINE = 3.5
 PLAN_OLD = "PLAN_WRITTEN ws=2 paths=src/a.py\n"
 PLAN_FIXED_3 = "# Plan\n\n## Fix log\nPLAN_FIXED fixed=3 new_paths=yes\n"
 PLAN_FIXED_1 = "# Plan\n\n## Fix log\nPLAN_FIXED fixed=1 new_paths=none\n"
@@ -344,14 +343,43 @@ def baseline_of(argv: list[str], f: Path) -> int:
     return -1
 
 
+# Runs wait_for.main() on a fake clock: each time.sleep(s) advances monotonic()
+# by s, and sleep number AT writes BODY to TARGET first. The poll that sees the
+# write is then fixed by construction, not by how the scheduler treats a 0.5 s
+# margin. Under a real clock that write is another process's; here it lands
+# between two polls, which is the only thing the waiter can observe either way.
+SCRIPTED = """
+import sys, pathlib, time
+sys.path.insert(0, sys.argv[1])
+import wait_for
+target, body, at = pathlib.Path(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+clock = [0.0]
+sleeps = [0]
+def sleep(s):
+    sleeps[0] += 1
+    if sleeps[0] == at:
+        target.write_text(body)
+    clock[0] += s
+time.monotonic = lambda: clock[0]
+time.sleep = sleep
+sys.argv = [wait_for.__file__, *sys.argv[5:]]
+sys.exit(wait_for.main())
+"""
+
+
+def run_scripted(cwd: Path, f: Path, body: str, at: int,
+                 *args: str) -> subprocess.CompletedProcess[str]:
+    argv = [sys.executable, "-c", SCRIPTED, str(WAIT_FOR.parent), str(f), body,
+            str(at), *args]
+    return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
+
+
 def timed_out_first_call(
     tmp: Path, f: Path, body: str
 ) -> subprocess.CompletedProcess[str]:
-    """A wait whose rewrite lands 0.5 s before the deadline, after the last poll."""
-    w = delayed_write(f, body, LANDS_BEFORE_DEADLINE)
-    r = run(tmp, *plan_args(f, CHUNK))
-    w.wait()
-    return r
+    """A wait whose rewrite lands after the second-to-last poll: only the final,
+    deadline poll sees it, so it is not yet size-stable."""
+    return run_scripted(tmp, f, body, CHUNK, *plan_args(f, CHUNK))
 
 
 def case_observed_wait1_finish_just_before_deadline(tmp: Path) -> None:
@@ -398,9 +426,9 @@ def case_retry_chain_keeps_first_baseline(tmp: Path) -> None:
     first_ns = f.stat().st_mtime_ns
     r1 = timed_out_first_call(tmp, f, MID_EDIT)
     argv1 = retry_argv(r1.stdout)
-    w = delayed_write(f, FINISHED_EDIT, LANDS_BEFORE_DEADLINE)
-    r2 = run_retry(tmp, argv1)
-    w.wait()
+    # The printed interpreter and script are checked by run_retry elsewhere;
+    # here only the arguments matter, replayed on the fake clock.
+    r2 = run_scripted(tmp, f, FINISHED_EDIT, CHUNK, *argv1[2:])
     argv2 = retry_argv(r2.stdout)
     ok = (r1.returncode == 2 and r2.returncode == 2 and bool(argv1) and bool(argv2)
           and baseline_of(argv1, f) == first_ns
@@ -480,6 +508,39 @@ def case_empty_file_reason(tmp: Path) -> None:
           ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
 
 
+# token_present is called once per poll and once more by the timeout diagnosis;
+# deleting the file just before that last call is the race, made deterministic.
+VANISH = """
+import sys
+sys.path.insert(0, sys.argv[1])
+import wait_for
+real = wait_for.token_present
+calls = [0]
+def token_present(path, token):
+    calls[0] += 1
+    if calls[0] == 2:
+        path.unlink()
+    return real(path, token)
+wait_for.token_present = token_present
+sys.argv = [wait_for.__file__, *sys.argv[2:]]
+sys.exit(wait_for.main())
+"""
+
+
+def case_file_vanishing_during_diagnosis_still_prints_retry(tmp: Path) -> None:
+    f = tmp / "plan.md"
+    f.write_text(PLAN_OLD)
+    r = subprocess.run(
+        [sys.executable, "-c", VANISH, str(WAIT_FOR.parent), "--timeout", "0",
+         "--expect", str(f), "PLAN_FIXED", str(f)],
+        cwd=tmp, capture_output=True, text=True, check=False)
+    ok = (r.returncode == 2 and "missing: plan.md" in r.stdout
+          and bool(retry_argv(r.stdout)) and "Traceback" not in r.stderr)
+    check("a file deleted mid-diagnosis is reported missing, RETRY still printed",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r} "
+              f"err={r.stderr.strip()[-200:]!r}")
+
+
 CASES = [
     case_spec_quote_routes_on_verdict,
     case_outcome_at_top,
@@ -507,6 +568,7 @@ CASES = [
     case_retry_keeps_first_write_for_absent_rewritten_file,
     case_retry_keeps_dash_separator,
     case_empty_file_reason,
+    case_file_vanishing_during_diagnosis_still_prints_retry,
 ]
 
 

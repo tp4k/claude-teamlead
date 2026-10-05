@@ -334,7 +334,9 @@ def baseline_of(argv: list[str]) -> int:
     return int(argv[i + 2])
 
 
-def timed_out_first_call(tmp: Path, f: Path, body: str) -> subprocess.CompletedProcess[str]:
+def timed_out_first_call(
+    tmp: Path, f: Path, body: str
+) -> subprocess.CompletedProcess[str]:
     """A wait whose rewrite lands 0.5 s before the deadline, after the last poll."""
     w = delayed_write(f, body, LANDS_BEFORE_DEADLINE)
     r = run(tmp, *plan_args(f, CHUNK))
@@ -351,7 +353,8 @@ def case_observed_wait1_finish_just_before_deadline(tmp: Path) -> None:
           and "not yet size-stable" in r.stdout
           and "still the pre-dispatch copy" not in r.stdout
           and "--baseline" in argv and str(f) in argv)
-    check("a rewrite landing just before the deadline is size-unstable, with a RETRY line",
+    check("a rewrite landing just before the deadline is size-unstable, "
+          "with a RETRY line",
           ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
 
 

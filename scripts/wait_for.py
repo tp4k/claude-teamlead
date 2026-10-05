@@ -17,6 +17,14 @@ began. Pass it per call rather than making it the default: for a file the phase
 does not touch, demanding a fresh mtime turns a finished artifact into a certain
 timeout.
 
+`--baseline FILE NS` (repeatable) replaces that start-time snapshot for a
+`--rewritten` FILE with NS, an mtime in integer nanoseconds. The coordinator never
+types it: a follow-up after exit 2 is the `RETRY:` line this script prints, which
+carries the first call's baseline. A call that re-snapshotted instead would take the
+mtime of a file the agent finished between the two calls, and could never succeed.
+A new dispatch passes no `--baseline`, so it snapshots fresh. Nothing is stored on
+disk.
+
 `--expect FILE TOKEN` (repeatable) holds a file unready until its routing line
 actually says TOKEN, and it is what a rewrite needs on top of `--rewritten`. Fresh
 mtime plus size stability is not enough on its own: an agent that rewrites a file
@@ -42,14 +50,17 @@ never `cat`s the file:
      non-heading line
   1  early exit: a ready file's routing line says `status: blocked|partial` or
      `OUTCOME: CANNOT_RUN` — read that file now, do not wait for the slow siblings
-  2  timeout: the files not yet ready are listed, and one already present but
-     unchanged is marked as still the pre-dispatch copy; wait one more chunk,
-     then check the child's task output
+  2  timeout: the files not yet ready are listed, each with one reason (missing;
+     no token in its routing line; token present but mtime not newer than the
+     baseline; still the pre-dispatch copy; not yet size-stable), then a
+     `RETRY: <command>` line; run it verbatim for one more chunk, then check the
+     child's task output
 """
 from __future__ import annotations
 
 import argparse
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -108,6 +119,10 @@ def main() -> int:
                     help="hold FILE unready until its routing line says TOKEN; "
                          "pair it with --rewritten so a mid-edit file cannot "
                          "look ready between two Edit calls")
+    ap.add_argument("--baseline", action="append", nargs=2, default=[],
+                    metavar=("FILE", "NS"),
+                    help="mtime baseline in ns for a --rewritten FILE; printed "
+                         "in the RETRY line, not typed by hand")
     ap.add_argument("files", nargs="+")
     a = ap.parse_args()
 
@@ -119,6 +134,15 @@ def main() -> int:
     # stability already prove that.
     rewritten = {Path(f) for f in a.rewritten}
     start_mtime_ns = {f: f.stat().st_mtime_ns for f in rewritten if f.exists()}
+    for f_arg, ns_arg in a.baseline:
+        if Path(f_arg) not in rewritten:
+            print(f"--baseline {Path(f_arg).name} is not a --rewritten file; "
+                  "nothing waits on it")
+            return 2
+        try:
+            start_mtime_ns[Path(f_arg)] = int(ns_arg)
+        except ValueError:
+            ap.error(f"--baseline {f_arg}: {ns_arg!r} is not an integer")
     for f in rewritten:
         if f not in set(files):
             print(f"--rewritten {f.name} is not in the wait list; nothing waits on it")
@@ -156,17 +180,34 @@ def main() -> int:
                 print(f"{f.name}: {routing_line(f)}")
             return 0
         if time.monotonic() >= deadline:
-            # "not rewritten yet" and "not there at all" need different
-            # follow-ups, so name which one it is.
+            # One reason per pending file; "not rewritten yet", "token present
+            # but not newer" and "not there at all" need different follow-ups.
             def why(f: Path) -> str:
-                if f.exists() and f in expect and not token_present(f, expect[f]):
+                if not f.exists():
+                    return f.name
+                has_token = f not in expect or token_present(f, expect[f])
+                if not has_token:
                     return f"{f.name} (exists, no {expect[f]} in its routing line yet)"
-                if f in start_mtime_ns:
+                if f in start_mtime_ns and f.stat().st_mtime_ns <= start_mtime_ns[f]:
+                    if f in expect:
+                        return (f"{f.name} (has {expect[f]} but its mtime is not "
+                                "newer than the baseline)")
                     return f"{f.name} (still the pre-dispatch copy)"
-                return f.name
+                return f"{f.name} (not yet size-stable)"
 
             pending = [why(f) for f in files if f not in ready]
             print(f"TIMEOUT after {a.timeout}s; missing: {', '.join(pending)}")
+            retry = ["python3", str(Path(__file__).resolve()),
+                     "--timeout", str(a.timeout), "--poll", str(a.poll)]
+            for f_arg in a.rewritten:
+                retry += ["--rewritten", f_arg]
+            for f_arg, token in a.expect:
+                retry += ["--expect", f_arg, token]
+            for f_arg in a.rewritten:
+                if Path(f_arg) in start_mtime_ns:
+                    retry += ["--baseline", f_arg, str(start_mtime_ns[Path(f_arg)])]
+            retry += a.files
+            print("RETRY: " + shlex.join(retry))
             return 2
         time.sleep(a.poll)
 

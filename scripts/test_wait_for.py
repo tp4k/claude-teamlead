@@ -323,15 +323,25 @@ def retry_argv(out: str) -> list[str]:
 
 
 def run_retry(cwd: Path, argv: list[str]) -> subprocess.CompletedProcess[str]:
-    """Run a printed RETRY command; its interpreter and script path are checked."""
+    """Run a printed RETRY command exactly as printed, interpreter included."""
     if len(argv) < 2 or argv[1] != str(WAIT_FOR):
         return subprocess.CompletedProcess(argv, 99, "", "bad RETRY command")
-    return run(cwd, *argv[2:])
+    try:
+        return subprocess.run(argv, cwd=cwd, capture_output=True, text=True,
+                              check=False)
+    except OSError as e:
+        return subprocess.CompletedProcess(argv, 98, "", str(e))
 
 
-def baseline_of(argv: list[str]) -> int:
-    i = argv.index("--baseline")
-    return int(argv[i + 2])
+def baseline_of(argv: list[str], f: Path) -> int:
+    """The NS that RETRY's `--baseline` gives `f`, or -1 when it names no such file."""
+    for i, tok in enumerate(argv[:-2]):
+        if tok == "--baseline" and argv[i + 1] == str(f):
+            try:
+                return int(argv[i + 2])
+            except ValueError:
+                return -1
+    return -1
 
 
 def timed_out_first_call(
@@ -347,12 +357,13 @@ def timed_out_first_call(
 def case_observed_wait1_finish_just_before_deadline(tmp: Path) -> None:
     f = tmp / "plan.md"
     f.write_text(PLAN_OLD)
+    first_ns = f.stat().st_mtime_ns
     r = timed_out_first_call(tmp, f, PLAN_FIXED_3)
     argv = retry_argv(r.stdout)
     ok = (r.returncode == 2
           and "not yet size-stable" in r.stdout
           and "still the pre-dispatch copy" not in r.stdout
-          and "--baseline" in argv and str(f) in argv)
+          and baseline_of(argv, f) == first_ns)
     check("a rewrite landing just before the deadline is size-unstable, "
           "with a RETRY line",
           ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
@@ -392,7 +403,8 @@ def case_retry_chain_keeps_first_baseline(tmp: Path) -> None:
     w.wait()
     argv2 = retry_argv(r2.stdout)
     ok = (r1.returncode == 2 and r2.returncode == 2 and bool(argv1) and bool(argv2)
-          and baseline_of(argv1) == first_ns and baseline_of(argv2) == first_ns)
+          and baseline_of(argv1, f) == first_ns
+          and baseline_of(argv2, f) == first_ns)
     check("a chained timeout carries the first call's baseline forward",
           ok, f"r1={r1.stdout.strip()!r} r2={r2.stdout.strip()!r}")
 
@@ -446,6 +458,28 @@ def case_retry_keeps_first_write_for_absent_rewritten_file(tmp: Path) -> None:
           ok, f"r1={r1.returncode} r2={r2.returncode} {r2.stdout.strip()!r}")
 
 
+def case_retry_keeps_dash_separator(tmp: Path) -> None:
+    """A wait-list file starting with `-` needs `--`; RETRY must keep it."""
+    r = run(tmp, "--timeout", "0", "--", "-plan.md")
+    rr = run_retry(tmp, retry_argv(r.stdout))
+    ok = (r.returncode == 2 and rr.returncode == 2
+          and "-plan.md" in rr.stdout and "usage:" not in rr.stderr)
+    check("RETRY for a `-`-leading file runs as a timeout, not an argparse error",
+          ok, f"first={r.stdout.strip()!r} retry={rr.returncode} "
+              f"err={rr.stderr.strip()[:200]!r}")
+
+
+def case_empty_file_reason(tmp: Path) -> None:
+    """A stable zero-byte file is never ready; say empty, not size-unstable."""
+    f = tmp / "empty.md"
+    f.write_text("")
+    r = run(tmp, "--poll", "1", "--timeout", "2", str(f))
+    ok = (r.returncode == 2 and "empty.md (exists but is empty)" in r.stdout
+          and "size-stable" not in r.stdout)
+    check("a stable empty file times out naming it empty",
+          ok, f"exit={r.returncode} out={r.stdout.strip()!r}")
+
+
 CASES = [
     case_spec_quote_routes_on_verdict,
     case_outcome_at_top,
@@ -471,6 +505,8 @@ CASES = [
     case_abandoned_wait_redispatch_does_not_accept_late_file,
     case_baseline_not_in_rewritten_exits_2,
     case_retry_keeps_first_write_for_absent_rewritten_file,
+    case_retry_keeps_dash_separator,
+    case_empty_file_reason,
 ]
 
 

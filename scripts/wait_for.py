@@ -51,8 +51,8 @@ never `cat`s the file:
   1  early exit: a ready file's routing line says `status: blocked|partial` or
      `OUTCOME: CANNOT_RUN` — read that file now, do not wait for the slow siblings
   2  timeout: the files not yet ready are listed, each with one reason (missing;
-     no token in its routing line; token present but mtime not newer than the
-     baseline; still the pre-dispatch copy; not yet size-stable), then a
+     empty; no token in its routing line; token present but mtime not newer than
+     the baseline; still the pre-dispatch copy; not yet size-stable), then a
      `RETRY: <command>` line; run it verbatim for one more chunk, then check the
      child's task output
 """
@@ -187,6 +187,8 @@ def main() -> int:
             def why(f: Path) -> str:
                 if not f.exists():
                     return f.name
+                if f.stat().st_size == 0:
+                    return f"{f.name} (exists but is empty)"
                 has_token = f not in expect or token_present(f, expect[f])
                 if not has_token:
                     return f"{f.name} (exists, no {expect[f]} in its routing line yet)"
@@ -199,7 +201,7 @@ def main() -> int:
 
             pending = [why(f) for f in files if f not in ready]
             print(f"TIMEOUT after {a.timeout}s; missing: {', '.join(pending)}")
-            retry = ["python3", str(Path(__file__).resolve()),
+            retry = [sys.executable, str(Path(__file__).resolve()),
                      "--timeout", str(a.timeout), "--poll", str(a.poll)]
             for f_arg in a.rewritten:
                 retry += ["--rewritten", f_arg]
@@ -208,7 +210,7 @@ def main() -> int:
             for f_arg in a.rewritten:
                 baseline = start_mtime_ns.get(Path(f_arg), FIRST_WRITE_NS)
                 retry += ["--baseline", f_arg, str(baseline)]
-            retry += a.files
+            retry += ["--", *a.files]
             print("RETRY: " + shlex.join(retry))
             return 2
         time.sleep(a.poll)

@@ -26,7 +26,7 @@ Use these sections for at least three workstreams or any L-rated stream. For one
 
 Preserve the planner's Goal, Workstreams, specs, acceptance, DAG, Decisions taken, project rules, and anti-scope. Do not restate them. Duplicate spec text can diverge.
 
-Append exactly these four sections to the end of the file (via a sonnet writer — the teamlead never writes files itself):
+Have the sonnet writer append exactly these four sections at the end of plan.md:
 
 ```
 ## Progress

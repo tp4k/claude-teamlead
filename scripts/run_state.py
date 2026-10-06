@@ -201,8 +201,9 @@ def stream_next(r: Run, ws: int) -> tuple[int, str, str, bool] | None:
     rnd = r.round_of(ws)
     tag = f"ws{ws}-r{rnd}" if r.multi else f"r{rnd}"
     if not r.brief(ws, rnd).exists():
-        return (10, "rework brief missing", f"write briefs/impl-ws{ws}-r{rnd}.md "
-                "(rows merged, per references/roles/triage.md), then brief I", False)
+        return (10, "rework brief missing", f"re-dispatch teamlead:triage (brief T, "
+                f"round {rnd - 1}) to write briefs/impl-ws{ws}-r{rnd}.md, then brief I",
+                False)
 
     rep = r.report(ws, rnd)
     if rep is None:
@@ -244,11 +245,11 @@ def stream_next(r: Run, ws: int) -> tuple[int, str, str, bool] | None:
         missing = [a for a in r.axes(ws, rnd)
                    if not r.phase_file("review", ws, rnd, f"-{a}")]
         if missing:
-            return (9, "reviews outstanding", "spawn the reviewers in ONE turn "
-                    f"({', '.join(missing)}) with this stream's axis tags "
-                    f"(brief R, {tag})", False)
-        return (10, "triage not written", f"you write {r.run.name}/triage-{tag}.md "
-                f"following references/roles/triage.md", False)
+            return (9, "reviews outstanding", "run review_briefs.py, then spawn "
+                    f"the reviewers in ONE turn ({', '.join(missing)}) from its "
+                    f"lines (brief R, {tag})", False)
+        return (10, "triage not written", "spawn teamlead:triage (brief T, "
+                f"{tag}) to write triage-{tag}.md", False)
     tv = verdict(tri)
     if not tv:
         return (10, "triage verdict unreadable", f"read {tri.name} — it has no "
@@ -259,9 +260,9 @@ def stream_next(r: Run, ws: int) -> tuple[int, str, str, bool] | None:
             return (10, "rework cap reached", f"STOP and take it to the user: round "
                     f"{rnd} still needs rework past a cap of {r.cap}, so the plan or "
                     f"the spec is wrong, not the coder", True)
-        return (10, "rework round due", f"write briefs/impl-ws{ws}-r{rnd + 1}.md "
-                f"(spec-growth rows demoted to Notes), then a FRESH implementer — "
-                f"never a SendMessage resume", False)
+        return (10, "rework round due", f"briefs/impl-ws{ws}-r{rnd + 1}.md is "
+                f"missing: re-dispatch teamlead:triage (brief T, {tag}) to write it, "
+                f"then a FRESH implementer — never a SendMessage resume", False)
     if tv == "STOP":
         return (10, "triage says STOP",
                 f"read {tri.name} and take it to the user", True)

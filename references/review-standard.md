@@ -1,44 +1,74 @@
 # Review standard
 
-Every reviewer reads this file itself — once before starting the review and once more right before writing the report (`roles/reviewer.md` says when). Nobody pastes it into a prompt. It is the contract between the reviewer and the two agents that consume the review: triage, which routes on the verdict without reading further, and the coder, which executes the rows without judgement. Everything here exists because one of those two misread a review at some point and it cost a round.
+Read this file before reviewing and again immediately before writing the report. Do not paste it into prompts. Triage routes on its verdict. The implementer executes its findings without deciding what you meant.
 
----
+## Report order
 
-REVIEW STANDARD — the shape and the bar of your report.
+1. **Verdict:** one line containing APPROVED, APPROVED_WITH_NOTES, or NEEDS_REWORK.
+2. **Coverage:** code axis only. Give one line identifying checked requirements and referring to failures in the table. Do not enumerate passes.
+3. **Probes:** code axis only. Include executed round-1 probes. In rework, include probes only when production lines requiring probes changed.
+4. **Findings:** one row per fix, highest severity first. Use an empty table when no findings exist.
+5. **Notes:** optional, at most five lines, for observations that are not blocking defects.
+6. **Verification:** always begin with `per $RUN/verifier-r<M>.md: PASS` or FAIL. Use the workstream filename when applicable. Code review then lists only its own failed commands and errors. Do not list passing commands.
 
-Shape, in this order, nothing else:
-1. **Verdict** — one line: `APPROVED` / `APPROVED_WITH_NOTES` / `NEEDS_REWORK`. The teamlead routes on this word alone.
-2. **Coverage** — code-review only, one line: which requirements you checked ("REQ-1..5 checked; failures in table"). Never list the passes.
-2a. **Probes** — code-review only, round 1 only (in a rework round, only if the rework changed a probed line). One line per load-bearing criterion, two or three lines in all, in the form `criterion → mutation at <file>:<line> → killed by <file>::<test_name> | SURVIVED`. **Both references must resolve** — the line you edited, and a test that exists in the tree, copied from the runner's output; a line whose citation cannot be followed is read as a probe that did not happen, and is better omitted than written. `roles/reviewer.md` says how to choose the mutation and why a deleted clause asks a sharper question than a swapped operator. **Write the killed lines too** — this is the only section where the passes belong, because a report without it is indistinguishable from a review that never probed, and a survivor is only worth acting on from a reviewer whose misses are also on the page. A `SURVIVED` line always has a matching findings row; a section that is all `killed by` is the normal outcome and takes three lines.
-3. **Findings** — a table, one row per fix, highest severity first. Empty table if none.
-4. **Notes** — optional, ≤ 5 lines. Observations that are not defects.
-5. **Verification** — first line, always: `per $RUN/verifier-r<M>.md: PASS` (or `FAIL`). That one line is how triage and the next reviewer know your green came from the gate and not from a suite run of your own — two eval runs lost this assertion because "skip the passes" was read as "skip the section". Code axis then adds only the commands it ran itself that FAILED, with the error. Never list passing commands.
+The Verification line identifies the independent gate as suite evidence. Two evaluation runs omitted it after interpreting "skip passes" as "skip Verification".
 
-No praise, no restating the spec, no "what's correct" section, no non-issues. Your reader is a coder agent about to fix things, not a human deciding whether to trust you. Terse beats thorough-looking.
+Do not add praise, repeated spec text, passing requirements, or non-issues. The report gives the next implementer executable changes.
 
-The verdict/row contract — the teamlead does not read your rows before routing, so:
-- any row ⇒ `NEEDS_REWORK`. A row you didn't mean as a gate still becomes one.
-- `APPROVED_WITH_NOTES` ⇒ **zero** rows. "Should fix but not a ship-blocker" is a Note.
+## Probe records
 
-What earns a row: a defect in the behaviour the spec asks for, or a problem that is **exploitable or measurable at the data shape and inputs the spec describes** — "exploitable" means you can write the input that triggers it; "measurable" means it moves a number the spec or the user cares about.
+Start Probes with `list: <n> brief + <n> added; off-list clauses: <n>; LIST_GAP: <n>`.
 
-**A working repro is not, by itself, a row.** A repro proves a capability exists; the acceptance criterion your brief gave you is what says whether that capability is *this change's* problem. Two axes once reproduced the same shell line and correctly disagreed — code graded it against the accepted finding's criterion and filed a HIGH, security asked "is this a regression this PR introduces", proved the identical payload executes on the untouched path, and demoted it to a Note. Both were right. So run the counterfactual before you file: **does the pre-change code do this too?** If it does, the row is about pre-existing behaviour and belongs in Notes unless your criterion names it. And make the probe recreate what the call site actually guarantees — a probe of a hook run outside the hook, without the staged-path guarantee the hook always has, "confirmed" the wrong mechanism and would have hardened four harmless routes while missing the live one. List what the inputs are guaranteed to be, satisfy every item, then run it through the real entry point. Hardening or generalising past the spec (rejecting input types the spec doesn't admit, guarding degenerate constructor arguments, micro-optimising a path the spec doesn't call hot) is a Note even when you'd personally add it: growing the spec is the user's decision, and a row makes it the coder's, silently.
+For each executed probe, use `criterion → mutation at <file>:<line> → killed by <file>::<test_name> | SURVIVED`. Add `[off-list]` after a criterion absent from the shared list.
 
-Row anatomy: `| Sev | Location | Req/Concern | Problem → Fix |`, Sev ∈ CRITICAL / HIGH / MEDIUM / LOW, Location is `file:line`. The Fix half is an instruction the coder can execute **without judgement** — it names the exact edit and it names what must stay. Two rules that come from rounds that were lost:
-- **Show the proof, not the opinion.** "mutant `>=`→`>` at limiter.py:41 survives 6/6" or "input `'a'*10_000` takes 4 s" — the coder's re-check is then mechanical: does that mutant die, does that input finish.
-- **Coverage rows are additive.** A row asking for a stronger test says "add …" and names the assertions that stay. A coder reads "record `LIMIT` requests and assert `count == 0`" as *replace*, deletes the partial-fill assertion the test already had, and you meet the same file again next round with a different hole. The rework diff for a coverage row should be almost all `+` lines.
+Cite the actual mutated line. For a kill, copy the existing test name from runner output. Both references must resolve. An unresolvable citation cannot establish an executed probe.
 
-  | | example |
-  |---|---|
-  | bad | `count` test too weak → record LIMIT requests and assert count == 0 |
-  | good | `while`→`if` mutant at `_expire` survives 6/6 → ADD to `test_count_excludes_expired…`: record `LIMIT` requests, `advance(WINDOW_S)`, `assert count("k") == 0`; KEEP the existing `== 1` partial-fill assert and the unknown-key assert |
+Include killed probes as well as survivors. Without this section, a reader cannot distinguish a clean review from one that never probed. Every SURVIVED record needs a corresponding findings row. Use LIST_GAP for an off-list survivor. All-killed outcomes are normal.
 
-Re-review after a rework: re-check only the rows you raised and the lines the rework changed. Do not reopen round-1 Notes. For a test-only rework, read the diff's `-` lines first: a removed assertion is a regression until proven subsumed.
+Follow `roles/reviewer.md` for mutation selection and fixture reachability.
 
-Sanity pass (specialists only, when your brief says so): the planner found no {attacker-controlled input | hot path} in this workstream. Read the changed files once and run nothing. The report has its own, shorter shape — **whole file ≤ 15 lines**, no Coverage, no Findings table:
-1. Verdict line: `APPROVED — sanity pass; tag: <the planner's tag verbatim>`.
-2. One line: the spec line or code path the tag rests on, cited.
-3. One line: `the diff confirms the planner's no` — with the one fact that settles it.
-4. Notes — optional, ≤ 5 lines.
-5. The Verification line from item 5.
-If the diff proves the planner wrong — a request or file value reaches this code, or it sits on a loop the spec calls hot — say `contradicts` in the first line instead and write the full shape above. Ten reasoned paragraphs on a pure function carry the same information as these three lines and cost triage a read to skip.
+## Verdict and findings
+
+Any findings row requires NEEDS_REWORK. APPROVED_WITH_NOTES requires zero findings. Put optional improvements in Notes instead of accidentally making them gates.
+
+A row requires a defect in specified behavior or an exploitable/measurable problem under the specified inputs and data shape. "Exploitable" requires an input that triggers it. "Measurable" requires a change to a quantity relevant to the spec or user.
+
+A working reproduction alone does not establish this change's responsibility. Compare it with the acceptance criterion and the pre-change code. Pre-existing behavior belongs in Notes unless the criterion explicitly requires its correction.
+
+Two reviews once reproduced the same shell payload and correctly reached different conclusions. Code review checked the accepted finding's criterion and filed HIGH. Security established that the untouched route also executed it and recorded a Note.
+
+Reproduce the actual caller guarantees. List guaranteed input properties, satisfy each, and use the real entry point. A hook tested outside its staged-path guarantee can suggest an incorrect mechanism. One such probe would have hardened four harmless routes while missing the actual route.
+
+Treat additional input hardening, degenerate arguments, and non-hot-path micro-optimization as Notes when the spec does not require them. The user decides scope additions.
+
+## Findings rows
+
+Use `| Sev | Location | Req/Concern | Problem → Fix |`. Severity is CRITICAL, HIGH, MEDIUM, or LOW. Location is `file:line`.
+
+The fix must name the exact change and what must remain. The implementer must not need to infer your intended result.
+
+- Give observed proof, such as a surviving `>=` to `>` mutation at `limiter.py:41` or an input taking four seconds.
+- Make coverage fixes additive. Name the new assertion and every existing assertion to preserve. The resulting diff should contain almost entirely additions.
+
+| Example | Problem → Fix |
+|---|---|
+| Incomplete | `count` test too weak → record LIMIT requests and assert count == 0 |
+| Executable | `while`→`if` mutant at `_expire` survives 6/6 → ADD LIMIT requests, `advance(WINDOW_S)`, and `assert count("k") == 0` to `test_count_excludes_expired…`. KEEP the existing partial-fill `== 1` assertion and unknown-key assertion. |
+
+In an earlier round, a replacement-shaped request removed partial-fill coverage and caused another gap. State additions explicitly.
+
+## Re-review
+
+Check only your previous findings and changed rework lines. Do not reopen round-1 Notes. For test-only changes, inspect removed assertions first. Treat removal as a regression until you establish stronger coverage.
+
+## Specialist sanity pass
+
+Use this shape only when the brief supplies an axis tag of `no`. Read changed files once and run nothing. Keep the report within 15 lines:
+
+1. `APPROVED — sanity pass; tag: <the planner's tag verbatim>`.
+2. Cite the spec line or code path supporting the tag.
+3. State `the diff confirms the planner's no` with the decisive fact.
+4. Include optional Notes, at most five lines.
+5. Include the required verifier-based Verification line.
+
+If the diff disproves the tag, state `contradicts` in the first line and use the full report format. Examples include a reaching request/file value or a loop identified as hot by the spec.

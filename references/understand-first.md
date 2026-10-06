@@ -1,29 +1,28 @@
 # Understand-first — read-only as-is discovery before planning
 
-An **optional** Step 0 (loop step 2b). Run it when the task touches code you don't yet understand and a wrong mental model would be expensive to discover later. It produces a grounded as-is picture *before* the planner commits to a decomposition.
+Use this optional discovery pass at delegate step 2 when an incorrect understanding could invalidate the plan. Discover current behavior before choosing the decomposition.
 
 ## Why it exists
 
-The teamlead's default loop jumps straight from the user's request to the planner. That's fine when the change is in well-understood code. It's a trap when it isn't: the planner builds a decomposition on a guessed mental model, implementers build on the plan, and the misunderstanding only surfaces at the review round — the most expensive place to find it. By then you've spent a planning agent, one or more implementers, and a reviewer, and you have to unwind all of it.
-
-An explicit understanding pass is cheap insurance: a read-only agent traces how the relevant slice actually works today, a second agent validates that trace against the code, and only then does the planner run — now grounded in verified reality instead of assumption. This is a de-risking tool, not a tax: skip it for code you already understand.
+A guessed model can propagate through planning and implementation until review discovers the mistake. By then the run has spent a planner, implementers, and reviewers. A read-only trace followed by independent validation can identify the error earlier. Skip discovery when the mechanism is already clear.
 
 ## When to run it
 
-Run it when **two or more** of these hold:
-- The task is a change to existing behaviour in code neither you nor the user has explained in this session.
-- The flow spans several components/files/services and the interaction isn't obvious.
-- A wrong assumption about current behaviour would invalidate the plan (e.g. "it's synchronous" vs "it's actually queued").
-- The user's request itself is framed as "figure out how X works, then change it" or "why does Y happen".
+Run when at least two conditions hold:
 
-Skip it when the change is localised and the mechanism is already clear — don't pay for discovery you don't need.
+- Existing behavior changes and nobody explained the mechanism in this session.
+- The interaction spans components, files, or services and is unclear.
+- A false assumption, such as synchronous execution versus queueing, would invalidate the plan.
+- The request asks how something works before changing it, or asks why behavior occurs.
+
+Skip localized changes with an understood mechanism.
 
 ## Two flavours
 
-1. **Lightweight (default):** one read-only opus tracer returns a prose as-is explanation. Good enough for most "I need to understand this before changing it" cases.
-2. **Diagrammed (on request / genuinely complex flows):** the tracer also produces diagram(s) of the flow. Use only when the interaction is hard to follow in prose and the user would benefit from a visual, or when the user explicitly asks. Don't over-invest in rendering for a flow that two sentences would capture.
+1. **Lightweight:** an opus tracer returns a concise explanation of current behavior.
+2. **Diagrammed:** add one to three diagrams when requested or when a complex interaction benefits from a visual. Avoid rendering work for a flow explainable in two sentences.
 
-Either way, the **validation pass is mandatory** — an unverified as-is description is exactly the hallucination risk this step is meant to remove.
+Both require a different agent to validate the trace. An unchecked explanation retains the original factual risk.
 
 ## Step 1 — Tracer (read-only, opus)
 
@@ -67,10 +66,10 @@ Check every claim against the code:
 Report: VALID / NEEDS_FIX, plus a findings list (claim → reality file:line → correction). Only report problems. If accurate, say so in one line.
 ```
 
-If the validator returns NEEDS_FIX, correct the explanation (re-spawn the tracer with the findings, or fix inline) until it's consistent with the code or the remaining uncertainty is stated explicitly.
+For NEEDS_FIX, correct the explanation using the findings. Redispatch the tracer or correct the explanation inline. Continue until code supports it or remaining uncertainty is explicit.
 
 ## Step 3 — Feed it into planning
 
-The validated as-is becomes context for the planner: paste it into the planner prompt as "verified current behaviour" so the decomposition is grounded. The `CONFIRMED / INFERRED / UNCLEAR` split is especially valuable — `UNCLEAR` items often become the planner's open questions for the user, and `INFERRED` items are where the plan should stay cautious.
+Provide the validated explanation to the planner as current-behavior context. Keep CONFIRMED, INFERRED, and UNCLEAR distinctions. UNCLEAR items can become open questions. INFERRED items require cautious claims. Prefer an input artifact path when one exists, following the pointer-brief rule.
 
-Keep the artifact lightweight unless the user wants a durable report. The goal is a correct mental model before planning, not a polished document.
+Keep the artifact concise unless the user requests a durable report. Establish correct understanding before planning.

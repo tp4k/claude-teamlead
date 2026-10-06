@@ -36,6 +36,7 @@ import run_config
 from wait_for import ROUTING, routing_line
 
 AXES = ("code", "security", "perf")
+SETTING_OF = {"security": "securityReview", "perf": "perfReview"}
 WS_HEADING = re.compile(r"^##\s+WS-(\d+)\b", re.M)
 
 
@@ -148,15 +149,41 @@ class Run:
         that direction and not the other. Code is never subtracted — it is the
         one axis `triage.md` says always re-runs.
         """
-        flags = next((ln for ln in self.text("task.md").splitlines()
-                      if ln.startswith("flags:")), "")
-        allowed = tuple(a for a in AXES
-                        if a == "code" or f"--no-{a}-review" not in flags)
+        allowed = tuple(a for a in AXES if a == "code" or (
+            self.setting(a) != "off"
+            and not (ws and self.skip_record(ws, rnd, a).exists())))
         if rnd < 2 or not ws:
             return allowed
         prev = self.phase_file("triage", ws, rnd - 1)
         carried = carried_axes(prev.read_text(errors="replace")) if prev else ()
         return tuple(a for a in allowed if a == "code" or a not in carried)
+
+    def setting(self, axis: str) -> str:
+        """on, when-needed or off for one reviewer axis.
+
+        The resolved option in config.json wins over the task's `--no-*` flag,
+        because the options card can turn a flagged-off reviewer back on; the
+        flag decides only when no option was recorded. review_briefs.py and the
+        completion check must agree on this, or a resumed run waits for a
+        report nobody was asked to write.
+        """
+        if axis == "code":
+            return "on"
+        option = paths.read_json(self.run / "config.json").get("options", {})
+        flags = next((ln for ln in self.text("task.md").splitlines()
+                      if ln.startswith("flags:")), "")
+        flagged = "off" if f"--no-{axis}-review" in flags else "on"
+        return str(option.get(SETTING_OF[axis], flagged))
+
+    def skip_record(self, ws: int, rnd: int, axis: str) -> Path:
+        """Where review_briefs.py records a reviewer it decided not to dispatch.
+
+        `when-needed` + tag=no skips on the validator's tag, which lives in no
+        run file; without this record a resumed run cannot tell a skipped
+        reviewer from an outstanding one.
+        """
+        infix = f"ws{ws}-" if self.multi else ""
+        return self.run / "briefs" / f"review-{infix}r{rnd}-{axis}.skip"
 
     def brief(self, ws: int, rnd: int) -> Path:
         return self.run / "briefs" / f"impl-ws{ws}-r{rnd}.md"

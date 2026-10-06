@@ -393,9 +393,14 @@ def case_missing_reviewer_is_named(tmp: Path) -> None:
 
 def case_flags_remove_a_reviewer_from_the_expected_set(tmp: Path) -> None:
     """The discriminating half of the previous case: with the flag set, the same
-    file set is *complete*, so the next action is triage rather than a respawn."""
+    file set is *complete*, so the next action is triage rather than a respawn.
+
+    config.json carries the flags as run_config.py resolves them: the options,
+    not task.md, decide, since the options card can turn a flagged-off review
+    back on (test_review_briefs covers that and the no-option fallback)."""
     flags = "Apply stacked coupons.\n\nflags: --no-security-review, --no-perf-review\n"
-    run = mkrun(tmp, {"task.md": flags, "plan.md": PLAN, "questions.md": ANSWERED,
+    run = mkrun(tmp, {"config.json": config(securityReview="off", perfReview="off"),
+                      "task.md": flags, "plan.md": PLAN, "questions.md": ANSWERED,
                       "plan-validation.md": VALID, "briefs/impl-ws1-r1.md": BRIEF,
                       "implementer-ws1-r1.md": DONE_REPORT,
                       "verifier-r1.md": "OUTCOME: PASS\n\npytest -q → exit 0\n",

@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 from review_briefs import mode, write_briefs
+from run_state import AXES, Run
 
 SCRIPTS = Path(__file__).resolve().parent
 TAGS = {"input": "no", "hot": "yes", "public": "yes"}
@@ -94,6 +95,20 @@ class ReviewBriefTests(unittest.TestCase):
         out = write_briefs(self.rundir, 1, 1, TAGS, "abc", "")
         self.assertTrue(out[1].startswith("security sanity"))
         self.assertEqual(out[2], "perf skip reason=perfReview=off, hot=yes")
+
+    def test_completion_check_agrees_with_skips(self) -> None:
+        # A resumed run must not wait for a report the script chose not to request.
+        self.config("when-needed", "off")
+        write_briefs(self.rundir, 1, 1, TAGS, "abc", "")
+        self.assertEqual(Run(self.rundir).axes(1, 1), ("code",))
+        # A later run of the script with tag=yes dispatches it and clears the record.
+        write_briefs(self.rundir, 1, 1, dict(TAGS, input="yes"), "abc", "")
+        self.assertEqual(Run(self.rundir).axes(1, 1), ("code", "security"))
+
+    def test_completion_check_follows_resolved_option(self) -> None:
+        (self.rundir / "task.md").write_text("flags: --no-security-review\n")
+        self.config("on", "on")
+        self.assertEqual(Run(self.rundir).axes(1, 1), AXES)
 
     def test_multi_workstream_uses_infix(self) -> None:
         self.config("off", "off")

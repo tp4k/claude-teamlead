@@ -16,7 +16,7 @@ Each run uses `$RUN`, defined in `references/run-directory.md`. Agents write rep
 
 ## Hard rules
 
-1. **Write only under `$RUN`.** You may write `task.md`, `adrs.md`, Answers, `settled-r<M>.md`, verifier-FAIL rework briefs, refactor decisions, and the final report. `teamlead:triage` writes triage files and review-driven rework briefs. `review_briefs.py` writes reviewer briefs. `run_config.py` writes `config.json`. Delegate repository edits, tests, ADRs, and ledger writes through Agent. Keep `plan.md` in `$RUN`. The planner owns its plan sections. The writer owns its living sections.
+1. **Write only under `$RUN`.** You may write `task.md`, `adrs.md`, Answers, `settled-ws<N>-r<M>.md`, verifier-FAIL rework briefs, refactor decisions, and the final report. `teamlead:triage` writes triage files and review-driven rework briefs. `review_briefs.py` writes reviewer briefs. `run_config.py` writes `config.json`. Delegate repository edits, tests, ADRs, and ledger writes through Agent. Keep `plan.md` in `$RUN`. The planner owns its plan sections. The writer owns its living sections.
 2. **Limit Bash.** Run the bundled orchestration scripts explicitly named in this workflow. Fast read-only inspection may use `git log`, `git show --stat`, `ls`, and `cat`. Delegate other state changes or long-running work. Never run tests or verification yourself. The verifier supplies independent command evidence. Two evaluation runs spent 5–6 coordinator turns repeating its checks.
 3. **Respect pinned models.** Pass no model for `teamlead:planner`, `teamlead:plan-validator`, `teamlead:plan-reviewer`, `teamlead:implementer`, `teamlead:verifier`, `teamlead:triage`, or `teamlead:writer`. For harness reviewers and ad-hoc agents, use opus for reasoning and sonnet for reading or dictated writing. A specialist sanity pass with an axis tag of `no` uses sonnet. Using opus for a two-line sanity report cost 11% of one measured run.
 4. **Parallelize independent work.** Use multiple Agent calls in one message for independent workstreams, read-only questions, or reviews. Sequence calls only when one depends on another.
@@ -192,9 +192,9 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Do not call CANNOT_RUN an implementer test failure.
 9.  Dispatch configured reviewers together immediately after the gate passes.
     Code review always runs. Use the validator's final tags and config.json.
-    Write settled decisions once to $RUN/settled-r<M>.md (see Pointer briefs), then:
+    Write settled decisions once to $RUN/settled-ws<N>-r<M>.md (see Pointer briefs), then:
       python3 $PLUGIN/scripts/review_briefs.py $RUN --ws <N> --round <M> \
-        --tags input=<yes|no>,hot=<yes|no>,public=<yes|no> --commits "<hashes>" --settled $RUN/settled-r<M>.md
+        --tags input=<yes|no>,hot=<yes|no>,public=<yes|no> --commits "<hashes>" --settled $RUN/settled-ws<N>-r<M>.md
     It applies the table below, drops specialists the preceding triage carried, and prints one line per axis: full|sanity with type, model and brief path, or skip with its reason.
     Dispatch each non-skip line in one message: subagent_type and model from the line, prompt `Read and follow <brief path>.`
     Code-axis mutation probes use disposable clones under $RUN. Keep the shared tree read-only for every reviewer.
@@ -304,7 +304,7 @@ Output: write $RUN/verifier-r<M>.md, return the OUTCOME block + file line.
 
 **R — reviewer** — written by `scripts/review_briefs.py` (step 9), never typed. Its dispatch line names `code-review`, `performance-engineer`, or `security-review`/`general-purpose`, and opus for a full review or sonnet for a sanity pass. The prompt is only `Read and follow <brief path>.`
 
-**S — settled decisions** (`$RUN/settled-r<M>.md`, the one file you write for review; `none` when nothing is settled; the script copies it verbatim into every reviewer brief)
+**S — settled decisions** (`$RUN/settled-ws<N>-r<M>.md`, the one file you write for review; `none` when nothing is settled; the script copies it verbatim into every reviewer brief)
 ```
 <each settled decision verbatim, including its accepted consequence, numbered>
 <verifier note, only when step 8a's untouched-failure exception applied: which failures, touched=no, treated as PASS>
@@ -313,7 +313,7 @@ Output: write $RUN/verifier-r<M>.md, return the OUTCOME block + file line.
 ```
 $RUN = <abs>. Repo: <abs>.
 Workstream: WS-<N>. Round: <M>. <infix line as in G>
-Reviews: <each review report path of this round>. Carried: <axis verdict (round, reason) each, or none>.
+Reviews: <each review report path of this round>. Previous triage: <$RUN/triage-r<M-1>.md path, or none in round 1>.
 Rework count before this round: <k>. reworkCap: <cap>.
 Output: write $RUN/triage-r<M>.md and, on NEEDS_REWORK, $RUN/briefs/impl-ws<N>-r<M+1>.md; return the two-line VERDICT block.
 ```

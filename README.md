@@ -267,7 +267,7 @@ Run artifacts, worktree handover files, and config live under `$TEAMLEAD_HOME`, 
     ├── questions.md                the planner's questions + your ## Answers
     ├── briefs/impl-wsN-rM.md       what each implementer is told to build
     ├── briefs/review-rM-<axis>.md  each reviewer's brief, written by review_briefs.py
-    ├── settled-rM.md               settled decisions copied into every reviewer brief
+    ├── settled-wsN-rM.md           settled decisions copied into every reviewer brief
     ├── plan-review-package/        what Codex was given                (codexPlanReview)
     ├── plan-design-review.md       the in-session design review
     ├── plan-review-package/plan-review-r1.md   the Codex design review

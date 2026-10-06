@@ -16,7 +16,8 @@ a specialist runs in full on tag=yes, as a sonnet sanity pass on tag=no with
 setting `on`, and not at all on `off` or `when-needed` + no. The setting is
 the resolved option in config.json, not the task's `--no-*` flag: the options
 card can turn a flagged-off reviewer back on. A rework round also drops the
-specialists the previous triage carried.
+specialists the previous triage carried. Every skip leaves a `.skip` record
+beside the briefs so run_state's completion check stops expecting that report.
 
 Prints one line per axis:
   <axis> full|sanity type=<subagent type> model=<opus|sonnet> brief=<abs path>
@@ -31,10 +32,9 @@ import sys
 from pathlib import Path
 
 import paths
-from run_state import AXES, Run, carried_axes
+from run_state import AXES, SETTING_OF, Run, carried_axes
 
 TAG_OF = {"code": "public", "security": "input", "perf": "hot"}
-SETTING_OF = {"security": "securityReview", "perf": "perfReview"}
 TYPE_OF = {
     "code": "code-review",
     "security": "security-review (general-purpose if unregistered)",
@@ -117,26 +117,26 @@ def write_briefs(run_dir: Path, ws: int, rnd: int, tags: dict[str, str],
     run = Run(run_dir.resolve())
     if not (run.run / "repo.txt").is_file():
         raise ValueError(f"{run_dir} has no repo.txt, so it is not a run directory")
-    options = paths.read_json(run.run / "config.json").get("options", {})
-    flags = next((ln for ln in run.text("task.md").splitlines()
-                  if ln.startswith("flags:")), "")
     prev = run.phase_file("triage", ws, rnd - 1) if rnd > 1 else None
     carried = carried_axes(prev.read_text(errors="replace")) if prev else ()
     infix = f"ws{ws}-" if run.multi else ""
     out: list[str] = []
     for axis in AXES:
         tag = tags[TAG_OF[axis]]
-        if axis != "code" and axis in carried:
-            out.append(f"{axis} skip reason=carried by triage round {rnd - 1}")
-            continue
-        flagged = "off" if f"--no-{axis}-review" in flags else "on"
-        setting = ("on" if axis == "code"
-                   else options.get(SETTING_OF[axis], flagged))
+        skip = run.skip_record(ws, rnd, axis)
+        setting = run.setting(axis)
         how = mode(axis, setting, tag)
-        if how == "skip":
-            out.append(f"{axis} skip reason={SETTING_OF[axis]}={setting}, "
-                       f"{TAG_OF[axis]}={tag}")
+        reason = ""
+        if axis != "code" and axis in carried:
+            reason = f"carried by triage round {rnd - 1}"
+        elif how == "skip":
+            reason = f"{SETTING_OF[axis]}={setting}, {TAG_OF[axis]}={tag}"
+        if reason:
+            skip.parent.mkdir(exist_ok=True)
+            skip.write_text(reason + "\n")
+            out.append(f"{axis} skip reason={reason}")
             continue
+        skip.unlink(missing_ok=True)
         path = run.run / "briefs" / f"review-{infix}r{rnd}-{axis}.md"
         path.parent.mkdir(exist_ok=True)
         path.write_text(brief(run, ws, rnd, axis, how, tag, commits, settled))

@@ -43,6 +43,8 @@ Rows that are defects in what the spec *does* ask for go to rework unchanged. **
 
 Write each demoted row in a **ledger-ready** one-line form — `<what would change> — <why it was demoted> (<location>)` — because a ledger writer copies these lines verbatim into `<repo>/docs/deferred-work.md` at the end of the run. A demotion is a real decision about the codebase; recorded only in a chat message it is gone by the next run, and the next reviewer raises the same row and gets it demoted again.
 
+**Keep the `LIST_GAP` tag on a merged row.** It marks a survivor on a clause the shared probe list never carried — the planner's seed or the implementer's additions missed it — and the run counts these (`list_gap=` in your return line) to tell whether the list is closing the gap between what the coder probes and what the reviewer mutates.
+
 ## Collect the Notes
 
 Gather the Notes from all reviews into one short list for the user. They ride along with the final summary or the between-rounds update; they never enter a rework brief as if they were findings, and they are never silently dropped.
@@ -134,7 +136,7 @@ Write both files first, then return. A verdict returned without the files on dis
 Your final message is exactly two lines:
 
 ```
-VERDICT: <verdict> rows=<n> demoted=<n> notes=<n> rework_brief=<path|none> rereview=<code[,security][,perf]> carried=<none|security[,perf]>
+VERDICT: <verdict> rows=<n> list_gap=<n> demoted=<n> notes=<n> rework_brief=<path|none> rereview=<code[,security][,perf]> carried=<none|security[,perf]>
 file: $RUN/triage-r<M>.md
 ```
 

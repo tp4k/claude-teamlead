@@ -179,6 +179,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
       refactor request → decide through references/refactor-workflow.md
     Inspect git log --oneline and git show --stat <hash>.
 8a. Dispatch teamlead:verifier with brief G.
+    Before a same-round retry, complete the report archival procedure in step 9, including after CANNOT_RUN.
     First wait for every repository writer in the wave, including parallel implementers and refactor agents.
     Record the final wave HEAD for brief G. Keep repository writers idle until every verifier and reviewer finishes.
     Wait: wait_for.py --timeout 120 <verifier report>
@@ -199,7 +200,11 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Security uses input:. Performance uses hot:. Code uses public: for its public-surface checklist.
     Report specialists skipped by when-needed and the tag responsible.
     Wait once for the dispatched review reports, with timeout 480.
-    A reviewer reporting invalid snapshot evidence → return to 8a for fresh verification and review.
+    A reviewer reporting invalid snapshot evidence → wait for every current-wave verifier and reviewer to finish.
+    Before redispatch, archive every current-wave verifier, review, and triage report:
+      python3 $PLUGIN/scripts/archive_reports.py $RUN <all current-wave report paths>
+    Preserve earlier rounds, implementer reports, and briefs. Stop recovery if archival fails.
+    Return to 8a for fresh verification and review. The original paths now await new reports.
     Do not dispatch implementation merely to resolve this gate failure.
     For rework, code always reruns. Dispatch specialists selected by the preceding triage only.
 10. TRIAGE using references/roles/triage.md. Write triage-r<M>.md.

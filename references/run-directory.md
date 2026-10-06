@@ -48,6 +48,8 @@ Use r1 for initial implementation. Increment the round for each rework. Verifica
 
 For multiple workstreams, use `verifier-ws<N>-r<M>.md`, `review-ws<N>-r<M>-<axis>.md`, and `triage-ws<N>-r<M>.md`. For one workstream, omit the `ws<N>-` infix. Every prompt must identify the applicable convention.
 
+For a same-round verification retry, first wait for every current-wave verifier and reviewer to finish. Run `archive_reports.py $RUN <all current-wave verifier, review, and triage paths>` before redispatch. The script moves existing reports into a unique directory under `$RUN/report-history/`. This preserves evidence and removes stale routing files. Keep implementer reports, briefs, and earlier rounds in place. Wait on the original report paths for the new attempt.
+
 ## The pointer brief
 
 Every agent prompt has the same skeleton, and it fits in 15–25 lines:

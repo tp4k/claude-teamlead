@@ -16,9 +16,9 @@ Each run uses `$RUN`, defined in `references/run-directory.md`. Agents write rep
 
 ## Hard rules
 
-1. **Write only under `$RUN`.** You may write `task.md`, `adrs.md`, Answers, rework briefs, triage files, refactor decisions, and the final report. `run_config.py` writes `config.json`. Delegate repository edits, tests, ADRs, and ledger writes through Agent. Keep `plan.md` in `$RUN`. The planner owns its plan sections. The writer owns its living sections.
+1. **Write only under `$RUN`.** You may write `task.md`, `adrs.md`, Answers, `settled-ws<N>-r<M>.md`, verifier-FAIL rework briefs, refactor decisions, and the final report. `teamlead:triage` writes triage files and review-driven rework briefs. `review_briefs.py` writes reviewer briefs. `run_config.py` writes `config.json`. Delegate repository edits, tests, ADRs, and ledger writes through Agent. Keep `plan.md` in `$RUN`. The planner owns its plan sections. The writer owns its living sections.
 2. **Limit Bash.** Run the bundled orchestration scripts explicitly named in this workflow. Fast read-only inspection may use `git log`, `git show --stat`, `ls`, and `cat`. Delegate other state changes or long-running work. Never run tests or verification yourself. The verifier supplies independent command evidence. Two evaluation runs spent 5–6 coordinator turns repeating its checks.
-3. **Respect pinned models.** Pass no model for `teamlead:planner`, `teamlead:plan-validator`, `teamlead:plan-reviewer`, `teamlead:implementer`, `teamlead:verifier`, or `teamlead:writer`. For harness reviewers and ad-hoc agents, use opus for reasoning and sonnet for reading or dictated writing. A specialist sanity pass with an axis tag of `no` uses sonnet. Using opus for a two-line sanity report cost 11% of one measured run.
+3. **Respect pinned models.** Pass no model for `teamlead:planner`, `teamlead:plan-validator`, `teamlead:plan-reviewer`, `teamlead:implementer`, `teamlead:verifier`, `teamlead:triage`, or `teamlead:writer`. For harness reviewers and ad-hoc agents, use opus for reasoning and sonnet for reading or dictated writing. A specialist sanity pass with an axis tag of `no` uses sonnet. Using opus for a two-line sanity report cost 11% of one measured run.
 4. **Parallelize independent work.** Use multiple Agent calls in one message for independent workstreams, read-only questions, or reviews. Sequence calls only when one depends on another.
 5. **Review every coding round after the verifier gate.** An implementer's success report does not replace either check.
 6. **Use pointer briefs.** Resolve `$RUN` absolutely. Name inputs, output, and return line. Add only facts absent from disk, such as routing settings, tags, commit lists, and review subsets. Plugin agents need no role, tool, or model lines. Harness reviewers need their role pointer. Exception: copy settled decisions and accepted consequences verbatim into every reviewer brief as specified below. Across six runs, retyping context cost 10–15 minutes per run. One 23 KB brief contained 19 KB of copied context.
@@ -29,7 +29,7 @@ Each run uses `$RUN`, defined in `references/run-directory.md`. Agents write rep
 10. **Preserve the spec.** The planner quotes it in each workstream block and round-1 brief. Code review checks conformance. Specialists use it as context. Do not paraphrase it into a prompt. Point to `plan.md` and its `## WS-<N>` block.
 11. **Wait while children run.** Do not end the turn with a running subagent. Three of six evaluation runs stalled after doing so. Use one wait call per phase, rather than repeated sleep calls. In two measured runs, sleep polling consumed 14–19 of 83–104 coordinator turns.
     Run `python3 $PLUGIN/scripts/wait_for.py --timeout <s> <phase output files>`. Route on its printed lines. Read a file only when routing requires its details. Exit 1 identifies blocked, partial, or CANNOT_RUN output. Read that file immediately. Exit 2 prints a `RETRY:` command. Run it verbatim. After two empty chunks, read the child's task-output path and report the stall. Use 120-second chunks for verifier or sanity passes, 240 for validation, and 480 for planning, implementation, or full reviews. Start Codex plan review in background Bash. Its completion notification supplies the result. Do not wait for it with this script. Child notifications can arrive after the file and do not change an already processed result.
-12. **Minimize routing delay.** Aim to dispatch the next ready agent within one minute. Write the answers, triage, rework brief, or final report required by the phase. Avoid composing redundant narration between phases.
+12. **Minimize routing delay.** Aim to dispatch the next ready agent within one minute. Write the answers or final report required by the phase. Avoid composing redundant narration between phases.
 
 ## Run options — resolved by a script, not by you
 
@@ -192,6 +192,11 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Do not call CANNOT_RUN an implementer test failure.
 9.  Dispatch configured reviewers together immediately after the gate passes.
     Code review always runs. Use the validator's final tags and config.json.
+    Write settled decisions once to $RUN/settled-ws<N>-r<M>.md (see Pointer briefs), then:
+      python3 $PLUGIN/scripts/review_briefs.py $RUN --ws <N> --round <M> \
+        --tags input=<yes|no>,hot=<yes|no>,public=<yes|no> --commits "<hashes>" --settled $RUN/settled-ws<N>-r<M>.md
+    It applies the table below, drops specialists the preceding triage carried, and prints one line per axis: full|sanity with type, model and brief path, or skip with its reason.
+    Dispatch each non-skip line in one message: subagent_type and model from the line, prompt `Read and follow <brief path>.`
     Code-axis mutation probes use disposable clones under $RUN. Keep the shared tree read-only for every reviewer.
       setting       tag=yes                 tag=no
       on            opus full review        sonnet sanity pass
@@ -206,13 +211,13 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Preserve earlier rounds, implementer reports, and briefs. Stop recovery if archival fails.
     Return to 8a for fresh verification and review. The original paths now await new reports.
     Do not dispatch implementation merely to resolve this gate failure.
-    For rework, code always reruns. Dispatch specialists selected by the preceding triage only.
-10. TRIAGE using references/roles/triage.md. Write triage-r<M>.md.
+10. TRIAGE: dispatch teamlead:triage with brief T. Do not read the reviews yourself.
+    Wait: wait_for.py --timeout 300 <triage report>
+    Route on its VERDICT line:
       APPROVED or APPROVED_WITH_NOTES → 11
-      NEEDS_REWORK → write merged rows in briefs/impl-ws<N>-r<M+1>.md
-        Demote scope additions to Notes. Dispatch a fresh implementer, then return to 8.
-    If rework already equals reworkCap, default 3, another NEEDS_REWORK becomes STOP.
-    Provide findings history and the possible plan/spec defect. Do not loop indefinitely.
+      NEEDS_REWORK → confirm briefs/impl-ws<N>-r<M+1>.md exists (triage writes it before the report), dispatch a fresh implementer, then return to 8.
+      STOP → it hit reworkCap (default 3). Relay its findings history and possible plan/spec defect to the user.
+    Do not loop indefinitely.
     Dispatch dependent streams when their dependencies are approved and every review in the current wave has finished.
 11. Any demoted row or deferred refactor → dispatch the ledger writer with brief L.
     With no such items, dispatch no ledger writer.
@@ -235,7 +240,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
 
 Use absolute paths for `$RUN` and `$PLUGIN` in every prompt. Apply the documented workstream filename infix to every output path. Templates show single-workstream filenames unless stated otherwise. Kickoff prints `PLUGIN_ROOT=`. A prompt does not expand shell placeholders. Resolve any role or format reference before dispatch.
 
-The six pipeline agents load their own roles, tools, and models. Briefs supply per-run facts. Do not duplicate those definitions. Each template is complete except for its indicated substitutions and applicable conditional lines.
+The seven pipeline agents load their own roles, tools, and models. Briefs supply per-run facts. Do not duplicate those definitions. Each template is complete except for its indicated substitutions and applicable conditional lines.
 
 **P — planner** (`teamlead:planner`)
 ```
@@ -297,32 +302,35 @@ Inputs: $RUN/briefs/impl-ws<N>-r<M>.md (## Verification commands), $RUN/implemen
 Output: write $RUN/verifier-r<M>.md, return the OUTCOME block + file line.
 ```
 
-**R — reviewer** (`code-review`, `performance-engineer`, or `general-purpose` for security). Use opus for full review and sonnet for specialist sanity passes.
+**R — reviewer** — written by `scripts/review_briefs.py` (step 9), never typed. Its dispatch line names `code-review`, `performance-engineer`, or `security-review`/`general-purpose`, and opus for a full review or sonnet for a sanity pass. The prompt is only `Read and follow <brief path>.`
+
+**S — settled decisions** (`$RUN/settled-ws<N>-r<M>.md`, the one file you write for review; `none` when nothing is settled; the script copies it verbatim into every reviewer brief)
 ```
-Role: read and follow $PLUGIN/references/roles/reviewer.md. $RUN = <abs>. Repo: <abs>.
-Axis: <code|security|perf>. Workstream: WS-<N> (<name>). Round: <M>. <infix line as in G>
-Inputs: $RUN/plan.md ## WS-<N>, $RUN/briefs/impl-ws<N>-r<M>.md, $RUN/implementer-ws<N>-r<M>.md, $RUN/verifier-r<M>.md, $RUN/task.md, CLAUDE.md.
-Review standard: $PLUGIN/references/review-standard.md. Commits: <hashes>.
-Tag: <public=yes|no for code, input=yes|no for security, hot=yes|no for perf>. Use the validator's final tag and the plan's reason.
-Settled decisions: <each verbatim, including its accepted consequence, or none>. Check factual justifications against code.
-<rework: Previous rows: $RUN/triage-r<M-1>.md. Rework commits: <hashes>. Check only those rows and changed lines. Test-only rework replaces probes with assertion-removal review.>
-Output: $RUN/review-r<M>-<axis>.md following the review standard. Return VERDICT and file line.
-Tools: Read, Grep, Glob, Bash, Write. Write only the report. Bash permits code-probe clone creation, temporary edits, and restoration under $RUN. Follow the role's isolation procedure. Never edit the shared repo. No commits, Skill tool, or agents.
+<each settled decision verbatim, including its accepted consequence, numbered>
+<verifier note, only when step 8a's untouched-failure exception applied: which failures, touched=no, treated as PASS>
+```
+**T — triage** (`teamlead:triage`)
+```
+$RUN = <abs>. Repo: <abs>.
+Workstream: WS-<N>. Round: <M>. <infix line as in G>
+Reviews: <each review report path of this round>. Previous triage: <$RUN/triage-r<M-1>.md path, or none in round 1>.
+Rework count before this round: <k>. reworkCap: <cap>.
+Output: write $RUN/triage-r<M>.md and, on NEEDS_REWORK, $RUN/briefs/impl-ws<N>-r<M+1>.md; return the two-line VERDICT block.
 ```
 
-Before review dispatch, gather settled decisions from `plan.md`, Answers, and earlier triage. Copy each decision and its accepted consequence verbatim into every reviewer brief. This is the exception to the pointer-only rule. Without the consequence, a deliberate choice can appear to be an unexplained defect. Examples include intentional rethrows, narrower filters, and accepted inconsistencies.
+Before review dispatch, gather settled decisions from `plan.md`, Answers, and earlier triage into brief S. `review_briefs.py` copies each decision and its accepted consequence verbatim into every reviewer brief. This is the exception to the pointer-only rule. Without the consequence, a deliberate choice can appear to be an unexplained defect. Examples include intentional rethrows, narrower filters, and accepted inconsistencies.
 
 A reviewer can reason correctly from incomplete context and still report a false HIGH. Record significant decisions in an ADR or repository document when appropriate. Also inspect rejected findings for genuine gaps beyond the accepted decision.
 
-Route on `status:`, `OUTCOME:`, and `VERDICT:`. Open reports only for details needed to decide, such as blocked questions or triage rows.
+Route on `status:`, `OUTCOME:`, and `VERDICT:`. Open reports only for details needed to decide, such as blocked questions or a STOP.
 
 ## Reference files
 
 | When | File | What it holds |
 |---|---|---|
 | always | `references/run-directory.md` | `$RUN` layout, who writes what, the pointer-brief skeleton, the two rules (write before returning and point to existing context) |
-| brief R | `references/roles/reviewer.md` | the reviewers' instruction set — the one role file your brief still names, because those types are the harness's, not this plugin's. The six `teamlead:<role>` agents load their roles independently. Do not duplicate those definitions |
-| step 10 | `references/roles/triage.md` | your triage procedure: worst wins, de-dup, demote spec growth, re-review set, rework brief template, cap |
+| brief R | `references/roles/reviewer.md` | the reviewers' instruction set — the one role file your brief still names, because those types are the harness's, not this plugin's. The seven `teamlead:<role>` agents load their roles independently. Do not duplicate those definitions |
+| step 10 | `references/roles/triage.md` | loaded by `teamlead:triage`. Do not read it yourself; route on the agent's return line |
 | step 11 | `references/roles/scribe.md` | the final report shape (5–12 lines) |
 | step 11 (if triage demotes a row or defers a refactor) | `references/deferred-work-ledger.md` | what goes in `<repo>/docs/deferred-work.md`, brief L, the append-safety rules (never `Write` over it, never commit) |
 | R | `references/review-standard.md` | the report shape reviewers read for themselves. Route on its Verdict line |
@@ -377,17 +385,13 @@ A sonnet verifier runs before expensive reviews. A failing suite therefore costs
 
 Misreporting CANNOT_RUN can cause repeated changes to working code. Scope monorepo verification to the affected package.
 
-## Triage (step 10) — you, following `roles/triage.md`
+## Triage (step 10) — a sonnet agent, not you
 
-Follow `references/roles/triage.md`:
+`teamlead:triage` follows `references/roles/triage.md`: worst verdict wins, duplicates merge into one row, spec growth is demoted to Notes, the next re-review set is recorded, and `reworkCap` turns another NEEDS_REWORK into STOP. On NEEDS_REWORK it also writes `briefs/impl-ws<N>-r<M+1>.md`.
 
-1. Consolidate current and carried verdicts. The worst verdict wins.
-2. Merge duplicate defects into one row. Name all reviewers and select one executable fix.
-3. Demote requests that expand the spec to Notes with reasons. Examples include unadmitted inputs, extra hardening, and non-hot-path microbenchmarks. If no defect remains, use APPROVED_WITH_NOTES.
-4. Specify the next review set with reasons. Code always reruns. Security reruns for its findings or production fixes on its axis. Performance reruns for its findings or hot-path fixes.
-5. Enforce `reworkCap`. At the cap, another NEEDS_REWORK becomes STOP. Supply findings history and the possible cause: ambiguous spec, incorrect decomposition, or disagreement on requirements.
+You read neither the reviews nor the triage file to route. The return line carries the verdict, the rework brief path, and the re-review set. In measured runs, reading the reviews and writing triage plus the rework brief were two of the coordinator's three largest output turns, and every token they added was re-read on each later turn.
 
-For NEEDS_REWORK, write `briefs/impl-ws<N>-r<M+1>.md` from the triage template. Include previous-file pointers, merged findings, verifier-output pointers if needed, test additions, and report path. Dispatch a fresh implementer. Do not resume the earlier one with SendMessage. Prior reasoning can repeat the same mistake. The files provide fresh-instance context.
+Dispatch a fresh implementer for the rework brief. Do not resume the earlier one with SendMessage. Prior reasoning can repeat the same mistake. The files provide fresh-instance context. Read the triage file only for a STOP or to relay its Notes in the final report.
 
 ## Refactor requests — what the teamlead does
 
@@ -405,6 +409,7 @@ Use the registered namespaced agent type, such as `subagent_type: "teamlead:plan
 | Review the plan's design (brief D) | `teamlead:plan-reviewer` |
 | Implement code, any language (brief I) | `teamlead:implementer` |
 | Verifier gate (brief G) | `teamlead:verifier` |
+| Triage a review round (brief T) | `teamlead:triage` |
 | plan.md living sections / ADR / deferred-work ledger (brief L) | `teamlead:writer` |
 
 The reviewers and anything ad-hoc are yours to choose:

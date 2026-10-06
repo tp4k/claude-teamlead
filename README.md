@@ -59,7 +59,7 @@ flowchart TD
       CODE["9 · code-review<br/>spec conformance, tests, mutation probes"]
       SEC["9 · security review"]
       PERF["9 · performance review"]
-      TRIAGE["10 · triage — coordinator<br/>worst verdict wins, one row per defect"]
+      TRIAGE["10 · triage — sonnet agent<br/>worst verdict wins, one row per defect"]
     end
 
     HALT(["HALT — the plan contradicts an ADR"])
@@ -204,7 +204,7 @@ An invalid config value defers to the next tier. An invalid flag stops the run a
 
 ## What gets installed
 
-Seven agents. Each pins its own model and tool set, so the coordinator passes none:
+Eight agents. Each pins its own model and tool set, so the coordinator passes none:
 
 | Agent | Model | Writes |
 | --- | --- | --- |
@@ -213,6 +213,7 @@ Seven agents. Each pins its own model and tool set, so the coordinator passes no
 | `teamlead:plan-validator` | sonnet | `plan-validation.md` |
 | `teamlead:implementer` | sonnet | the code, its commits, its own report |
 | `teamlead:verifier` | sonnet | `verifier-rN.md` |
+| `teamlead:triage` | sonnet | `triage-rN.md`, and the next rework brief on NEEDS_REWORK |
 | `teamlead:writer` | sonnet | `plan-human.md`, the living plan sections, an ADR, the deferred-work rows |
 | `teamlead:code-reviewer` | opus | `opus-review-rN.md` — only when `/teamlead:codex-review` falls back because Codex could not run |
 
@@ -265,6 +266,8 @@ Run artifacts, worktree handover files, and config live under `$TEAMLEAD_HOME`, 
     ├── plan-human.md               the same plan in about a page   (humanReadablePlan)
     ├── questions.md                the planner's questions + your ## Answers
     ├── briefs/impl-wsN-rM.md       what each implementer is told to build
+    ├── briefs/review-rM-<axis>.md  each reviewer's brief, written by review_briefs.py
+    ├── settled-wsN-rM.md           settled decisions copied into every reviewer brief
     ├── plan-review-package/        what Codex was given                (codexPlanReview)
     ├── plan-design-review.md       the in-session design review
     ├── plan-review-package/plan-review-r1.md   the Codex design review

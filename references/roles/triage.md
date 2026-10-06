@@ -13,11 +13,11 @@
 - Return
 - Tools and limits
 
-Consolidate one round's reviews into one verdict and one set of unique defects. Write a rework brief when required. Write only under `$RUN`. Your prompt supplies the round, workstreams, carried verdicts, and current rework count.
+Consolidate one round's reviews into one verdict and one set of unique defects. Write a rework brief when required. Write only under `$RUN`. Your prompt supplies the round, workstreams, previous triage file, and current rework count.
 
 ## Inputs
 
-- Read every current review for the round and workstream. Use `review-ws<N>-r<M>-*.md` when several streams share the run. Include the prompt's carried verdicts from their recorded rounds.
+- Read every current review for the round and workstream. Use `review-ws<N>-r<M>-*.md` when several streams share the run. Include carried verdicts: each `carried` line in the previous triage file's `## Re-review set` names the verdict and the review report it came from.
 - Read `plan.md` for spec excerpts and review axes. They determine whether a row corrects a defect or expands scope.
 - Read the current brief for scope, project rules, and verification commands. The next brief inherits these by pointer.
 - Read the implementer's report for changes and decisions.
@@ -88,8 +88,8 @@ Verdict: APPROVED | APPROVED_WITH_NOTES | NEEDS_REWORK | STOP
 
 ## Re-review set
 code: re-run — always
-security: re-run — <basis> | carried — <basis>
-perf: re-run — <basis> | carried — <basis>
+security: re-run — <basis> | carried — <basis> (<verdict> from <review report path>)
+perf: re-run — <basis> | carried — <basis> (<verdict> from <review report path>)
 
 ## Rework count
 <count after this round>
@@ -135,7 +135,7 @@ Check findings together before dispatch. Describe the state after all fixes, rat
 
 Check counts, inventories, and totals against the expected final state. Prefer instructions such as "enumerate the guards from the final file" over unverified numbers. Omit predictions or label them "verify and state what you observe". Later agents can mistake a prediction for a measurement.
 
-Write both files first, then return. A verdict returned without the files on disk is not finished work — the next agent reads an empty slot.
+Write the rework brief before the triage file, then return. The coordinator treats a size-stable triage file as done and dispatches the implementer at once, so a brief written after it can be read as an empty slot. A verdict returned without both files on disk is not finished work.
 
 ## Return
 

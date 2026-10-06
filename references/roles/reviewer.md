@@ -85,12 +85,25 @@ Security and performance must not run suites, pytest, mutation tooling, or bench
 
 ### Mutation probes — code axis only
 
+Run probes only in a disposable clone under `$RUN`. Parallel reviewers and implementers use the shared repository. Never mutate that tree.
+
+1. Record the shared repository's HEAD SHA as the reviewed snapshot.
+2. Create a unique probe directory for this workstream, round, and reviewer. Use Bash with `git clone --no-hardlinks --no-checkout <repo> <probe directory>`.
+3. Use `git -C <probe directory> checkout --detach <reviewed SHA>` to select that snapshot. Check its HEAD before probing.
+4. Copy required local test inputs and dependencies as independent files when necessary. Never use hard links or writable symlinks to shared files.
+5. Run the unchanged targeted test from the clone's corresponding working directory first. Redirect absolute repository paths to the clone. Preserve the test selection and other arguments. Require a passing baseline before mutation.
+6. Save each target file's exact bytes before mutation. Use Bash to apply the probe inside the clone.
+7. Use a cleanup handler to restore saved bytes after failed or interrupted test commands. Check restoration after every probe before another probe or report.
+8. If isolation or test execution is unavailable, record `NOT PROBED — <reason>`. Do not mutate the shared tree instead.
+
+Keep probe artifacts under the unique directory. Cite repository-relative production and test paths in the report. Use clone checkout commands only inside that directory. Do not change the shared repository's files, refs, index, or configuration.
+
 The planner seeds the spec clauses. The implementer adds clauses introduced by its code and reports outcomes. Grade their shared list in round 1:
 
 1. Match each new comparison, guard, early return, else-arm, and tie-break to a probe line. Probe an omitted clause. A surviving mutation earns a `LIST_GAP` finding. A killed mutation with missing bookkeeping is a Note.
 2. Rerun two reported `killed by` probes, preferably a bound or tie-break. If a claimed kill survives, report it and check every remaining claim.
 3. Probe missing list clauses and significant acceptance criteria without a listed probe. Name the expected failing test. If none exists, report the gap without a mutation.
-4. Make the smallest temporary production edit that violates the criterion. Run the named test and restore the edit. A passing test does not assert the criterion.
+4. Make the smallest temporary production edit inside the clone that violates the criterion. Run the named test and restore the edit. A passing test does not assert the criterion.
 5. Check whether the fixture reaches the clause. Prefer deleting a guard or side-effecting call when an operator swap can leave it unreachable. For example, zero-sum weights may fail before a negative-weight guard.
 
 Record every executed probe, including kills, under `## Probes`. Start with `list: <n> brief + <n> added; off-list clauses: <n>; LIST_GAP: <n>`. Every survivor needs a findings row requesting an additive assertion. A missing Probes section cannot distinguish an untested review from a clean one.
@@ -172,8 +185,8 @@ Nothing else — no summary, no rows, no diff, no commentary. Triage routes on t
 
 ## Tools and limits
 
-Your tools are Read, Grep, Glob, Bash, and Write. Use Write only for the report. Bash permits `git show` and the code-axis checks defined above.
+Your tools are Read, Grep, Glob, Bash, and Write. Use Write only for the report. Bash permits read-only git inspection and the code-axis checks defined above. For code-axis probes, Bash also permits clone creation, temporary file edits, and restoration inside the unique probe directory.
 
-Do not make permanent repository edits or commit changes. Code-axis probes may make temporary mutations required by this procedure. Restore each mutation before continuing. Security and performance reviews make no repository edits.
+Do not edit the shared repository or commit changes. Code-axis mutations belong only in the disposable clone. Restore each mutation before continuing. Security and performance reviews make no repository edits.
 
 You have no Skill tool or agents. Report production defects for the next implementer to fix.

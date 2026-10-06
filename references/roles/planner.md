@@ -108,6 +108,15 @@ The implementer loads its role file independently. Do not repeat generic tools, 
 
 A hook checks this block before permitting implementer writes. Include every production and test file the stream must write, including NEW files. A missing path blocks implementation and requires the coordinator to expand the brief. If filenames are uncertain, list the required directory. Use protected-file rules and review for narrower limits. The fence prevents edits in unrelated modules. Omit it only when the stream genuinely cannot be bounded.
 
+- `## Spec` — copy the spec excerpt verbatim, with its source path and heading. Include governing ADR clauses verbatim with filenames.
+- `## Observable acceptance` — name the test that fails before the change and passes afterwards. Include the scenario and expected output.
+- `## Test plan` — copy the `existing:`, `new:`, and `probe:` lists from the workstream. State observable obligations, not implementation steps.
+- `## Reuse and scope` — copy the `reuse:`, optional `do not reuse:`, and `keep because:` lines verbatim.
+- `## Do not touch` — list every other workstream's file scope and the task-wide anti-scope.
+- `## Project forbiddens` — quote the workstream's applicable project rules verbatim, with their source files.
+- `## Verification commands` — give each working directory and its exact commands.
+- `## Report file` — use `$RUN/implementer-ws<N>-r1.md`.
+
 Fill every placeholder before writing a brief. The coordinator dispatches it verbatim. Do not write reviewer or rework briefs. They depend on a diff that does not exist yet.
 
 ## Output c — `$RUN/questions.md` — written LAST

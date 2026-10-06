@@ -188,6 +188,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Do not call CANNOT_RUN an implementer test failure.
 9.  Dispatch configured reviewers together immediately after the gate passes.
     Code review always runs. Use the validator's final tags and config.json.
+    Code-axis mutation probes use disposable clones under $RUN. Keep the shared tree read-only for every reviewer.
       setting       tag=yes                 tag=no
       on            opus full review        sonnet sanity pass
       when-needed   opus full review        do not dispatch
@@ -295,7 +296,7 @@ Tag: <public=yes|no for code, input=yes|no for security, hot=yes|no for perf>. U
 Settled decisions: <each verbatim, including its accepted consequence, or none>. Check factual justifications against code.
 <rework: Previous rows: $RUN/triage-r<M-1>.md. Rework commits: <hashes>. Check only those rows and changed lines. Test-only rework replaces probes with assertion-removal review.>
 Output: $RUN/review-r<M>-<axis>.md following the review standard. Return VERDICT and file line.
-Tools: Read, Grep, Glob, Bash, Write. Write only the report. Code probes permit temporary mutations restored immediately. No permanent edits, Skill tool, or agents.
+Tools: Read, Grep, Glob, Bash, Write. Write only the report. Bash permits code-probe clone creation, temporary edits, and restoration under $RUN. Follow the role's isolation procedure. Never edit the shared repo. No commits, Skill tool, or agents.
 ```
 
 Before review dispatch, gather settled decisions from `plan.md`, Answers, and earlier triage. Copy each decision and its accepted consequence verbatim into every reviewer brief. This is the exception to the pointer-only rule. Without the consequence, a deliberate choice can appear to be an unexplained defect. Examples include intentional rethrows, narrower filters, and accepted inconsistencies.

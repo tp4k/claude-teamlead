@@ -20,7 +20,7 @@ For security use attacker-controlled input. For performance use hot path. For co
 2. Read only the relevant workstream blocks in `$RUN/plan.md`. Include their spec, acceptance, tests, and review axes.
 3. Read the current implementer brief for scope, protected files, project rules, and commands.
 4. Read the implementer's report as claims requiring checks.
-5. Read the verifier's OUTCOME for independent suite evidence.
+5. Read the verifier's OUTCOME and `## Snapshot` for independent suite evidence. On the code axis, require `tree: CLEAN` and the recorded `head:` SHA. Check shared HEAD with `git rev-parse HEAD`. Require the recorded SHA and empty `git status --porcelain=v1 --untracked-files=all` output. Missing or mismatched evidence requires `NEEDS_REWORK` requesting fresh verification. Stop review rather than treating the mismatch as only an unavailable probe.
 6. Read `$RUN/task.md` for the exact request.
 7. Read project and user-global CLAUDE.md and matching `~/.claude/rules/*.md`. Extract project forbiddens from both. Matching rule files may not load automatically. Check TDD under item 2.
 8. Read supplied ADR clauses.
@@ -85,11 +85,11 @@ Security and performance must not run suites, pytest, mutation tooling, or bench
 
 ### Mutation probes — code axis only
 
-Run probes only in a disposable clone under `$RUN`. Parallel reviewers and implementers use the shared repository. Never mutate that tree.
+Run probes only in a disposable clone under `$RUN`. Parallel reviewers use the shared repository. Repository writers remain idle until verification and reviews finish. Never mutate that tree.
 
-1. Record the shared repository's HEAD SHA as the reviewed snapshot.
+1. Use the verifier report's `head:` SHA as the reviewed snapshot. Never substitute the shared repository's current HEAD.
 2. Create a unique probe directory for this workstream, round, and reviewer. Use Bash with `git clone --no-hardlinks --no-checkout <repo> <probe directory>`.
-3. Use `git -C <probe directory> checkout --detach <reviewed SHA>` to select that snapshot. Check its HEAD before probing.
+3. Use `git -C <probe directory> checkout --detach <verified SHA>` to select the verifier's snapshot. Check its HEAD before probing.
 4. Copy required local test inputs and dependencies as independent files when necessary. Never use hard links or writable symlinks to shared files.
 5. Run the unchanged targeted test from the clone's corresponding working directory first. Redirect absolute repository paths to the clone. Preserve the test selection and other arguments. Require a passing baseline before mutation.
 6. Save each target file's exact bytes before mutation. Use Bash to apply the probe inside the clone.

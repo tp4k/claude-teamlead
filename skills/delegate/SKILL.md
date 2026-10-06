@@ -179,12 +179,15 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
       refactor request → decide through references/refactor-workflow.md
     Inspect git log --oneline and git show --stat <hash>.
 8a. Dispatch teamlead:verifier with brief G.
+    First wait for every repository writer in the wave, including parallel implementers and refactor agents.
+    Record the final wave HEAD for brief G. Keep repository writers idle until every verifier and reviewer finishes.
     Wait: wait_for.py --timeout 120 <verifier report>
       PASS → 9
       FAIL with touched=yes/unclear → write a rework brief pointing to the FAIL commands
         Dispatch a fresh implementer for round M+1. Return to 8. Count this rework toward the cap.
       FAIL with every failure touched=no → report the pre-existing failures and proceed to 9
-      CANNOT_RUN → correct the command/environment or ask the user
+      CANNOT_RUN → correct the command/environment or resolve the snapshot failure with its owner
+        Never commit or stash unrelated user changes to clear the gate. Ask the user when their changes prevent verification.
     Do not call CANNOT_RUN an implementer test failure.
 9.  Dispatch configured reviewers together immediately after the gate passes.
     Code review always runs. Use the validator's final tags and config.json.
@@ -196,6 +199,8 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Security uses input:. Performance uses hot:. Code uses public: for its public-surface checklist.
     Report specialists skipped by when-needed and the tag responsible.
     Wait once for the dispatched review reports, with timeout 480.
+    A reviewer reporting invalid snapshot evidence → return to 8a for fresh verification and review.
+    Do not dispatch implementation merely to resolve this gate failure.
     For rework, code always reruns. Dispatch specialists selected by the preceding triage only.
 10. TRIAGE using references/roles/triage.md. Write triage-r<M>.md.
       APPROVED or APPROVED_WITH_NOTES → 11
@@ -203,7 +208,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
         Demote scope additions to Notes. Dispatch a fresh implementer, then return to 8.
     If rework already equals reworkCap, default 3, another NEEDS_REWORK becomes STOP.
     Provide findings history and the possible plan/spec defect. Do not loop indefinitely.
-    Dispatch dependent streams when their dependencies are approved.
+    Dispatch dependent streams when their dependencies are approved and every review in the current wave has finished.
 11. Any demoted row or deferred refactor → dispatch the ledger writer with brief L.
     With no such items, dispatch no ledger writer.
     Wait for dispatched writers before reporting their results.
@@ -282,6 +287,7 @@ Output: write $RUN/implementer-ws<N>-r<M>.md ENDING with the fenced status block
 ```
 $RUN = <abs>. Repo: <abs>.
 Workstream: WS-<N>. Round: <M>. <One workstream in this run: no ws<N>- infix. | Several workstreams share this run: use the ws<N>- infix.>
+Expected HEAD: <full final wave SHA after every repository writer finishes>.
 Inputs: $RUN/briefs/impl-ws<N>-r<M>.md (## Verification commands), $RUN/implementer-ws<N>-r<M>.md (commits:), $RUN/repo.txt.
 Output: write $RUN/verifier-r<M>.md, return the OUTCOME block + file line.
 ```

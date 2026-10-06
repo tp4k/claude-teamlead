@@ -11,11 +11,14 @@ Use three outcomes. A test failure and an unavailable command require different 
 ## Inputs
 
 - `$RUN/briefs/impl-ws<N>-r<M>.md` — the brief for the workstream and round named in your prompt. Its `## Verification commands` section gives you the working directory and the exact commands. Execute only those commands. Do not add, omit, or reinterpret them.
-- `$RUN/implementer-ws<N>-r<M>.md` — the implementer's report. Its `commits:` line lists the commits under test. Before running anything, confirm HEAD matches with `git log --oneline`. If it does not match, stop and report `CANNOT_RUN` with what you saw.
+- `$RUN/implementer-ws<N>-r<M>.md` — the implementer's report. Its `commits:` line lists the commits under test. Confirm that every listed commit belongs to the expected HEAD supplied in your prompt. Parallel workstreams can contribute later commits to that snapshot.
+- `Expected HEAD:` in your prompt — the full SHA after all repository writers in this wave finish. Check it with `git rev-parse HEAD`. A mismatch requires `CANNOT_RUN`.
 - `$RUN/repo.txt` — the absolute repo path, one line.
 
 ## Rules for running
 
+- Before verification, run `git status --porcelain=v1 --untracked-files=all`. Require empty output. Staged changes, unstaged changes, and untracked files require `CANNOT_RUN`. Record the paths without repairing, committing, or stashing them.
+- Record the expected SHA under `## Snapshot`. Check HEAD and repository status again after each command. A changed HEAD or nonempty status invalidates verification and requires `CANNOT_RUN`, even when commands pass. Use `tree: CLEAN` only when every snapshot check passes.
 - Run each command once in brief order, from the specified directory. Capture its exit code and output.
 - Do not read the suite's exit status through a pipe. `pytest | tail` returns the tail command's status and can hide failed tests. Redirect command output to a file. Capture the command's exit code immediately, then read the output file. For background wrappers, check the actual run's summary rather than the wrapper's status.
 - Retry a timing-dependent failure once. Report both attempts. Relevant signs include network timing, sleeps, flaky test names, or unexpected failing tests. If the brief permits an isolated run, report a suite-fail/isolated-pass split under `## Flaky`. Shared pools or workers can create races absent from isolated runs. Do not diagnose or suppress the split.
@@ -39,6 +42,12 @@ Write `$RUN/verifier-r<M>.md`, or `$RUN/verifier-ws<N>-r<M>.md` when your prompt
 
 OUTCOME: PASS | FAIL | CANNOT_RUN
 
+## Snapshot
+
+head: <full expected SHA>
+tree: CLEAN | DIRTY | CHANGED | UNCHECKED
+<for an invalid snapshot: observed HEAD, status paths, or the unavailable check>
+
 ## Commands
 
 <per command, in run order>
@@ -56,9 +65,9 @@ OUTCOME: PASS | FAIL | CANNOT_RUN
 
 Outcome definitions:
 
-- **PASS** — every command exited 0.
+- **PASS** — every command exited 0, and all snapshot checks passed.
 - **FAIL** — at least one command ran to completion and exited non-zero, and you can point at the failing test/check.
-- **CANNOT_RUN:** at least one command cannot execute or complete. Causes include exit 126/127, denied permission, incorrect directory, missing dependency/environment, HEAD mismatch, or TIMEOUT. If another command fails too, CANNOT_RUN takes precedence. Resolve the environment before interpreting failures.
+- **CANNOT_RUN:** at least one command cannot execute or complete, or a snapshot check fails. Causes include exit 126/127, denied permission, incorrect directory, missing dependency/environment, HEAD mismatch, a dirty or changed tree, or TIMEOUT. If another command fails too, CANNOT_RUN takes precedence. Resolve the environment before interpreting failures.
 
 ## Return
 

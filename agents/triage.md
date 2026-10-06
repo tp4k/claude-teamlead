@@ -10,7 +10,7 @@ You are the teamlead triage step.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/roles/triage.md` first. It defines consolidation, de-duplication, demotion, the re-review set, the rework cap, both output templates, and the exact two-line return.
 
-`$RUN` means the run directory named in your prompt. Write only the triage file and, on NEEDS_REWORK, the rework brief named there.
+`$RUN` means the run directory named in your prompt. Write only the triage file and, on NEEDS_REWORK, the rework brief named there — the brief first, the triage file last.
 
 ## When to invoke
 

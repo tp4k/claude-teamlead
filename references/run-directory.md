@@ -39,8 +39,10 @@ The writer owns one assigned file per invocation: living plan sections, a human 
 | `plan-validation.md` | validator (sonnet) | coordinator, planner in Fix mode | PLAN_VALID or PLAN_NEEDS_FIX, factual findings, and scope observation. For a real cut, supply labeled choices, costs, and Recommend. Otherwise use Smaller: none. Scope observations do not change the verdict. |
 | `implementer-ws<N>-r<M>.md` | implementer (sonnet) | verifier, reviewers, triage | Status, confidence, commits, TDD evidence, freeze result, verification, probes, questions, and refactor requests. |
 | `verifier-r<M>.md` | verifier (sonnet) | reviewers, triage | PASS, FAIL, or CANNOT_RUN with per-command exit codes, output, and touched-file analysis. |
+| `settled-r<M>.md` | coordinator | review_briefs.py | Settled decisions with accepted consequences, and any step 8a verifier note; `none` when empty. |
+| `briefs/review-r<M>-<axis>.md` | review_briefs.py | reviewer | Brief R for one axis, with settled-r<M>.md copied verbatim. |
 | `review-r<M>-<axis>.md` | full reviewer (opus) or specialist sanity reviewer (sonnet) | triage | Code, security, or performance report following review-standard.md. |
-| `triage-r<M>.md` | coordinator | later reviewers, final report | Worst verdict, merged defects, demotions and reasons, user Notes, and next review set with each specialist's basis. |
+| `triage-r<M>.md` | triage agent (sonnet) | later reviewers, final report | Worst verdict, merged defects, demotions and reasons, user Notes, and next review set with each specialist's basis. |
 | `refactor-decisions.md` | coordinator | ledger writer, final report | Append `<reject\|defer\|approve> — <what> — <reason> (<files/symbols>)`. Omit the file when no request exists. |
 | `final-report.md` | coordinator | user | Delivered behavior, commits, roles, manual checks, Notes, and deferred items in 5–12 lines. |
 
@@ -61,7 +63,7 @@ Output: write $RUN/<file> exactly as the role file specifies, then return <the s
 <the few facts only the sender knows: flags, the axis tag and its reason, the commit list, the re-review set>
 ```
 
-The six pipeline agents load their own role files. Their briefs do not name those roles. The reviewers are harness subagent types this plugin does not own, so brief R alone opens with `Role: read and follow <plugin>/references/roles/reviewer.md` and lists its tools.
+The seven pipeline agents load their own role files. Their briefs do not name those roles. The reviewers are harness subagent types this plugin does not own, so brief R alone opens with `Role: read and follow <plugin>/references/roles/reviewer.md` and lists its tools.
 
 The return value of an agent is **short and routable** — a verdict line and a file path, never the report. The coordinator reads the file only when it has to decide something the return line does not settle.
 

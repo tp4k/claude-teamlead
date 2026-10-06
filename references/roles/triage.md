@@ -135,7 +135,7 @@ Check findings together before dispatch. Describe the state after all fixes, rat
 
 Check counts, inventories, and totals against the expected final state. Prefer instructions such as "enumerate the guards from the final file" over unverified numbers. Omit predictions or label them "verify and state what you observe". Later agents can mistake a prediction for a measurement.
 
-Write both files first, then return. A verdict returned without the files on disk is not finished work — the next agent reads an empty slot.
+Write the rework brief before the triage file, then return. The coordinator treats a size-stable triage file as done and dispatches the implementer at once, so a brief written after it can be read as an empty slot. A verdict returned without both files on disk is not finished work.
 
 ## Return
 

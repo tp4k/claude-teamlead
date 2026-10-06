@@ -74,10 +74,26 @@ class ReviewBriefTests(unittest.TestCase):
             "Verdict: NEEDS_REWORK\n\n## Re-review set\ncode: re-run — always\n"
             "security: carried — no finding\nperf: re-run — hot fix\n")
         out = write_briefs(self.rundir, 1, 2, TAGS, "fff", "")
-        self.assertTrue(out[1].startswith("security skip reason=carried"))
+        self.assertEqual(out[1], "security skip reason=carried by triage round 1")
         perf = (self.briefs / "review-r2-perf.md").read_text()
         self.assertIn("previous rows are in $RUN/triage-r1.md. Rework commits: fff.",
                       perf)
+
+    def test_resolved_option_beats_task_flag(self) -> None:
+        # The options card turned security back on after --no-security-review.
+        (self.rundir / "task.md").write_text(
+            "flags: --no-security-review --no-perf-review\n")
+        self.config("on", "off")
+        out = write_briefs(self.rundir, 1, 1, TAGS, "abc", "")
+        self.assertTrue(out[1].startswith("security sanity"))
+        self.assertEqual(out[2], "perf skip reason=perfReview=off, hot=yes")
+
+    def test_flag_applies_when_option_missing(self) -> None:
+        (self.rundir / "task.md").write_text("flags: --no-perf-review\n")
+        (self.rundir / "config.json").write_text("{}")
+        out = write_briefs(self.rundir, 1, 1, TAGS, "abc", "")
+        self.assertTrue(out[1].startswith("security sanity"))
+        self.assertEqual(out[2], "perf skip reason=perfReview=off, hot=yes")
 
     def test_multi_workstream_uses_infix(self) -> None:
         self.config("off", "off")

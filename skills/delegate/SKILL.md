@@ -194,7 +194,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Code review always runs. Use the validator's final tags and config.json.
     Write settled decisions once to $RUN/settled-r<M>.md (see Pointer briefs), then:
       python3 $PLUGIN/scripts/review_briefs.py $RUN --ws <N> --round <M> \
-        --tags input=<y|n>,hot=<y|n>,public=<y|n> --commits "<hashes>" --settled $RUN/settled-r<M>.md
+        --tags input=<yes|no>,hot=<yes|no>,public=<yes|no> --commits "<hashes>" --settled $RUN/settled-r<M>.md
     It applies the table below, drops specialists the preceding triage carried, and prints one line per axis: full|sanity with type, model and brief path, or skip with its reason.
     Dispatch each non-skip line in one message: subagent_type and model from the line, prompt `Read and follow <brief path>.`
     Code-axis mutation probes use disposable clones under $RUN. Keep the shared tree read-only for every reviewer.
@@ -215,7 +215,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Wait: wait_for.py --timeout 300 <triage report>
     Route on its VERDICT line:
       APPROVED or APPROVED_WITH_NOTES → 11
-      NEEDS_REWORK → it wrote briefs/impl-ws<N>-r<M+1>.md. Dispatch a fresh implementer, then return to 8.
+      NEEDS_REWORK → confirm briefs/impl-ws<N>-r<M+1>.md exists (triage writes it before the report), dispatch a fresh implementer, then return to 8.
       STOP → it hit reworkCap (default 3). Relay its findings history and possible plan/spec defect to the user.
     Do not loop indefinitely.
     Dispatch dependent streams when their dependencies are approved and every review in the current wave has finished.
@@ -329,7 +329,7 @@ Route on `status:`, `OUTCOME:`, and `VERDICT:`. Open reports only for details ne
 | When | File | What it holds |
 |---|---|---|
 | always | `references/run-directory.md` | `$RUN` layout, who writes what, the pointer-brief skeleton, the two rules (write before returning and point to existing context) |
-| brief R | `references/roles/reviewer.md` | the reviewers' instruction set — the one role file your brief still names, because those types are the harness's, not this plugin's. The six `teamlead:<role>` agents load their roles independently. Do not duplicate those definitions |
+| brief R | `references/roles/reviewer.md` | the reviewers' instruction set — the one role file your brief still names, because those types are the harness's, not this plugin's. The seven `teamlead:<role>` agents load their roles independently. Do not duplicate those definitions |
 | step 10 | `references/roles/triage.md` | loaded by `teamlead:triage`. Do not read it yourself; route on the agent's return line |
 | step 11 | `references/roles/scribe.md` | the final report shape (5–12 lines) |
 | step 11 (if triage demotes a row or defers a refactor) | `references/deferred-work-ledger.md` | what goes in `<repo>/docs/deferred-work.md`, brief L, the append-safety rules (never `Write` over it, never commit) |

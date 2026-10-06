@@ -13,8 +13,10 @@ named by `--settled`, and copied verbatim into every brief here.
 
 The axis set and the setting/tag table are step 9's: code always runs in full;
 a specialist runs in full on tag=yes, as a sonnet sanity pass on tag=no with
-setting `on`, and not at all on `off` or `when-needed` + no. A rework round
-keeps only the specialists the previous triage did not carry (run_state.axes).
+setting `on`, and not at all on `off` or `when-needed` + no. The setting is
+the resolved option in config.json, not the task's `--no-*` flag: the options
+card can turn a flagged-off reviewer back on. A rework round also drops the
+specialists the previous triage carried.
 
 Prints one line per axis:
   <axis> full|sanity type=<subagent type> model=<opus|sonnet> brief=<abs path>
@@ -29,7 +31,7 @@ import sys
 from pathlib import Path
 
 import paths
-from run_state import AXES, Run
+from run_state import AXES, Run, carried_axes
 
 TAG_OF = {"code": "public", "security": "input", "perf": "hot"}
 SETTING_OF = {"security": "securityReview", "perf": "perfReview"}
@@ -116,15 +118,20 @@ def write_briefs(run_dir: Path, ws: int, rnd: int, tags: dict[str, str],
     if not (run.run / "repo.txt").is_file():
         raise ValueError(f"{run_dir} has no repo.txt, so it is not a run directory")
     options = paths.read_json(run.run / "config.json").get("options", {})
-    wanted = run.axes(ws, rnd)
+    flags = next((ln for ln in run.text("task.md").splitlines()
+                  if ln.startswith("flags:")), "")
+    prev = run.phase_file("triage", ws, rnd - 1) if rnd > 1 else None
+    carried = carried_axes(prev.read_text(errors="replace")) if prev else ()
     infix = f"ws{ws}-" if run.multi else ""
     out: list[str] = []
     for axis in AXES:
         tag = tags[TAG_OF[axis]]
-        if axis not in wanted:
-            out.append(f"{axis} skip reason=carried or disabled for round {rnd}")
+        if axis != "code" and axis in carried:
+            out.append(f"{axis} skip reason=carried by triage round {rnd - 1}")
             continue
-        setting = "on" if axis == "code" else options.get(SETTING_OF[axis], "on")
+        flagged = "off" if f"--no-{axis}-review" in flags else "on"
+        setting = ("on" if axis == "code"
+                   else options.get(SETTING_OF[axis], flagged))
         how = mode(axis, setting, tag)
         if how == "skip":
             out.append(f"{axis} skip reason={SETTING_OF[axis]}={setting}, "

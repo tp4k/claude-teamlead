@@ -1,6 +1,6 @@
 ---
 name: cycle
-description: 'Runs one delivery cycle from one free-text task, in one session: a fresh worktree off origin/main, bootstrapped, the session moved into it and named after the work, then /teamlead:delegate with the plan reviewed by Codex before anything is built, then a full /teamlead:codex-review with its findings ledger. Four decision points, not zero. Use when the user says "cycle this", "full teamlead cycle", "fresh tree + teamlead", or hands over a task and wants the worktree, the run and the review packaged together.'
+description: "Runs a task in a fresh worktree, prepares its environment, moves the session, then invokes /teamlead:delegate and /teamlead:codex-review. Includes user decisions. Use for \"cycle this\", \"full teamlead cycle\", or \"fresh tree + teamlead\"."
 metadata:
   argument-hint: "<task description> [--slug NAME] [--base REF] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--with-human-readable-plan=off|generate|pause] [--adr] | --resume <slug>"
 allowed-tools: Bash(git worktree list), Bash(git rev-parse *), Bash(git show-ref *), Bash(git check-ignore *), Bash(git log *), Bash(git status *), Bash(git fetch *), EnterWorktree, AskUserQuestion
@@ -8,120 +8,78 @@ allowed-tools: Bash(git worktree list), Bash(git rev-parse *), Bash(git show-ref
 
 # Teamlead cycle
 
-One free-text task in; a fresh named worktree, a `/teamlead:delegate` run and an independent review
-out. Everything else is derived, and it all happens in **one session**: step 7 moves this
-session into the worktree with `EnterWorktree`, and only then does part 2 run.
+Prepare a fresh worktree, run `/teamlead:delegate`, then run an independent review in one session. Step 7 moves the session into the worktree before implementation.
 
-That move is not cosmetic. A path-scoped `CLAUDE.md` loads only for files under one of the
-session's **workspace roots** — cwd alone does not do it — so a coordinator still rooted in the
-primary checkout hands every subagent a workspace the worktree is not inside. Run
-`/teamlead:delegate` before step 7 and a server workstream never sees `apps/server/CLAUDE.md`.
-`EnterWorktree` moves the roots and cwd together, which is the whole reason this used to demand
-a second session.
+A matching cwd alone does not load path-scoped CLAUDE.md outside workspace roots. `EnterWorktree` moves both cwd and roots. Without it, subagents can miss files such as `apps/server/CLAUDE.md`. Earlier versions required a second session for this move.
 
-`$ARGUMENTS` is the task. Strip `--slug`, `--base` and `--resume`; everything else is the task
-text, and `/teamlead:delegate` resolves its own options out of it (`run_config.py` reads the flags
-it knows and ignores the prose, so nothing here has to decide what is a flag).
+`$ARGUMENTS` contains the task. Remove `--slug`, `--base`, and `--resume`. Pass the remaining prose and flags to delegate. Its `run_config.py` resolves known flags.
 
-**The cycle adds two of those options itself**, appended to the task text it passes on:
-`--codex-plan-review=always --with-human-readable-plan=generate`. A cycle is the expensive
-shape of this workflow — a fresh tree, a full run, then a 10–20 minute independent review of
-the diff — and the cheapest place by far to catch a wrong design is before any of that starts:
-a plan defect costs a paragraph here and a whole round after implementation. The human-readable
-plan comes with it because the cycle is also the path where the user is furthest from the work,
-having handed over one line of text. A user flag wins over both: an explicit
-`--codex-plan-review=off` in the task text is theirs, not a value to override.
+Add `--codex-plan-review=always` and `--with-human-readable-plan=generate` only when the user supplied no explicit value for that option. User flags take precedence. A plan correction costs less before building and reviewing the work. The human-readable plan lets a user inspect the result of a one-line request.
 
 ## Four decision points
 
-The cycle is one command, not one turn. It stops for you four times, and you should know
-where before you start it:
+The cycle can present four routine decisions, subject to run settings:
 
-1. **The run options card** (`/teamlead:delegate` step 3a) — the plan review, the human-readable
-   plan, and whether the security and performance reviewers run always, only where the planner
-   flags a surface, or not at all. Current values are pre-marked; every one of them has a config
-   default, so this card is a chance to change your mind, not a form to fill in.
-2. **`/teamlead:delegate` step 6** — the open questions, plus a card for any design finding that is
-   a real choice. Arrives as `AskUserQuestion` cards; `go` accepts every recommendation at once.
-3. **The hold gate** (`/teamlead:delegate` step 6d) — the plan is final and something wants your
-   eyes on it: a scope cut the validator named, confirmed design findings, or `=pause`. This is
-   where `$RUN/plan-human.md` is worth reading; it is the same plan in about a page.
-4. **`/teamlead:codex-review` step 4** — which of the triaged findings to act on.
+1. **Delegate step 3a:** choose plan review, human plan, security review, and performance review. The card shows current resolved defaults.
+2. **Delegate step 6:** answer unresolved questions and design choices. `go` accepts all recommendations.
+3. **Delegate step 6d:** inspect the final plan when the hold conditions require it. These include scope choices, confirmed design corrections, and a requested pause. Read `$RUN/plan-human.md` when generated.
+4. **Codex-review step 4:** choose which verified findings to fix.
 
-A fifth appears only on a collision (step 2). Nothing else is asked; nothing is
-merged or pushed at any point.
-
----
+A collision or ambiguous bootstrap can require an additional setup decision. No step merges or pushes.
 
 # Part 1 — prepare the tree
 
 ## 1. Resolve the names, mutate nothing
 
 ```
-git rev-parse --path-format=absolute --git-common-dir     # → <repo>/.git, even from a linked worktree
+git rev-parse --path-format=absolute --git-common-dir
 ```
 
-`<repo>` is that path's parent — never `--show-toplevel`, which returns the worktree you
-happen to be standing in and would nest a tree inside a tree.
+Use that path's parent as `<repo>`. `--show-toplevel` can return a linked worktree and incorrectly nest another tree.
 
-- **slug**: `--slug` if given; otherwise `<issue-number>-<two-or-three-word-kebab>` derived
-  from the task (`980-toolgate`, `deferred-ledger`). Lower-case `[a-z0-9-]`, ≤ 30 chars.
-  Derive it silently — do not ask. This one string names the worktree, the branch, the
-  `/teamlead:delegate` run directory and the session, so all four are findable together later.
-- **worktree**: `<repo-parent>/<repo-name>-<slug>`, a sibling of the repo.
-- **branch**: `<type>/<slug>`, type from the task's verb (`fix` / `feat` / `chore` / `docs`).
-- **base**: `--base` if given, else `main`.
+- **Slug:** use `--slug` or derive `<issue-number>-<two-or-three-word-kebab>` from the task. Examples: `980-toolgate`, `deferred-ledger`. Use lowercase `[a-z0-9-]`, at most 30 characters. Do not ask the user to derive it. The slug identifies worktree, branch, run, and session.
+- **Worktree:** `<repo-parent>/<repo-name>-<slug>`, beside the repository.
+- **Branch:** `<type>/<slug>`. Derive type as fix, feat, chore, or docs from the task.
+- **Base:** use `--base`, otherwise main.
 
-## 2. Collision check — before anything is created
+## 2. Collision check — before creating anything
 
 ```
 git worktree list
 git show-ref --verify --quiet refs/heads/<branch>
 ```
 
-If the worktree path exists **or** the branch exists, stop and put it to the user as one
-`AskUserQuestion` card, in this order:
+If the path or branch exists, ask one AskUserQuestion card with these choices in order:
 
-- **Start a fresh worktree under a different slug** — you supply the new slug, and the cycle
-  continues from step 3 with it. First option, and the recommended one.
-- **Switch to the existing tree** — the cycle does not run. Report the tree's path, its
-  branch, its `git log --oneline -1` and its `git status --porcelain` so the user can see
-  what is in it, and print `cd <path>` plus the `/teamlead:delegate` line they would run there.
-- **Stop here** — the cycle ends immediately having created nothing. You cannot terminate a
-  session yourself; say so and print how to leave it (`/exit`, or Ctrl-C twice).
+1. **Fresh worktree under another slug:** supply a new slug and continue at step 3. Recommend this option.
+2. **Inspect the existing tree:** do not run the cycle. Report its path, branch, latest commit, and porcelain status. Provide `cd <path>` and the delegate command for the user.
+3. **Stop:** create nothing. You cannot terminate the session. Explain `/exit` or Ctrl-C twice.
 
-Never reuse an existing tree, and never pick between these yourself. A tree another session
-may own is the one thing this skill must not touch: two sessions in one worktree costs the
-attribution of both and duplicates work invisibly.
+Never reuse an existing tree or choose the collision outcome yourself. Another session can own it, making concurrent work indistinguishable.
 
 ## 3. Create the worktree
 
 ```
 git -C <repo> fetch origin <base>
 git -C <repo> worktree add -b <branch> <worktree> origin/<base>
-git -C <worktree> log --oneline -1              # HEAD must equal origin/<base>
+git -C <worktree> log --oneline -1
 ```
+
+Confirm HEAD equals `origin/<base>`.
 
 ## 4. Carry the ignored local config
 
-A worktree is a fresh checkout: everything git ignores is absent from it. Typically that
-is `.env`, and without it the suite fails with mass `ECONNREFUSED` that reads exactly like
-a regression the change caused.
+A fresh checkout lacks ignored files. Missing `.env` configuration can make connection failures look like regressions.
 
-Copy every root file matching `.env*` that `git check-ignore -q <file>` confirms is ignored
-— confirm, don't assume, so a tracked file git already provides is never overwritten by a
-stale local copy. Report each file copied by name. If the repo has none, say so and move on;
-that is normal for most repos, not an error.
+For every root `.env*` file, confirm `git check-ignore -q <file>` before copying it. Never overwrite a tracked file with an old local copy. Report copied filenames. If none exist, say so and continue.
 
 ## 5. Bootstrap — the repo's own command, never a hardcoded one
 
-Prefer a bootstrap command the repo documents: a `CLAUDE.md` "Common Commands" section, the
-README's setup steps, or a `setup` / `bootstrap` script in `package.json`. Use that verbatim.
+Use the repository's documented setup command verbatim. Check CLAUDE.md, README, or package setup/bootstrap scripts.
 
-Only when the repo documents nothing, pick the package manager from the lockfile at the
-repo root and run its plain install:
+If the repository documents no command, select a package manager from the root lockfile and use its normal installation command:
 
-| lockfile at root | manager |
+| Root lockfile | Manager |
 |---|---|
 | `pnpm-lock.yaml` | pnpm |
 | `package-lock.json` | npm |
@@ -133,48 +91,31 @@ repo root and run its plain install:
 | `go.sum` | go |
 | `Gemfile.lock` | bundler |
 
-Lockfile-pinning flags differ by major version and are the easiest thing here to get wrong
-— `yarn install --immutable` is Yarn 2+, Yarn 1 spells it `--frozen-lockfile`. Confirm the
-flag against `<manager> install --help` before you use one, or run the plain install without
-it. Never invent a flag.
+Check pinning flags against the manager's help before using them. Yarn 2+ uses `--immutable`. Yarn 1 uses `--frozen-lockfile`. Never invent a flag. A normal install without a pinning flag is acceptable here.
 
-**Two lockfiles at the root, or none, means stop and ask** — do not guess which one owns the
-tree. Same for a repo where nothing above matches: report it, ask what the bootstrap is, and
-carry the answer into step 6's task file so part 2 has it.
+If there are multiple root lockfiles, no lockfile, or an unsupported manager, stop and ask for the bootstrap command. Record the answer in step 6's task file.
 
-This step blocks, and it stays before step 7 on purpose: a bootstrap that fails here costs
-nothing and is reported from the primary checkout, while the same failure found after the move
-leaves the session standing in a tree that cannot build. If it fails, report the command and
-its output and stop — do not move into a tree that cannot build.
+Bootstrap before moving the session. If it fails, report the command and output, then stop. Do not enter a worktree that cannot build.
 
 ## 6. Write the task file
 
-```
-~/.teamlead/tasks/<slug>.md
-```
-
-It lives outside the repo deliberately: no `.gitignore` in any repo has to cooperate, and
-nothing can be committed by accident. It also lives outside the plugin, for the reason the
-run directory does — `claude plugin update` replaces that tree (`scripts/paths.py`);
-`$TEAMLEAD_HOME` moves both. Contents:
+Use `$TEAMLEAD_HOME/tasks/<slug>.md`, defaulting to `~/.teamlead/tasks/<slug>.md`. This lies outside repositories and the replaceable plugin directory. `scripts/paths.py` resolves the state root.
 
 ```
 slug: <slug>
 repo: <abs repo>
 worktree: <abs worktree>
 branch: <branch>
-session: <`echo "$CLAUDE_CODE_SESSION_ID"` — this session's id>
+session: <this session's CLAUDE_CODE_SESSION_ID>
 base: <base>@<sha>
-flags: <the user's own flags, plus --codex-plan-review=always --with-human-readable-plan=generate>
+flags: <user flags plus cycle defaults only for options the user did not set>
 bootstrap: <the command step 5 ran>
 
 # Task
 <the task text, VERBATIM, flags stripped>
 ```
 
-Verbatim matters the same way it does everywhere in this workflow: a paraphrase is a new
-request nobody agreed to. The file is also what makes `--resume <slug>` possible at all, so
-write it even though the normal path never reads it back.
+Preserve the exact request. Write the file even when normal execution does not reread it. Resume depends on it.
 
 ## 7. Move this session into the tree
 
@@ -182,121 +123,71 @@ write it even though the normal path never reads it back.
 EnterWorktree({ path: "<worktree>" })
 ```
 
-The plugin's `allow-cycle-worktree.py` hook pre-approves this call because the task file from
-step 6 names the tree *and this session*, so write that file first and pass the same absolute
-path here. `$TEAMLEAD_HOME` is shared across sessions; the `session:` line is what keeps the
-grant from reaching any other one. The hook also wants the tree from step 3 to be under 30
-minutes old, so a slow bootstrap or a long wait on a card between steps 3 and 7 means the
-switch prompts. A missing or wrong id, or a late switch, costs only the prompt.
+Write the task file first and supply the same absolute worktree path. The allow-cycle-worktree hook checks both the worktree and session ID. It grants no other session access. It also requires a worktree created within 30 minutes. Slow bootstrap or decision waits can therefore cause a permission prompt. A missing or incorrect ID has the same effect.
 
-One call, and the session's cwd, its write access and its workspace roots are all inside the
-worktree; the worktree's own `CLAUDE.md` and settings load with it. Report one line and
-continue straight into part 2 — same session, same turn if nothing needs asking:
+The move updates cwd, write access, workspace roots, CLAUDE.md, and settings. Report this line and continue into part 2:
 
 ```
 Worktree <worktree> on <branch>, base <base>@<sha>, <n> file(s) carried, bootstrap OK. Session moved into the tree.
 ```
 
-**The session's name needs nothing from you.** The plugin's `UserPromptSubmit` hook named it
-from the task text the moment the cycle was invoked, and `/teamlead:delegate`'s kickoff then
-requests the run's real slug (`new_run.py` prints `SESSION_TITLE=<slug>`), which replaces that
-first guess at the following prompt — the answer to `/teamlead:delegate`'s open questions. Do
-not print a rename instruction and do not ask the user to relaunch: a session can be renamed
-in place, and that is what removed the second session from this cycle.
+The UserPromptSubmit hook names the session from the task. Delegate kickoff prints `SESSION_TITLE=<slug>` to refine the title at the next prompt. Do not ask the user to rename or relaunch.
 
-If `EnterWorktree` is not available or the call is declined, and only then, fall back to the
-cold path — print this and stop:
+Only if EnterWorktree is unavailable or declined, print this command and stop:
 
 ```
 cd <worktree> && claude "/teamlead:cycle --resume <slug>"
 ```
 
-No `-n` on that line: the hook derives the name from the command itself, so the new session
-comes up as `<slug>` anyway.
-
----
+Do not add `-n`. The hook derives the new session title from the command.
 
 # Part 2 — run the cycle
 
-Entered directly from step 7, or as `--resume <slug>` in a session that came up in the tree.
+Continue from step 7 or resume in a session started inside the worktree.
 
 ## 8. Load and check
 
-On `--resume <slug>`, read `~/.teamlead/tasks/<slug>.md` — it holds everything part 1
-derived. Either way, confirm cwd equals its `worktree:` line before going further; if it does
-not, stop and print the correct `cd`. Running the rest from the primary checkout is the exact
-failure step 7 exists to prevent, and it fails silently — the subagents work, they just never
-see the nested `CLAUDE.md` files.
+On `--resume <slug>`, read the task file under `$TEAMLEAD_HOME/tasks/`. Confirm cwd equals its `worktree:` before continuing. If it differs, stop and print the correct cd command. Running from the primary checkout can silently omit nested CLAUDE.md rules.
 
 ## 9. Implement — `/teamlead:delegate`
 
-Invoke the `teamlead` skill with the task text from the file plus its `flags:` line — which
-already carries `--codex-plan-review=always --with-human-readable-plan=generate` from step 6 —
-telling it the repo is this worktree. When the run reports the human-readable plan's path, print
-it: it is the artifact this cycle produces for a person rather than for an agent, and a path that
-appears only inside a subagent's output is one nobody opens. It owns planning, questions, implementation, verification,
-review and triage; duplicate none of that here. Its run directory is
-`~/.teamlead/runs/<worktree-dir-name>/<timestamp>-<slug>/` — keyed on the
-directory name it is handed, which is why the worktree carries the slug.
+Invoke `/teamlead:delegate` with the saved task and `flags:`. Identify this worktree as the repository. Relay the human-readable plan path when generated.
 
-**If `/teamlead:delegate` halts short, the cycle stops and the review does not run.** Report the halt
-reason, the run directory, and every commit that landed:
+Delegate owns planning, questions, implementation, verification, review, and triage. Do not duplicate them. Its run path is `$TEAMLEAD_HOME/runs/<worktree-dir-name>/<timestamp>-<slug>/`.
 
-- **ADR conflict** — halted before dispatch, nothing was built.
-- **Rework cap** — commits exist but no workstream is approved.
-- **`CANNOT_RUN`** — the environment broke; this is never a coder's failure.
-- **`blocked` / `partial`** — the stream needs an answer only the user has.
+If delegate halts before approval, stop the cycle without external review. Report the cause, run directory, and every landed commit:
 
-A Codex review grades work against intent. Work that failed its own verifier has no intent
-to grade, and reviewing it spends 10–20 minutes saying so.
+- **ADR conflict:** implementation did not start.
+- **Rework cap:** work remains unapproved. Other completed streams may already be approved.
+- **CANNOT_RUN:** the environment or command prevented verification.
+- **Blocked or partial:** work needs an answer or another implementation round.
+
+External review of unfinished work spends another 10–20 minutes without completing its own acceptance.
 
 ## 10. Review — `/teamlead:codex-review`
 
-On a clean finish, invoke `codex-review` with the worktree as the target and **no flags**.
-The default path is the point: it builds the package, runs a fresh Codex session in a
-disposable linked worktree with network access (background, 10–20 minutes), and triages
-every finding into a verdict ledger where each row appears exactly once with the evidence
-that settled it. Pass `--no-network` to review in the hard read-only sandbox instead —
-right when nothing in the change needs `gh`, a PR or a CI run to settle it.
+After a clean finish, invoke codex-review with this worktree and no default flags. It packages the task, starts fresh Codex in a disposable worktree, and triages every finding. The background review usually takes 10–20 minutes.
 
-If Codex cannot run, the review stops there unless `opusCodeReview=fallback` is set in a
-config tier; then `teamlead:code-reviewer` reviews the same package on Opus (its step 2b)
-and the ledger says so. Do not pass `--opus-code-review` yourself — which reviewer stands
-in is the user's setting, not a cycle default.
+Use `--no-network` only when no review claim needs GitHub, PR, or CI access. It selects the hard read-only sandbox instead of the disposable networked worktree.
 
-Its output is that ledger plus the counts line, then it asks which `CONFIRMED`,
-`PLAN-DEFECT` and `PRE-EXISTING-SUBSYSTEM-REWRITTEN` rows to act on, writes
-`<run>/review-followup.md`, and hands over `/teamlead:delegate <run>/review-followup.md`.
+If Codex cannot run, stop unless the user's config sets `opusCodeReview=fallback`. That setting dispatches the Opus fallback. Do not add your own fallback setting.
 
-`Follow instructions to review PR @<abs>/PROMPT.md` is **not** this path's output — that is
-the legacy `--package-only` handoff. Do not pass `--package-only`, and do not report that
-line as the result.
+Codex-review reports its ledger and counts, then asks which CONFIRMED, PLAN-DEFECT, and PRE-EXISTING-SUBSYSTEM-REWRITTEN findings to fix. For selected rows, it writes `review-followup.md` and supplies `/teamlead:delegate <path>`.
+
+Do not use `--package-only` or report its manual `Follow instructions to review PR @<abs>/PROMPT.md` handoff as the completed review.
 
 ## 11. Closing report
 
-One message: worktree path, branch, base SHA, run directory, commit count, the plan design
-review's counts line, the `$RUN/plan-human.md` path, the code review ledger's counts line (its `reviewer:` field
-included — an Opus fallback reads differently from a Codex review), the
-`review-followup.md` path, the `/teamlead:delegate <path>` one-liner, and the deferred-work rows
-added if any.
+Report the worktree, branch, base SHA, run directory, commit count, plan-review counts, and human-plan path. Include code-review counts with the reviewer identity. Include any follow-up path, delegate command, and deferred-work count.
 
-The fix round is deliberately **not** part of the cycle. Fixing confirmed findings is a fresh
-`/teamlead:delegate` run with its own plan, its own questions and its own reviewers; folding it in
-would hide a second full round of cost behind one command and give that round no independent
-review of its own. That run supplies the review itself: its task is a `review-followup.md`,
-so its step 11 reruns `/teamlead:codex-review` on the fixed tree: Codex first, with the Opus
-fallback kept available when that is what wrote the review being closed. That rerun reads
-only the fix commits, checks each closed finding against them, and reviews them as a change
-of their own.
-
----
+Selected fixes start a separate delegate run with its own plan, questions, and reviews. That run invokes codex-review at step 11. It reviews only new fix commits and checks earlier findings. Codex remains first, with Opus fallback available when it produced the earlier review. Do not hide this separate round inside the initial cycle.
 
 ## Never
 
-- Merge or push. No step does either, ever, and no flag enables it.
-- Reuse an existing worktree or branch, or decide a collision yourself.
-- Run `/teamlead:delegate` before step 7 has moved the session into the worktree.
-- Tell the user to relaunch, rename, or `cd` anywhere while `EnterWorktree` is available.
-- Hardcode a package manager, a bootstrap command, or `.env` as the only carried file.
-- Report the `--package-only` handoff line as the review result.
-- Enter a tree whose bootstrap failed.
+- Merge or push.
+- Reuse an existing worktree or branch. The collision procedure permits inspection, not automatic reuse.
+- Run delegate before the session moves into the worktree.
+- Ask for relaunch, rename, or cd when EnterWorktree is available and accepted.
+- Hardcode bootstrap, package manager, or `.env` as the sole possible carried file.
+- Report a package-only handoff as a completed review.
+- Enter a worktree whose bootstrap failed.

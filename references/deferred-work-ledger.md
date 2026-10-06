@@ -1,14 +1,14 @@
 # The deferred-work ledger
 
-Triage already does the hard part — deciding that a findings row grows the spec rather than fixes a defect — and refactor decisions already weigh blast radius against risk. Then both die in a chat message. The next run's reviewer raises the same row, triage demotes it again, and the next implementer trips over the same code and files the same refactor request, because nothing in the repo records that either was already settled.
+Triage can defer requests that expand scope. The coordinator can also defer refactors after considering their impact. Without a durable record, later runs can repeat those decisions.
 
-So a run that demoted or deferred anything appends it to `<repo>/docs/deferred-work.md` through a delegated sonnet writer (brief **L**), the same way an ADR is written: the coordinator never writes the repo itself.
+When a run defers an item, delegate its append to `<repo>/docs/deferred-work.md` using the sonnet writer and brief L. The coordinator does not edit the repository.
 
 ## When it runs
 
-At step 11, **only if** there is at least one row to add: a `## Demoted to Notes` line in any `triage-*.md`, or a `defer` line in `$RUN/refactor-decisions.md`. Nothing to add → no writer, no file. An empty ledger created "for next time" is a file the user has to delete.
+At step 11, append only if triage has a demoted row or `refactor-decisions.md` has a `defer` line. Otherwise dispatch no writer and create no ledger.
 
-Rejected refactors, Notes the user must decide on, pre-existing test failures and open questions do **not** go in — they belong in the final report, which the user reads once and acts on. The ledger is only for work that was consciously postponed.
+Exclude rejected refactors, undecided Notes, pre-existing failures, and open questions. Put these in the final report. The ledger records deliberately postponed work.
 
 ## What goes in
 
@@ -21,7 +21,7 @@ One row per item:
 | 2026-09-03 | ratelimit-a1b2 | extract the window arithmetic from Limiter | works as-is; touches 3 callers outside scope | refactor request |
 ```
 
-`Run` is the basename of `$RUN`. Copy the triage lines **verbatim** — triage writes them ledger-ready (`<what would change> — <why> (<location>)`) precisely so nobody rephrases a decision into something subtly different from what was decided.
+Set Run to the basename of `$RUN`. Copy each ledger-ready triage line verbatim. Do not change the wording of the recorded decision.
 
 ## Appending safely matters more than the ledger does
 
@@ -30,7 +30,7 @@ The file accumulates across runs and it belongs to the repo, not to this run:
 - **`Read` it first.** If it exists, append with `Edit`: `old_string` is the current last row copied verbatim, `new_string` is that row plus the new ones. **Never `Write` over a file that exists** — a whole-file write silently drops every earlier run's rows, and this file has no other copy.
 - Only when the read proves it absent do you `Write` it: a `# Deferred work` heading, one line saying `/teamlead` runs append here, the table header, then the rows.
 - `mkdir -p <repo>/docs` if needed.
-- **Never `git add`, never commit.** Same rule as a created ADR: the file lands in the working tree and the user commits it when they choose. A run that commits on the user's behalf has made a decision that was not delegated to it.
+- **Never stage or commit.** Leave the ledger in the working tree. The user decides whether to commit it, as with a generated ADR.
 
 ## Brief L — ledger writer (`teamlead:writer`)
 
@@ -40,4 +40,4 @@ Inputs: $RUN/triage-*.md (the ## Demoted to Notes lines), $RUN/refactor-decision
 Output: append the rows to <repo>/docs/deferred-work.md following the append-safety rules; return `LEDGER rows=<n> file=<path>`.
 ```
 
-Spawn it in the same turn you write the final report — it has no dependency on the report, and its `rows=<n>` is the number the report's Deferred line cites. Wait with the report's own turn (`wait_for.py --timeout 120 <repo>/docs/deferred-work.md`); it is a one-file append, so it returns in well under a minute.
+Dispatch the ledger writer while preparing the final report. The writer does not depend on the report. Use its returned `rows=<n>` count in the report's Deferred line. Wait for the writer's completion before sending that count. Appends normally finish in under a minute. If using `wait_for.py` on an existing ledger, require a rewrite and the dispatch baseline. File existence alone does not establish completion.

@@ -1,10 +1,10 @@
 # Living ExecPlan — the tail of `$RUN/plan.md`
 
-On complex tasks `$RUN/plan.md` does not stop at the planner's output: a sonnet writer appends four living sections to it and keeps them current as work proceeds (the trigger is in SKILL.md "Keeping the plan alive").
+For complex tasks, a sonnet writer appends four living sections to `$RUN/plan.md`. It updates them as work proceeds. The delegate skill defines the trigger under "Keeping the plan alive".
 
-**It lives in the run directory, not the repo.** An earlier version of this plugin copied `plan.md` into a `<repo>/PLAN.md` that the user then had to commit or gitignore. That bought nothing the run directory does not already give — and it cost a faithful-transcription step, a file the writer could clobber, and machine-specific detail leaking toward a committed file. One file, one copy: the planner writes its head, the writer extends its tail.
+Keep the plan in the run directory. Earlier versions copied it into repository PLAN.md, adding transcription work, overwrite risk, and machine-specific content near committed files. Keep one copy. The planner writes its main sections, and the writer updates only the living sections.
 
-**Why a living document and not a one-shot dump.** A static plan goes stale the instant an implementer diverges, and the *reasons* behind each choice evaporate when the session ends — so the next round (or the next session, or the user editing between sessions) is flying blind. A living ExecPlan fixes three things at once:
+A static plan can become stale after implementation diverges. Unrecorded reasons disappear when the session ends. Living sections retain progress and decisions for the next round, session, or user edit.
 
 - **Resumability** — a cold agent (or you, days later) can restart from *only this file* with no prior context. That is the bar: self-contained.
 - **Auditability** — the `Decision Log` records *why* a path was chosen, so "trust but verify" has something durable to verify against.
@@ -14,7 +14,7 @@ This is the same discipline that makes spec-driven workspaces and their ExecPlan
 
 ## When to use it
 
-Same trigger as before: **≥3 workstreams OR any workstream rated complexity L.** For simple tasks (1–2 streams, all S/M) `plan.md` stays as the planner wrote it — the cost being avoided is not disk space but the writer spawn after every synthesis and triage, which is real overhead on a two-stream task and leverage on a six-stream one.
+Use these sections for at least three workstreams or any L-rated stream. For one or two S/M streams, retain the planner's original plan. This avoids writer dispatches after every synthesis and triage when they add little value.
 
 ## Hard requirements
 
@@ -24,7 +24,7 @@ Same trigger as before: **≥3 workstreams OR any workstream rated complexity L.
 
 ## Skeleton
 
-The planner already wrote the head of `plan.md` — `## Goal`, `## Workstreams`, the per-stream blocks with their inline spec excerpts and observable acceptance, the DAG, `## Decisions taken`, forbiddens, anti-scope. **Do not restate any of it**; a second copy of a spec excerpt is a second copy to drift.
+Preserve the planner's Goal, Workstreams, specs, acceptance, DAG, Decisions taken, project rules, and anti-scope. Do not restate them. Duplicate spec text can diverge.
 
 Append exactly these four sections to the end of the file (via a sonnet writer — the teamlead never writes files itself):
 
@@ -69,4 +69,4 @@ Compare the result against the plan's `## Goal`.
 - **After each reviewer round:** update `Progress` (what passed, what's reworking) and log any course-correction in `Decision Log`.
 - **At completion:** write the `Outcomes & Retrospective` entry before declaring done.
 
-Keep each update **minimal and targeted** — a writer agent editing one section at a time, not a full rewrite. A full rewrite risks dropping earlier `Decision Log` / `Surprises` history, which is the whole point of the file, and here it would also take the planner's head of `plan.md` with it.
+Have the writer update one section per invocation. Avoid full rewrites. They can erase earlier decisions, discoveries, and the planner's main sections.

@@ -1,6 +1,6 @@
 ---
 name: codex-review
-description: 'Has Codex independently review a finished /teamlead:delegate run with its full task, plan, and diff context, then triages every finding in Claude Code. Use when the user says "review this run", "/teamlead:delegate --review", asks for a Codex review of teamlead work, or pastes back findings from another agent. With opusCodeReview=fallback, an Opus reviewer stands in when Codex cannot run.'
+description: "Runs an independent Codex review of completed teamlead work and triages every finding. Use for \"review this run\", /teamlead:delegate --review, a requested Codex review, or pasted findings. With opusCodeReview=fallback, dispatches the Opus reviewer when Codex cannot run."
 metadata:
   argument-hint: "[run dir | repo/worktree path] [--list] [--base SHA] [--with-diff] [--out DIR] [--package-only] [--timeout-minutes N] [--opus-code-review=off|fallback]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/review_package.py *), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/run_codex_review.py *)
@@ -8,12 +8,9 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/review_package.py *), 
 
 # Review a teamlead run with Codex
 
-**`$PLUGIN` is the plugin root** — two levels above this skill's base directory, which the harness names when it loads this file. Resolve it yourself in the commands below; a `${...}` reaches your Bash unexpanded.
+`$PLUGIN` is the plugin root, two levels above this skill's directory. Substitute its absolute path in commands. Literal placeholders may reach Bash without expansion.
 
-Four jobs, in order. Do not perform the initial review yourself — Codex is the
-independent reviewer, and when it cannot run, the `teamlead:code-reviewer` agent is
-(step 2b), never you. Your job on the way back is the opposite one: make sure
-nothing it found is lost, and reject a finding only on evidence.
+Perform the four steps below in order. Codex performs the initial review. If enabled, the fallback agent performs it when Codex cannot run. The coordinator triages findings and must reject them only with evidence.
 
 ## 1. Build the package
 
@@ -21,182 +18,97 @@ nothing it found is lost, and reject a finding only on evidence.
 python3 $PLUGIN/scripts/review_package.py <target> [--with-diff]
 ```
 
-`<target>` is a run directory, a repo/worktree path, or omitted (uses cwd); the script
-works out which and finds the newest matching run. **If the user names no target and this
-session's cwd is not the worktree, do not guess** — run `--list`, show the runs, and ask
-which one. The script does the same thing on failure, so a wrong path is self-correcting.
-If the user explicitly passed `--list`, show the script's list and stop; there is no
-package or review to run yet.
-It writes `PROMPT.md` (small: task, base SHA, commits, changed files, the rubric, the
-answer contract) plus `plan.md` (whole, as a sibling) into `<run>/review-package/`, and
-copies any file the task itself points at — when the task is "fix the issues from this
-review", that review is the acceptance criteria, and `$RUN/…` is a path the reviewing
-agent cannot expand. Add `--with-diff` only when the reviewing agent has no access to the
-repo — the prompt otherwise tells it to read the diff from git itself.
+Target may be a run directory, repository/worktree path, or omitted for cwd. The script finds the newest matching run. If the user supplies no target and cwd is not the intended worktree, run `--list` and ask the user to select one. For an explicit `--list`, print the list and stop.
 
-A branch written outside a `/teamlead:delegate` run has no run directory, so nothing states the
-request: pass `--plan <file>` (a PR body does) and `--task <file>` if the ask exists in
-writing anywhere. Both matter more than they look — the prompt grades the diff against
-whatever intent it can quote, and with neither it tells the reviewer so instead of
-inventing a boundary to measure against.
+The package contains PROMPT.md and a sibling copy of the complete plan. PROMPT.md includes task, base SHA, commits, changed files, rubric, and answer contract. The script also copies files referenced by the task. A prior review used as a fix request supplies acceptance criteria. Codex cannot expand the coordinator's `$RUN` placeholders.
 
-Keep the base SHA, commit/file counts, package path, and **every WARNING the script
-printed verbatim** for the final report. A base warning means the review may cover the
-wrong range — never suppress it. If the script exits 1, report the error and stop; the
-usual fix is `--base <sha>` or `--out <dir>`.
+Use `--with-diff` only when the reviewer cannot access the repository. Otherwise it reads git directly. For work without a teamlead run, pass `--plan <file>` and any written request as `--task <file>`. A PR body can supply the plan. Without intent sources, the prompt identifies the limitation rather than inventing scope.
 
-Keep its `opus    : opusCodeReview=<value>  (<source>)` line too. It decides step 2b, and
-it is resolved now, before the wait, so the fallback is a setting someone chose rather
-than a call made after Codex has already failed. Pass the user's `--opus-code-review=<v>`
-through to `review_package.py` when they gave one; it outranks the config tiers.
+Retain base SHA, commit/file counts, package path, and every WARNING verbatim. A base warning can indicate an incorrect review range. If packaging exits 1, report the error and stop. A corrected `--base` or `--out` commonly resolves it.
 
-If the user passed `--package-only`, retain the old manual handoff: report the base SHA
-and commit/file counts, every warning, and then copy the script's final
-`Follow instructions to review PR @<abs>/PROMPT.md` line exactly as printed. Put that
-line last and stop. Do not pass `--package-only` to `review_package.py`.
+Retain the printed `opus    : opusCodeReview=<value>  (<source>)` line. It governs fallback before review starts. Pass through an explicit `--opus-code-review=<v>` to the packager. It overrides config.
+
+For `--package-only`, report counts, base, warnings, and the printed manual handoff exactly. Put `Follow instructions to review PR @<abs>/PROMPT.md` last and stop. Do not pass `--package-only` to the packager itself.
 
 ## 2. Run the independent Codex review
-
-Unless this is `--package-only`, pass the generated prompt to the bundled runner:
 
 ```
 python3 $PLUGIN/scripts/run_codex_review.py <absolute-PROMPT.md> [--timeout-minutes N] [--no-network]
 ```
 
-The runner extracts the repository from the generated prompt, checks the saved Codex
-CLI login, and starts a **fresh** Codex session in a disposable linked worktree beside
-the prompt. The sandbox is `workspace-write` with network access on, because that is the
-only Codex mode that has network — and a reviewer without network cannot run `gh`, settle
-a `## Blocking` CI claim, check the PR, or fetch what a test needs. Before Codex starts,
-the runner saves the source's uncommitted work — `git diff HEAD` as a patch, plus the
-untracked files copied whole — into `pre-review-tree/`, then uses that same backup to make
-the disposable checkout equivalent to the live tree. The untracked copy stops at 500 files
-or 50 MB, and skips symlinks and anything that is not a regular file; each of those is a
-warning rather than a silent truncation. The review still runs either way, so such a
-warning means the isolated tree is missing untracked files and the reviewer's silence
-about them proves nothing. Report it with the rest. The prompt sent through stdin names
-the disposable path, and the runner force-removes it on success, failure, or timeout, so
-anything the networked reviewer writes **to that checkout's files** is discarded with it.
+Skip this step for package-only. The runner reads the repository from PROMPT.md and checks saved Codex login. It starts a fresh session in a disposable linked worktree beside the prompt.
 
-The runner retains the original tree's HEAD and dirty-content digest comparison as a
-backstop. A filesystem warning while isolation is active means the reviewer escaped the
-disposable checkout and changed the live tree; report every such `WARNING:` verbatim.
+The normal sandbox permits workspace writes and network access. Network access enables PR/CI checks, gh, and test dependencies. Before review, the runner saves `git diff HEAD` and copies untracked files into `pre-review-tree/`. It applies that backup to the isolated tree.
 
-**Not everything the reviewer writes is contained** — a linked worktree shares the whole
-repository, so the runner snapshots the git common directory byte for byte rather than a
-list of the surfaces someone thought to name. Refs, config, reflogs, hooks and the object
-database are all in there, and so is whatever this paragraph has not anticipated: a file
-nobody predicted still produces a warning naming it. Those warnings are separate from the
-filesystem ones because they are real changes to the source repository without being an
-escape. Report them too, and read them in this order. A config warning comes first —
-`core.hooksPath` and the `alias.*` keys decide what later commands in that repository
-execute — and a hook warning is the same danger arriving directly. A reflog warning is
-next: ref tips say where the branches are now, the reflog is the only record of where they
-were, so a shrinking one means the repository lost its way back rather than merely moving.
-An object warning is judged by which object IDs the repository can still serve from
-its own object store — local loose objects and local pack indexes — not by storage
-layout or by a store reached through `objects/info/alternates`, so a change inside
-that borrowed store produces no warning, a change to the pointer file itself still
-does, and a `git repack` or `git gc` that keeps every object produces none either. A
-`deleted` line means an object the repository could serve before the review is gone,
-or that mutable metadata deciding which objects are reachable (such as
-`objects/info/alternates`) was removed. A `created` line is the addition side of the
-same comparison — a new object the repository can now serve, new reachability
-metadata, or a loose object whose bytes no longer hash to its own name, since that
-corruption is tracked as content rather than as an object ID. Either mechanism that
-makes a loose object stop verifying — a hash that no longer matches, or a zlib stream
-that never reaches its own end — reads as a `created` line on that path whether or
-not the object was present before the review, since only an object that no longer
-verifies is ever entered into that map.
-`--no-network` keeps the hard read-only sandbox and skips the disposable worktree — worth
-passing when the change under review touches nothing GitHub can answer for, since no CI
-or PR claim then needs settling. The runner writes the final answer to
-`codex-review-rN.md` and the JSONL event stream to `codex-review-rN.jsonl` beside the
-prompt; use the exact paths it prints. It does not need `OPENAI_API_KEY` when `codex
-login status` reports a saved ChatGPT login. The Codex process does not inherit Claude's
-conversation: the generated package, its referenced files, and repository access are
-its complete task context.
+Untracked copying stops at 500 files or 50 MB. It skips symlinks and non-regular files. Each omission produces a warning. Review continues, but silence about omitted files proves nothing. Report every warning.
 
-A review of a real change takes 10 to 20 minutes, longer than a foreground Bash call is
-allowed to run, so start the runner **in the background** and let its completion
-notification bring you back. Do not poll the JSONL or sleep in a loop while it runs:
-nothing in the stream changes what you do next, and every poll costs a turn. The runner
-kills the whole Codex process group after `--timeout-minutes` (default 30) and reports
-the retained JSONL path, so a hung review cannot outlive the cap.
+The runner supplies the disposable path through stdin. It removes that worktree on success, failure, or timeout. File edits inside that checkout disappear with it.
 
-Do not start an interactive login, retry with `--dangerously-bypass-approvals-and-sandbox`
-or any other weakening beyond what the runner already sets, or fall back to reviewing the
-change yourself. When the runner exits non-zero — Codex not installed, no saved login,
-a failed run, or a timeout — report its error (and the retained JSONL path, when it
-printed one). Then `opusCodeReview=off` → stop there; `opusCodeReview=fallback` → go to
-step 2b. Never add `--with-diff` merely because Codex is a separate process;
-it runs on the same machine and reads the repository directly.
+### Source-state warnings
 
-Codex loads skills from `~/.agents/skills` on its own. Nothing named `codex-review`
-may live there: a copy written for the packaging side describes the wrong role to the
-reviewer, and the last time one was present Codex announced it was "using the
-codex-review skill" before starting the review.
+The runner compares the source HEAD and dirty-content digest. A filesystem warning during isolation means the reviewer changed the live tree outside the disposable checkout. Report it verbatim.
 
-When the runner succeeds, read `codex-review-rN.md` in full and continue directly to
-triage. Do not ask the user to copy or paste the review.
+Linked worktrees share git metadata. The runner also snapshots the common git directory, including unanticipated files. These warnings can reflect source repository changes without a filesystem escape.
+
+Read configuration warnings first. `core.hooksPath` and aliases can change later command execution. Read hook warnings next, then reflog warnings. Reflogs retain earlier branch positions, so shrinking them can erase recovery history.
+
+Object warnings use object IDs available from local loose objects and pack indexes. They do not compare storage layout or follow `objects/info/alternates` into borrowed stores. Changes inside a borrowed store produce no warning. Changes to the pointer file do. Repacking or garbage collection produces no object warning if every object remains available.
+
+A `deleted` entry identifies a lost local object or removed reachability metadata, including alternates pointers. A `created` entry identifies a newly available object, new reachability metadata, or corrupt loose-object bytes.
+
+Loose corruption includes a hash mismatch or a zlib stream without a complete end. It produces a `created` entry for that path even if the object existed earlier. Only unverifiable loose objects enter the content-comparison map.
+
+### Completion and failure
+
+`--no-network` uses the hard read-only sandbox and skips disposable worktree creation. Use it when no claim requires PR or CI access.
+
+The runner writes `codex-review-rN.md` and `codex-review-rN.jsonl` beside PROMPT.md. Use the exact printed paths. Saved ChatGPT login does not require OPENAI_API_KEY. The new process receives no Claude conversation. Its context consists of the package, referenced files, and repository access.
+
+Start the runner in background Bash. Real reviews take 10–20 minutes and exceed foreground limits. Let its completion notification resume the workflow. Do not poll JSONL or use repeated sleeps. The runner terminates the entire process group at its timeout, default 30 minutes, and reports retained JSONL.
+
+Do not start interactive login or weaken sandbox settings beyond the runner's defaults. Never use `--dangerously-bypass-approvals-and-sandbox`. Do not substitute your own initial review.
+
+On failure, report the error and any retained JSONL path. With `opusCodeReview=off`, stop. With `opusCodeReview=fallback`, continue to step 2b. A separate Codex process on the same machine can read the repository and does not require `--with-diff`.
+
+Codex can load skills from `~/.agents/skills`. A packaging-side skill named codex-review there can give the independent reviewer the wrong role. An earlier run announced that skill instead of starting from its package. Do not install such a packaging copy there.
+
+On success, read the complete answer and continue directly to triage. Do not ask the user to paste it.
 
 ## 2b. The Opus stand-in — only with `opusCodeReview=fallback`
 
-The same triggers as `opusPlanReview=fallback` on the plan side: the runner failed for
-any reason. Without this, the change ends its cycle with no independent review at all,
-and the only trace is one error line nobody acts on.
+Use fallback only after runner failure and resolved `opusCodeReview=fallback`. It prevents a requested independent review from ending as an unactioned error.
 
-First record the live tree, since this reviewer works in it rather than in a disposable
-checkout. Snapshot everything its contract (`agents/code-reviewer.md`) forbids it to
-touch: tracked and untracked files, `HEAD`, every ref (the stash included), local config
-and hooks:
+Record the live tree metadata before dispatch. The reviewer must not change files, HEAD, refs including stash, local config, or hooks:
 
 ```bash
 { git -C <repo> rev-parse HEAD; git -C <repo> status --porcelain;
   git -C <repo> for-each-ref --format='%(objectname) %(refname)';
   git -C <repo> config --local --list;
-  ls -lA "$(git -C <repo> rev-parse --path-format=absolute --git-path hooks)"; } \
-  > <abs dir of PROMPT.md>/tree-before-rN.txt
+  ls -lA "$(git -C <repo> rev-parse --path-format=absolute --git-path hooks)"; }   > <abs dir of PROMPT.md>/tree-before-rN.txt
 ```
 
-Ignored files are left out on purpose: the contract lets the reviewer run the test
-commands `PROMPT.md` names, and those write build output there on every run, so a
-comparison including them would warn every time and the warning would stop meaning
-anything. Then spawn `teamlead:code-reviewer` in the foreground with exactly this prompt:
+This block records status and metadata. It does not hash every tracked or untracked file. Exclude ignored build outputs because permitted test commands can recreate them on every run.
+
+Dispatch `teamlead:code-reviewer` in the foreground with this prompt:
 
 ```
 PROMPT.md: <abs path of review-package/PROMPT.md>
 Repo: <abs repo path from the package output>
-Answer: <abs dir of PROMPT.md>/opus-review-rN.md   (N = the first number not yet taken)
+Answer: <abs dir of PROMPT.md>/opus-review-rN.md   (N = the first unused number)
 Codex could not run (<the runner's error line, verbatim>), so this is the only review of this change.
 ```
 
-If that agent type is not registered — the plugin gained it after this session started —
-spawn `general-purpose` with `model: opus` instead, and put
-`Read $PLUGIN/agents/code-reviewer.md first; it is your instruction set.` above those
-four lines.
+If the agent type is unavailable in this session, use general-purpose with model opus. Prepend `Read $PLUGIN/agents/code-reviewer.md first; it is your instruction set.` with the resolved path.
 
-When it returns, run the same block into `tree-after-rN.txt` and `diff` the two files.
-Any difference means the reviewer changed the live tree: report the diff as a `WARNING:`,
-exactly as you would a runner warning, and do not revert anything yourself. Then read the
-answer file in full and triage it (step 3) exactly as you would a Codex answer. The file
-has the same contract, and the ledger's first line says who wrote it.
+After completion, repeat the metadata block into tree-after-rN.txt and compare with diff. Report any difference as WARNING. Do not revert it yourself. Read the entire answer and use the same triage rules as for Codex. Record reviewer identity in the ledger.
 
 ## 3. Triage the Codex findings
 
-The Codex prompt asks for five parts: a findings table, `## Blocking`, `## Per axis`,
-`## Plan defects` and `## Verified for this review`. Read the last one first — it tells
-you which findings were derived from something the reviewer actually ran, and that
-changes how much work each row's verification takes, not whether it gets one.
+Read the five required parts: findings, Blocking, Per axis, Plan defects, and Verified for this review. Start with Verified. It distinguishes executed checks from inferred claims. Use that evidence to plan each row's verification. Do not omit verification for any row.
 
-A package built for a follow-up run (the script prints a `closes  :` line) asks for a sixth
-part, `## Earlier findings`: FIXED, PARTIAL or NOT FIXED for every row of the review that
-run closed. Its range is that run's commits alone — the base is the head the earlier review
-read — and the table holds what the reviewer found in those commits as a change of their
-own. Give every PARTIAL and NOT FIXED line a verdict as if it were a table row (`CONFIRMED`
-means the finding is still open) and list it in the ledger, prefixed `earlier:`; a FIXED line
-needs no verdict, but its count goes on the closing line, so "3 of 3 fixed" is visible
-beside whatever new rows the fixes brought.
+A follow-up package prints `closes  :` and requests `## Earlier findings`. Each earlier row receives FIXED, PARTIAL, or NOT FIXED. The range starts at the earlier reviewed head and contains only the fix run's commits.
+
+Triage every PARTIAL or NOT FIXED record as a findings row. Prefix it `earlier:` in the ledger. CONFIRMED means it remains unresolved. FIXED requires no verdict, but include its count in the closing line. Report these counts beside any new defects in the fixes.
 
 If the user instead pasted findings from another agent, skip package creation and the
 Codex run and triage that pasted review using the same rules below.
@@ -220,18 +132,9 @@ not the arbiter. Read the cited lines first, then pick:
 | `WRONG` | falsified | the row's own "how to falsify" step, **executed**, with its output |
 | `OPEN` | not verifiable with what you have | one line on what you tried and what would settle it |
 
-**A rejection has to prove itself.** `WRONG` needs the falsification run and its real
-output; both `PRE-EXISTING` verdicts need the file quoted at the base SHA, not an
-assertion that it was probably always like that. If you cannot produce that evidence, the
-verdict is `OPEN` — reported to the user, never dropped. This is deliberate: the cheapest
-way for an outside review to become worthless is a triage where anything not instantly
-provable quietly disappears, and the rows most likely to be unprovable in five minutes are
-the ones about races, cross-process state and things that only fail under load.
+WRONG requires the executed falsification step and actual output. Both PRE-EXISTING verdicts require a quotation from the file at the base SHA. Without evidence, use OPEN and report it to the user. Do not silently discard hard-to-reproduce races, cross-process failures, or load-dependent findings.
 
-`PRE-EXISTING-SUBSYSTEM-REWRITTEN` exists because the split matters. A fault in code this
-change did not touch is genuinely someone else's problem. The same fault in the primitive
-this change just rebuilt is a decision the user should take knowingly — it was the single
-most valuable row in the last real review this workflow received.
+Distinguish untouched pre-existing defects from those in a subsystem this change rewrites. The latter need an explicit user decision. This distinction produced the most useful finding in an earlier review.
 
 Then report the **ledger**, which is the whole point of this step:
 
@@ -244,22 +147,11 @@ Reviewer: Codex | Opus (fallback — Codex <the runner's error, short>) | pasted
 CONFIRMED n · PLAN-DEFECT n · OUT-OF-SCOPE n · PRE-EXISTING n (n in rewritten subsystems) · WRONG n · OPEN n · reviewer: Codex | Opus fallback | pasted
 ```
 
-The reviewer appears twice because the counts line travels alone, into the cycle's closing
-report and into chat, and an Opus review is not the cross-vendor read a Codex one is. It
-shares a model family with the agents that built the change, so a reader weighing "0
-CONFIRMED" needs to know which of the two said it.
+Include reviewer identity in the header and counts line. Counts can travel alone into chat or the cycle report. Opus shares a model family with the implementation agents. Its fresh read does not provide Codex's cross-vendor independence.
 
-Every row the reviewer sent appears exactly once, quoted as they wrote it. Nothing is
-summarised away: a reader must be able to see what was asked and what became of it, which
-is the difference between "the review was mostly rejected" and "five of seven asks were
-accepted". Add the reviewer's `## Plan defects` items as `PLAN-DEFECT` rows and the
-`## Per axis` verdicts as one closing line — those are the parts a table cannot hold.
+Quote every finding exactly once and record its disposition. Do not summarize rows away. Add Plan defects as PLAN-DEFECT rows. Record Per axis verdicts on a closing line.
 
-`VALID-OUT-OF-SCOPE` rows go to `<repo>/docs/deferred-work.md` with `Source` =
-`external review`, following the append rules in
-`$PLUGIN/references/deferred-work-ledger.md` — **`Read` first, append
-with `Edit`, never `Write` over an existing ledger, never `git add`**. That file is how a
-deferral survives the chat it was decided in.
+Append VALID-OUT-OF-SCOPE findings to `docs/deferred-work.md` with Source = external review. Follow `references/deferred-work-ledger.md`. Read first and append with Edit. Never Write over an existing ledger or stage it.
 
 ## 4. Route the accepted rows back
 
@@ -285,19 +177,15 @@ Show the user the ledger and ask which `CONFIRMED`, `PLAN-DEFECT` and
   so the reviewer reads only the new commits, and checks each row below against them.
   A pasted review with no package gets `git rev-parse HEAD` of the tree it was about.
 - `# Task` — one paragraph naming the repo, the worktree and the base SHA, and saying
-  these are verified findings from an external review of that range.
+  these findings come from the verified external review of that range.
 - `## Findings to fix` — the accepted rows verbatim, each with the lines you read and the
   evidence that confirmed it. Verbatim matters: a rephrased finding is a new claim nobody
   verified.
 - `## Not in scope` — the rejected and deferred rows in one line each with their verdict,
   so the fix run does not re-open a settled row or re-derive a rejection.
 
-Then hand the user the one-liner: `/teamlead:delegate <run>/review-followup.md`. That is the
-handoff, and the fix run brings its result back here: it ends by invoking this skill on its own
-run directory (the fixed tree), so the fixes go through the same independent review the findings came from —
-Codex first, and `--opus-code-review=fallback` when `Reviewer:` says the fallback wrote them. This step is
-also where that chain stops. No rows picked → no `review-followup.md` → nothing reruns, so
-every lap costs one answer from the user and the loop never goes on by itself.
+Provide `/teamlead:delegate <run>/review-followup.md` for the selected fixes. That separate run reruns this review on its own run directory at completion. Codex remains first. Add `--opus-code-review=fallback` when the header identifies Opus fallback.
 
-Fixing is out of scope here, and a confirmed finding that ends its life in a chat message is the same loss as one that was never reported. Fix rows directly only if
-the user explicitly asks you to.
+If the user selects no rows, create no follow-up file and start no fix run. Every iteration therefore requires a user selection.
+
+Fix findings directly only when the user explicitly requests it. Otherwise this skill ends with the verified ledger and selected follow-up task.

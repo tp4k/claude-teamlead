@@ -1,10 +1,10 @@
 # `$RUN/plan-human.md` — the plan a person can actually read
 
-`plan.md` is written for machines that do not skim. Every workstream carries a verbatim spec excerpt, a two-list test plan, a reuse call with both halves, verification commands with their working directories, and three tagged review axes — and every one of those exists because a run went wrong without it. None of it is going away.
+The source `plan.md` contains detailed workstream specs, tests, reuse decisions, verification commands, and review tags. Agents require this material.
 
-But the person who has to say "yes, build that" is reading the same file, and a plan whose load-bearing decisions are spread across four hundred lines of material addressed to somebody else is one they will approve without reading. That approval is worth nothing, and it is the only gate between a misunderstanding and a full implementation round.
+A person deciding whether to approve the plan needs its behavior and consequential decisions. Those decisions can be difficult to find in hundreds of lines addressed to agents. A readable view supports an informed approval before implementation.
 
-So this file is a **second view of the same plan**, never a second plan. It adds no fact that is not in `plan.md`, and it decides nothing. If the two disagree, `plan.md` is right and this file is a bug.
+Create a human-readable view of the existing plan. Add no facts or decisions. Derive content from `plan.md`, `questions.md`, and `task.md`. If it conflicts with the authoritative `plan.md`, correct this view.
 
 ## Shape
 
@@ -46,11 +46,11 @@ row nobody could settle, a dependency that may not behave. Say "none" if none �
 an invented risk costs the reader's trust in the other sections.>
 ```
 
-Nothing else. No file lists, no commands, no spec excerpts, no test plans, no review axes: each of those has a reader, and that reader is an agent with the real plan open.
+Use only the sections above. Omit file inventories, commands, spec quotations, test plans, and review tags. Agents read those details in `plan.md`.
 
 ## Regenerating it after a Fix round
 
-The plan changes between the first read and dispatch — the user's answers get folded in, a design review row gets fixed, the validator corrects a claim. A reader who already read this file will not re-read it from the top, so a silent rewrite is a change nobody sees.
+Answers, design corrections, and validation can change the plan before dispatch. Someone who already read the human version needs an explicit change notice. Do not regenerate it silently.
 
 Rewrite the file and put this **first, above the title**:
 
@@ -60,4 +60,4 @@ Rewrite the file and put this **first, above the title**:
 - <what changed, in one line, newest first> — <why: the answer, the finding, the validator row>
 ```
 
-Newest first, because the last change is the one they have not seen. Keep every previous entry: the list is the file's history and it is short by nature. When nothing changed, do not regenerate the file at all — an unchanged file with a "Changes" section that says "none" trains the reader to skip the section that matters.
+Put the latest change first. Preserve every earlier entry. This list records the file's history. If the plan did not change, do not regenerate the file or add a "none" notice.

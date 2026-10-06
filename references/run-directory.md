@@ -6,17 +6,25 @@ Every `/teamlead:delegate` invocation gets one directory, outside the plugin:
 ~/.teamlead/runs/<repo-name>/<YYYY-MM-DD-HHMM>-<slug>/
 ```
 
-Outside deliberately: `claude plugin update` replaces the plugin directory, so state kept under it is state a version bump can delete, and a plugin someone else can install cannot carry one machine's briefs and repo paths. `$TEAMLEAD_HOME` moves the whole tree if you want it elsewhere (`scripts/paths.py`); every script resolves it, so no path here is ever typed by hand.
+Keep state outside the plugin because updates replace its directory. Installed plugins must not contain one machine's repository paths or briefs. `$TEAMLEAD_HOME` changes the state root through `scripts/paths.py`. Scripts resolve these paths.
 
-It is created by `scripts/new_run.py <repo> "<slug>" --task-file <task.md>` (which also prunes old runs per `~/.teamlead/config.json`) and printed as `RUN_DIR=<path>`. The coordinator waits for each phase's files with `scripts/wait_for.py --timeout <s> <files>` (one blocking call per phase; prints a routing line per file). Below, `$RUN` means that path.
+`new_run.py <repo> "<slug>" --task-file <task.md>` creates the directory and prunes old runs according to config. It prints `RUN_DIR=<path>`. `$RUN` means that path.
 
-`scripts/run_state.py $RUN` reads the same layout in the other direction: given the file set, it prints which step of the loop the run is on and the one next action, exiting 1 when that action is the user's. Use it on **resume** — a new session, or after a compaction — where `wait_for.py` is the wrong tool: it waits for an agent, and the agents of a previous session are all dead. That is why a missing file there means "spawn it again" rather than "wait", and why a resumed coordinator should never poll.
+Use one `wait_for.py --timeout <s> <files>` call per active phase. It prints each file's routing line.
+
+On resume or after compaction, run `run_state.py $RUN`. It reads the files and prints the next step and action. Exit 1 means the user must act. In a new session, earlier agents no longer run. A missing output requires redispatch, not polling or waiting for the old agent.
 
 ## Why files, not prompt text
 
-Measured across six eval runs, the coordinator spent 10–15 minutes per run retyping context into briefs — the spec excerpt, the plan's acceptance and test plan, the implementer's report tail, the verifier output — 19 KB of a 23 KB reviewer brief was text that already existed somewhere. Retyping is slow, it sits on the critical path, and it fills the coordinator's context with copies. So every agent **writes its own report to `$RUN`** and every later agent **reads what it needs from `$RUN`**. A brief is a pointer: which run files are its inputs, which file to write — and, for a reviewer, which role file to read. The coordinator (or the workflow script) only ever passes paths and a few routing facts.
+Across six evaluation runs, retyped context cost 10–15 minutes per run. One 23 KB reviewer brief contained 19 KB already present in files. Repeating it delays dispatch and consumes context.
 
-Agents may write to `$RUN` without prompts: the plugin's `hooks/allow-run-writes.py` approves `Edit`/`Write` under `~/.teamlead/runs/` and `~/.teamlead/tasks/` (the cycle's handover files) and nothing else, so no settings entry has to be added by hand. Nothing under `$RUN` is ever committed to the repo. In the repo tree, implementers write code within their brief's scope — enforced, not only asked: `hooks/deny-out-of-scope-writes.py` resolves the implementer's brief from its own dispatch prompt and refuses an `Edit`/`Write` outside the fenced ```scope block in its `## Scope` section. It answers only for implementer subagents whose brief declares that fence, so a hand-written brief, an older run or anyone else's write gets no decision at all. `teamlead:writer` owns exactly one file per invocation — the living sections of `$RUN/plan.md`, a new ADR, `docs/deferred-work.md`. The two repo files are written but **never committed**: the user commits them when they choose. The plan is deliberately not among them; it stays a run artifact, so no teamlead run ever leaves an untracked `PLAN.md` behind for the user to commit or ignore.
+Each agent writes its report under `$RUN`. Later agents read the required files. Briefs primarily supply input paths, output paths, and routing facts. Reviewer briefs also identify the role reference and settled decisions.
+
+The allow-run-writes hook approves Edit and Write under runs and cycle task directories. No one needs to edit settings manually. Do not commit run artifacts to the repository.
+
+Implementers write within their briefs. The scope hook reads the dispatch prompt and active fence, then refuses Edit or Write outside it. It makes no decision for other agents or briefs without a fence.
+
+The writer owns one assigned file per invocation: living plan sections, a human plan, an ADR, or deferred-work rows. The user decides whether to commit generated ADRs or ledger files. Keep the plan outside the repository.
 
 ## Layout
 
@@ -24,19 +32,21 @@ Agents may write to `$RUN` without prompts: the plugin's `hooks/allow-run-writes
 |---|---|---|---|
 | `repo.txt` | `new_run.py` | everyone | absolute repo path, one line |
 | `task.md` | coordinator via `new_run.py --task-file` | planner, reviewers, scribe | the user's task **verbatim**, flags stripped, plus a `flags:` line (`--no-perf-review`, `--no-security-review`, `--adr`, or `none`) |
-| `plan.md` | planner (opus); writer appends the living sections on `complex=yes` | validator, coordinator, reviewers, triage, scribe | the full plan: goal, workstream table (`WS-1`…), per-workstream block with inline **verbatim spec excerpt**, observable acceptance, test plan, `reuse:` / `do not reuse:` / `keep because:` lines, the three review axes, dependency DAG, `Decisions taken`, project forbiddens, task-wide anti-scope (`roles/planner.md`). On a complex task it continues as a living ExecPlan — `Progress`, `Surprises & Discoveries`, `Decision Log`, `Outcomes & Retrospective`, kept current by `teamlead:writer` (`references/execplan-template.md`). This is the artifact that has to be self-contained enough to resume a run from cold |
-| `questions.md` | planner; coordinator appends `## Answers` | coordinator, implementers (via brief), scribe | numbered open questions, each with an `options:` list of 2–4 lettered, self-describing candidate answers, the `recommended:` letter, the `rests on:` spec/code line and the `otherwise:` consequence — the coordinator relays each question as its own `AskUserQuestion` card built from those options, so they are menu entries, not prose. `## Answers` is one `n. <chosen option, verbatim>` line per question plus, when a scope card was on the table, `scope: <letter> — <option>`. Empty list ⇒ first line `No open questions.`; ends with `## Routing` = the planner's `PLAN_WRITTEN` block. Written **last** by the planner — the coordinator's `scripts/wait_for.py` waits on this file as the whole-plan-on-disk signal |
-| `briefs/impl-ws<N>-r1.md` | planner | implementer, verifier, reviewers | round-1 implementer brief for workstream N — workstream-specific parts only (scope, spec excerpt, acceptance, test plan, forbiddens, verification commands with cwd, anti-scope). The generic rules live in `roles/implementer.md`, which the brief tells the implementer to read first |
-| `briefs/impl-ws<N>-r<M>.md` (M ≥ 2) | triage (agent or coordinator) | implementer, verifier, reviewers | rework brief: the merged findings rows + verifier output if any + test-plan additions + pointer to the previous brief |
-| `plan-validation.md` | plan validator (sonnet) | coordinator / planner fix | `PLAN_VALID` / `PLAN_NEEDS_FIX` + findings table + the `Smaller / none` scope section — lettered options whose text before the colon names the option on its own (the coordinator relays them as the labels of a scope card), their prices and a `Recommend:` line when a cut exists, `Smaller: none` when it does not; never a blocker either way. See `roles/plan-validator.md` |
-| `implementer-ws<N>-r<M>.md` | implementer (sonnet) | verifier, reviewers, triage | the structured report (status, confidence, commits, TDD — RED commits, the wrong implementation each test rejects, the freeze check — verification, self-probes, questions, refactor requests) |
-| `verifier-r<M>.md` | verifier gate (sonnet) | reviewers, triage | `OUTCOME: PASS \| FAIL \| CANNOT_RUN` + per-command exit codes + output tails + pre-existing analysis |
-| `review-r<M>-<axis>.md` | reviewer (opus); axis ∈ `code`, `security`, `perf` | triage | the report in the shape of `review-standard.md` |
-| `triage-r<M>.md` | coordinator | next reviewers, the final report | consolidated verdict (worst wins), de-duplicated rows, rows demoted to Notes with the reason, Notes for the user, the re-review set for the next round with the basis per specialist |
-| `refactor-decisions.md` | coordinator, appended per decision | ledger writer, the final report | one line per refactor request: `<reject\|defer\|approve> — <what> — <reason> (<files/symbols>)`. Absent when no request was made |
-| `final-report.md` | coordinator | user | 5–12 lines: delivered, commits, who did what, manual checks, Notes, deferred |
+| `plan.md` | planner (opus), with living-section writer updates for complex tasks | validator, coordinator, reviewers, triage, scribe | Goal and workstreams. Each stream contains a verbatim spec, acceptance, tests, reuse guidance, review tags, and verification commands. Also contains dependencies, decisions, project rules, and anti-scope. Complex plans append Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective. Keep enough context for a fresh session. |
+| `questions.md` | planner, then coordinator for Answers | coordinator, implementers, scribe | Questions with 2–4 lettered options, recommendation, evidence, and alternative consequences. Answers contain verbatim selections and applicable design/scope decisions. With no questions, begin `No open questions.` End with the PLAN_WRITTEN block under Routing. Write this file last as the plan-completion signal. |
+| `briefs/impl-ws<N>-r1.md` | planner | implementer, verifier, reviewers | Workstream scope, quoted spec, acceptance, tests, rules, protected files, and verification commands with cwd. The implementer agent loads its generic role rules independently. |
+| `briefs/impl-ws<N>-r<M>.md` (M ≥ 2) | triage | implementer, verifier, reviewers | Previous-brief pointer, merged findings, any verifier-output pointer, and test additions. |
+| `plan-validation.md` | validator (sonnet) | coordinator, planner in Fix mode | PLAN_VALID or PLAN_NEEDS_FIX, factual findings, and scope observation. For a real cut, supply labeled choices, costs, and Recommend. Otherwise use Smaller: none. Scope observations do not change the verdict. |
+| `implementer-ws<N>-r<M>.md` | implementer (sonnet) | verifier, reviewers, triage | Status, confidence, commits, TDD evidence, freeze result, verification, probes, questions, and refactor requests. |
+| `verifier-r<M>.md` | verifier (sonnet) | reviewers, triage | PASS, FAIL, or CANNOT_RUN with per-command exit codes, output, and touched-file analysis. |
+| `review-r<M>-<axis>.md` | full reviewer (opus) or specialist sanity reviewer (sonnet) | triage | Code, security, or performance report following review-standard.md. |
+| `triage-r<M>.md` | coordinator | later reviewers, final report | Worst verdict, merged defects, demotions and reasons, user Notes, and next review set with each specialist's basis. |
+| `refactor-decisions.md` | coordinator | ledger writer, final report | Append `<reject\|defer\|approve> — <what> — <reason> (<files/symbols>)`. Omit the file when no request exists. |
+| `final-report.md` | coordinator | user | Delivered behavior, commits, roles, manual checks, Notes, and deferred items in 5–12 lines. |
 
-Round numbering: `r1` is the first implementation of a workstream; every rework increments it. The verifier and reviewers use the round of the workstream they check. With several workstreams in one run, the verifier, reviewers and triage write one file per workstream: `verifier-ws<N>-r<M>.md`, `review-ws<N>-r<M>-<axis>.md`, `triage-ws<N>-r<M>.md`; with one workstream the `ws<N>-` part is dropped. Every prompt says which case applies.
+Use r1 for initial implementation. Increment the round for each rework. Verification, reviews, and triage use the workstream's round.
+
+For multiple workstreams, use `verifier-ws<N>-r<M>.md`, `review-ws<N>-r<M>-<axis>.md`, and `triage-ws<N>-r<M>.md`. For one workstream, omit the `ws<N>-` infix. Every prompt must identify the applicable convention.
 
 ## The pointer brief
 
@@ -49,11 +59,11 @@ Output: write $RUN/<file> exactly as the role file specifies, then return <the s
 <the few facts only the sender knows: flags, the axis tag and its reason, the commit list, the re-review set>
 ```
 
-The five `teamlead:<role>` plugin agents load their own role file, so no brief names one. The reviewers are harness subagent types this plugin does not own, so brief R alone opens with `Role: read and follow <plugin>/references/roles/reviewer.md` and lists its tools.
+The six pipeline agents load their own role files. Their briefs do not name those roles. The reviewers are harness subagent types this plugin does not own, so brief R alone opens with `Role: read and follow <plugin>/references/roles/reviewer.md` and lists its tools.
 
 The return value of an agent is **short and routable** — a verdict line and a file path, never the report. The coordinator reads the file only when it has to decide something the return line does not settle.
 
 ## Two rules that fall out of this
 
-- **A report is a file first.** An agent that returns a verdict without having written its file has not finished; the next agent will read an empty slot. Role files say: write, then return.
-- **Nobody retypes what is on disk.** If a prompt needs the spec excerpt, it names the workstream block in `plan.md`; if it needs the diff, it names the commits and the agent runs `git show`. The only text that travels inside a prompt is what does not exist in a file yet.
+- **Write before returning.** A return line without its report leaves the next agent without an input.
+- **Point to existing context.** Name the workstream in plan.md for specs. Name commits for diff inspection. Add only new routing facts. The settled-decision exception copies decisions and accepted consequences into reviewer briefs as required by delegate.

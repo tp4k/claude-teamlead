@@ -6,47 +6,89 @@ A person deciding whether to approve the plan needs its behavior and consequenti
 
 Create a human-readable view of the existing plan. Add no facts or decisions. Derive content from `plan.md`, `questions.md`, and `task.md`. If it conflicts with the authoritative `plan.md`, correct this view.
 
+## How it should read
+
+Write it like a short spec handed to a colleague, not a report from a pipeline.
+
+- **The user's perspective first.** Problem and solution say what someone *experiences*, before and after. Structure, modules, and layers come later, if at all.
+- **The user's vocabulary.** Reuse the words from `task.md`. When the plan coined a term, either replace it with a plain one or define it in the same sentence the first time it appears.
+- **No paths, commands, test names, spec quotations, or review tags.** These go stale fast and mean nothing to someone approving behavior. Agents read them in `plan.md`.
+- **Short beats complete.** Use a bullet when it can replace a sentence. Cut a bullet that adds nothing. About a page; never longer than the plan's own summary would justify.
+- **No hedging and no throat-clearing.** Leave out "it's worth noting", "this plan aims to", and "comprehensive".
+
 ## Shape
 
-```markdown
-# <task, in one line of the user's own words>
+````markdown
+# <the task, in one line of the user's own words>
 
-<Two or three sentences: what will be true when this is done that is not true now.
-Behaviour, not structure. Someone who has not read the task should understand the
-change from this paragraph alone.>
+## Problem
 
-## What gets built
+<One to three sentences, from the user's side: what is broken, missing, or painful
+today. Someone who has not read the task should recognise the problem.>
 
-| # | Workstream | What it does | Size | Runs |
-|---|---|---|---|---|
-| 1 | <name> | <one sentence, behaviour> | S/M/L | wave 1 |
-| 2 | <name> | <one sentence, behaviour> | S/M/L | after 1 |
+## Solution
 
-## How you will know it worked
+<One to three sentences: what will be true when this lands that is not true now.
+Behaviour, not structure.>
 
-<One line per workstream: the observable acceptance, in the words a person would
-use to check it. "Send 101 requests in 10s — the last one gets a 429." Not the
-test's name, not the file it lives in.>
+## What you'll be able to do
 
-## Decisions already taken
+1. As a <who>, I can <behaviour>, so that <benefit>.
+2. …
 
-<One line each, from plan.md's `## Decisions taken` and questions.md's `## Answers`:
-the decision, then the consequence that was accepted. This is the section most
-worth a careful read — it is where a misunderstanding is still free to fix.>
+<One story per distinct behaviour the plan delivers — no more. A story the plan
+does not deliver belongs under "Out of scope", not here.>
 
-## What this does NOT do
+## The work
 
-<The anti-scope, in plain words, plus anything the plan deliberately leaves alone.
-A reader's most common objection to a plan is something it never claimed to do.>
+### 1 · <workstream name, as a short outcome: "Reject oversized uploads">
+
+**Delivers:** <the end-to-end behaviour this workstream makes work, in one sentence.>
+**Blocked by:** none — starts right away | 1 · <name>
+**Size:** S | M | L
+
+- [ ] <an acceptance check a person could perform: "Send 101 requests in 10 s — the
+      last one gets a 429.">
+- [ ] …
+
+### 2 · <name>
+
+…
+
+## Decisions already made
+
+- **<the decision>** — <the consequence that was accepted>. *(<source: "your answer
+  to Q2" or "planner">)*
+
+<From plan.md's `## Decisions taken` and questions.md's `## Answers`. This is the
+section most worth a careful read: a misunderstanding is still cheap to fix here.>
+
+## Out of scope
+
+- <the anti-scope, in plain words, plus anything the plan deliberately leaves alone>
+
+<A reader's most common objection to a plan is something it never claimed to do.>
 
 ## Open risks
 
-<Only what is genuinely uncertain: a claim the validator flagged, a design review
-row nobody could settle, a dependency that may not behave. Say "none" if none —
-an invented risk costs the reader's trust in the other sections.>
-```
+- <only what is genuinely uncertain: a claim the validator flagged, a design-review
+  row nobody settled, a dependency that may not behave>
 
-Use only the sections above. Omit file inventories, commands, spec quotations, test plans, and review tags. Agents read those details in `plan.md`.
+<Write "None." when there are none — an invented risk costs the reader's trust in
+every other section.>
+
+## Before you approve
+
+- <two to four pointed questions aimed at THIS plan's weakest joints, each naming the
+  item it is about: "Workstream 2 waits on 1 — could they run together?", "Decision 3
+  drops the CSV export — still fine?", "Is workstream 4 one piece of work or two?">
+````
+
+Number workstreams as `plan.md` numbers them, so a reader can cross-reference the source. "Blocked by" restates `plan.md`'s waves and dependencies. It does not decide them. Write each acceptance check as an action and the result a person would observe. A test name or a file path does not belong here.
+
+"Before you approve" may contain only questions about content already in the plan. Draw them from these checks: Is the work split at the right size? Are the blocking edges real? Should any workstreams be merged or split? Are the decisions acceptable? Never raise a concern the plan does not support.
+
+Use only the sections above.
 
 ## Regenerating it after a Fix round
 

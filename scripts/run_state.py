@@ -460,6 +460,42 @@ def autopilot(r: Run) -> bool:
     return paths.read_json(r.run / "config.json").get("autopilot") is True
 
 
+def recommended_labels(q: str) -> dict[str, str]:
+    """Question number → its recommended option's label, from questions.md.
+
+    The planner writes each question as `n. …`, its options as `a) <label>`
+    lines and the pick as `recommended: <letter>`; the relay shows the label on
+    the card, so an answer that repeats it verbatim is the recommendation.
+    """
+    labels: dict[str, str] = {}
+    num, options = "", {}
+    for ln in q.partition("## Answers")[0].splitlines():
+        if m := re.match(r"(\d+)\.\s", ln):
+            num, options = m.group(1), {}
+        elif m := re.match(r"\s+([a-z])\)\s+(.+)", ln):
+            options[m.group(1)] = m.group(2).strip()
+        elif (m := re.match(r"\s+recommended:\s*([a-z])\b", ln)) and num:
+            if m.group(1) in options:
+                labels[num] = options[m.group(1)].lower()
+    return labels
+
+
+def accepts_recommendation(answer: str, labels: dict[str, str]) -> bool:
+    """Whether one `## Answers` line records the recommended option.
+
+    6a allows `n. recommendation accepted` and `n. <chosen option, verbatim>`,
+    and coordinators routinely add the option's label or a note after the
+    first — `1. recommendation accepted — close the channel at once (…)`. An
+    end-of-line match read that as a changed answer and blocked a real run's
+    validator at 6b, so the phrase is matched at the start of the answer.
+    """
+    num, _, body = answer.partition(".")
+    body = body.strip().lower()
+    if re.match(r"recommendation accepted\b", body):
+        return True
+    return num in labels and body.rstrip(" .") == labels[num].rstrip(" .")
+
+
 def fold_owed(r: Run, q: str) -> str:
     """Why step 6b's planner Fix round is owed and has not run, else "".
 
@@ -474,10 +510,14 @@ def fold_owed(r: Run, q: str) -> str:
     counts = re.findall(r"CONFIRMED\s+(\d+)\s*·", r.text("plan-triage.md"))
     confirmed = int(counts[-1]) if counts else 0
     owed = [f"{confirmed} CONFIRMED design row(s)"] if confirmed else []
+    labels = recommended_labels(q)
     answers = q.partition("## Answers")[2]
-    owed += [ln.strip() for ln in answers.splitlines()
-             if re.match(r"(\d+\.|design:)\s", ln.strip())
-             and not ln.strip().lower().endswith("recommendation accepted")]
+    for ln in (raw.strip() for raw in answers.splitlines()):
+        if ln.startswith("design:") and not ln.lower().endswith(
+                "recommendation accepted"):
+            owed.append(ln)
+        elif re.match(r"\d+\.\s", ln) and not accepts_recommendation(ln, labels):
+            owed.append(ln)
     return "; ".join(owed)
 
 

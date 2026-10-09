@@ -42,6 +42,9 @@ PLAN_2WS = PLAN.replace("## WS-1 — resolve order",
                         "## WS-1 — resolve order\n\n## WS-2 — serialise output")
 QUESTIONS = "1. Round half-up? Recommend yes.\n\n## Routing\nPLAN_WRITTEN ws=1\n"
 ANSWERED = QUESTIONS + "\n## Answers\n1. recommendation accepted\n"
+OPTIONED = ("1. How are cents rounded?\n   options:\n     a) round half-up\n"
+            "     b) round half-even\n   recommended: a\n\n## Routing\n"
+            "PLAN_WRITTEN ws=1\n")
 VALID = ("# Plan validation\n\nVerdict: PLAN_VALID\n\n## Smaller / none\n\n"
          "Smaller: none\n")
 NEEDS_FIX = ("# Plan validation\n\n"
@@ -189,6 +192,19 @@ def case_design_fold_before_validation(tmp: Path) -> None:
          {"questions.md": ANSWERED}, "6c", "VALIDATOR", 0),
         ("a non-recommended answer, no Fix log → 6b Fix round",
          {"questions.md": picked}, "6b", "keep rounding half-even", 0),
+        # The reported block: the coordinator echoed the option after the phrase.
+        ("an accepted recommendation with its label and a note → 6c validator",
+         {"questions.md": OPTIONED + "\n## Answers\n1. recommendation accepted — "
+          "round half-up (after the user weighed half-even)\n"}, "6c", "VALIDATOR", 0),
+        ("the recommended option repeated verbatim → 6c validator",
+         {"questions.md": OPTIONED + "\n## Answers\n1. round half-up\n"},
+         "6c", "VALIDATOR", 0),
+        ("the other option repeated verbatim → 6b Fix round",
+         {"questions.md": OPTIONED + "\n## Answers\n1. round half-even\n"},
+         "6b", "1. round half-even", 0),
+        ("the phrase inside a longer answer is not an acceptance → 6b Fix round",
+         {"questions.md": OPTIONED + "\n## Answers\n1. no recommendation accepted, "
+          "round half-even\n"}, "6b", "no recommendation accepted", 0),
         ("CONFIRMED rows with a Fix log → 6c validator",
          {"questions.md": none_asked, "plan.md": PLAN + "\n## Fix log\nx → y\n"
           "PLAN_FIXED fixed=1 new_paths=no\n",

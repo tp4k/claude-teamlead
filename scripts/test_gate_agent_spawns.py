@@ -205,6 +205,15 @@ def case_validator_owes_the_design_fold(tmp: Path) -> None:
                 spawn("teamlead:plan-validator", run), "step 6b", "Fix mode")
 
 
+def case_validator_after_annotated_acceptance_allowed(tmp: Path) -> None:
+    """The reported deny: `recommendation accepted` followed by the option's
+    label is still the recommendation, so no 6b round is owed before 6c."""
+    run = mkrun(tmp, UNVALIDATED | {"questions.md": QUESTIONS + "\n## Answers\n"
+                                    "1. recommendation accepted — round half-up\n"})
+    expect_silent("a validator after an annotated acceptance is allowed",
+                  spawn("teamlead:plan-validator", run))
+
+
 def case_validator_after_relay_allowed(tmp: Path) -> None:
     run = mkrun(tmp, UNVALIDATED)
     expect_silent("a validator after the relay is allowed",

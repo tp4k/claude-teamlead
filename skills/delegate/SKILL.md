@@ -136,6 +136,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Continue to 6b in that same turn. Plan confirmation belongs to 6d.
 6a. Append ## Answers to questions.md when answers arrive.
     Record n. <chosen option, verbatim> or n. recommendation accepted.
+    A note may follow recommendation accepted after an em dash; nothing may precede it.
     Record design: <choice, verbatim> for each design card.
     After a scope answer at 6d, append scope: <letter> — <option, verbatim>.
     These records support compaction and run_state.py.

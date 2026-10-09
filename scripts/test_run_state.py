@@ -202,6 +202,12 @@ def case_design_fold_before_validation(tmp: Path) -> None:
         ("the other option repeated verbatim → 6b Fix round",
          {"questions.md": OPTIONED + "\n## Answers\n1. round half-even\n"},
          "6b", "1. round half-even", 0),
+        ("an option differing from the recommendation only in case → 6b Fix round",
+         {"questions.md": OPTIONED.replace("round half-even", "Round Half-Up")
+          + "\n## Answers\n1. Round Half-Up\n"}, "6b", "1. Round Half-Up", 0),
+        ("an option differing only by a trailing period → 6b Fix round",
+         {"questions.md": OPTIONED.replace("round half-even", "round half-up.")
+          + "\n## Answers\n1. round half-up.\n"}, "6b", "1. round half-up.", 0),
         ("the phrase inside a longer answer is not an acceptance → 6b Fix round",
          {"questions.md": OPTIONED + "\n## Answers\n1. no recommendation accepted, "
           "round half-even\n"}, "6b", "no recommendation accepted", 0),

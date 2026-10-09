@@ -476,7 +476,7 @@ def recommended_labels(q: str) -> dict[str, str]:
             options[m.group(1)] = m.group(2).strip()
         elif (m := re.match(r"\s+recommended:\s*([a-z])\b", ln)) and num:
             if m.group(1) in options:
-                labels[num] = options[m.group(1)].lower()
+                labels[num] = options[m.group(1)]
     return labels
 
 
@@ -488,12 +488,15 @@ def accepts_recommendation(answer: str, labels: dict[str, str]) -> bool:
     first — `1. recommendation accepted — close the channel at once (…)`. An
     end-of-line match read that as a changed answer and blocked a real run's
     validator at 6b, so the phrase is matched at the start of the answer.
+    A repeated label is compared exactly: options may differ only in case or
+    punctuation (`emit OK` / `emit ok`), and folding them would let the other
+    one through as the recommendation.
     """
     num, _, body = answer.partition(".")
-    body = body.strip().lower()
-    if re.match(r"recommendation accepted\b", body):
+    body = body.strip()
+    if re.match(r"recommendation accepted\b", body.lower()):
         return True
-    return num in labels and body.rstrip(" .") == labels[num].rstrip(" .")
+    return num in labels and body == labels[num]
 
 
 def fold_owed(r: Run, q: str) -> str:

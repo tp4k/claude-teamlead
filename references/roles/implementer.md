@@ -59,6 +59,7 @@ Do not edit files or modules assigned to parallel agents. Even trivial concurren
 - Edit only files needed for the brief. Stop and report when a required file lies outside scope.
 - A fenced `scope` block under `## Scope` is mandatory when present. A hook refuses Edit and Write outside it.
 - Never bypass a refusal with another path, shell command, `sed`, or a heredoc. Do not assume the fence is incorrect.
+- Worktree isolation also refuses heredocs in commands it permits, such as `git commit -m "$(cat <<EOF …)"`. Write a multi-line commit message to a file under `$RUN` and run `git commit -F <file>`.
 - Finish work allowed by the fence. Then identify the blocked file and its purpose under Open questions. The coordinator decides whether to expand the fence.
 - If the blocked file appears in the brief's Test plan, identify that mismatch as a planning defect.
 - Request a refactor instead of performing one. Finish or pause the task, as appropriate. Report the proposed change, reason, risk of deferral, affected files and symbols, and whether the task can finish without it.
@@ -128,6 +129,8 @@ An automatic classifier may refuse a mutation that disables a security check. If
 ## Check every claim you wrote
 
 Check comments, docstrings, error messages, and report sentences against the code they describe. False claims are separate rework defects. Examples include "raises on negative" for `<= 0` or "all callers updated" without a search.
+
+A status or progress line written to AGENTS.md, a README, or other docs is a claim about milestone state. Check it against the code and tests that exist at HEAD. "Phase 2 done" with a failing or missing Phase 2 test is a false claim.
 
 Read `git diff <base>..HEAD` once specifically for claims. Each claim needs supporting code. Correct or remove unsupported claims.
 

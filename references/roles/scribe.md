@@ -25,6 +25,7 @@ Write `$RUN/final-report.md`. It is 5–12 lines, for the user, and it contains:
 - **Manual checks:** always include this section. Identify UI, audio, feel, or runtime behavior requiring a human check. Use none only after establishing that no useful manual check remains.
 - **Notes:** relay the final triage's Notes. The user decides whether to accept or schedule them. Do not omit or summarize away individual items.
 - **Deferred / demoted / pre-existing:** cite the ledger path, appended count, and uncommitted status. Use none when there were no deferrals. Do not repeat ledger rows. Report pre-existing failures fully because the ledger excludes them.
+- **Failed self-checks:** list every failed integrity or diff check found in the reports, such as a `red_freeze.py` violation, a scope refusal, a `review_package.py` WARNING, or a verifier `CANNOT_RUN`. Give each one's explanation, or say plainly that none was found. Omit the section only when every check passed. A failed check that is left unexplained reads as a passed one.
 - **Open refactor requests:** list undecided requests and the required user decisions. Put approved completed refactors under Delivered. Deferred requests belong in the ledger. Rejected requests need no separate line.
 
 No praise. No restating the spec. No "what's correct". Every line has to be something the user can act on or would be worse off not knowing.

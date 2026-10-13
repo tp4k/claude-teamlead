@@ -59,6 +59,7 @@ Do not edit files or modules assigned to parallel agents. Even trivial concurren
 - Edit only files needed for the brief. Stop and report when a required file lies outside scope.
 - A fenced `scope` block under `## Scope` is mandatory when present. A hook refuses Edit and Write outside it.
 - Never bypass a refusal with another path, shell command, `sed`, or a heredoc. Do not assume the fence is incorrect.
+- Worktree isolation also refuses heredocs in commands it permits, such as `git commit -m "$(cat <<EOF …)"`. Write a multi-line commit message to a file under `$RUN` and run `git commit -F <file>`.
 - Finish work allowed by the fence. Then identify the blocked file and its purpose under Open questions. The coordinator decides whether to expand the fence.
 - If the blocked file appears in the brief's Test plan, identify that mismatch as a planning defect.
 - Request a refactor instead of performing one. Finish or pause the task, as appropriate. Report the proposed change, reason, risk of deferral, affected files and symbols, and whether the task can finish without it.
@@ -107,7 +108,7 @@ Report pre-existing failures and leave them unchanged. Establish that they preda
 
 A passing suite shows agreement between tests and code. It does not prove that the tests detect incorrect code. Weak tests cause rework and another verifier and review round. A self-probe can identify the gap earlier.
 
-Complete the probe list after verification passes. Start with the brief's `probe:` lines. Add each new comparison, guard, early return, else-arm, and tie-break not already covered. The planner could not know which clauses implementation would introduce. Include every line and outcome under `## Probes`. A missing clause whose reviewer mutation survives becomes a `LIST_GAP` finding. For rework, cover every fixed finding and each clause added by its fix.
+Complete the probe list after verification passes. Start with the brief's `probe:` lines. Add each new comparison, guard, early return, else-arm, and tie-break not already covered. List every resume, retry, and skip path the change adds or touches, and give each one a probe. These paths run only after an interruption or failure, so the main-path tests rarely reach them. The planner could not know which clauses implementation would introduce. Include every line and outcome under `## Probes`. A missing clause whose reviewer mutation survives becomes a `LIST_GAP` finding. For rework, cover every fixed finding and each clause added by its fix.
 
 For each probe:
 
@@ -128,6 +129,8 @@ An automatic classifier may refuse a mutation that disables a security check. If
 ## Check every claim you wrote
 
 Check comments, docstrings, error messages, and report sentences against the code they describe. False claims are separate rework defects. Examples include "raises on negative" for `<= 0` or "all callers updated" without a search.
+
+A status or progress line written to AGENTS.md, a README, or other docs is a claim about milestone state. Check it against the code and tests that exist at HEAD. "Phase 2 done" with a failing or missing Phase 2 test is a false claim.
 
 Read `git diff <base>..HEAD` once specifically for claims. Each claim needs supporting code. Correct or remove unsupported claims.
 

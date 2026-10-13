@@ -108,7 +108,7 @@ Report pre-existing failures and leave them unchanged. Establish that they preda
 
 A passing suite shows agreement between tests and code. It does not prove that the tests detect incorrect code. Weak tests cause rework and another verifier and review round. A self-probe can identify the gap earlier.
 
-Complete the probe list after verification passes. Start with the brief's `probe:` lines. Add each new comparison, guard, early return, else-arm, and tie-break not already covered. The planner could not know which clauses implementation would introduce. Include every line and outcome under `## Probes`. A missing clause whose reviewer mutation survives becomes a `LIST_GAP` finding. For rework, cover every fixed finding and each clause added by its fix.
+Complete the probe list after verification passes. Start with the brief's `probe:` lines. Add each new comparison, guard, early return, else-arm, and tie-break not already covered. List every resume, retry, and skip path the change adds or touches, and give each one a probe. These paths run only after an interruption or failure, so the main-path tests rarely reach them. The planner could not know which clauses implementation would introduce. Include every line and outcome under `## Probes`. A missing clause whose reviewer mutation survives becomes a `LIST_GAP` finding. For rework, cover every fixed finding and each clause added by its fix.
 
 For each probe:
 

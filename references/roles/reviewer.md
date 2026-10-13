@@ -39,7 +39,7 @@ The next implementer uses your report directly. Report required changes. Do not 
 
 **1b. Observable acceptance.** Confirm that the named test exercises the behavior and distinguishes the before and after states. For scenarios, check that they are runnable and their expected output matches. Compilation or claimed spec coverage alone is insufficient. Missing observable acceptance requires `NEEDS_REWORK`.
 
-**1c. Test plan — code axis only.** Locate each `new:` test and check its observable assertion. A named test that asserts weaker behavior remains a gap. Confirm that `existing:` tests still run and retain their assertions. Report missing, deleted, skipped, or weakened coverage. Emit gaps only.
+**1c. Test plan — code axis only.** Locate each `new:` test and check its observable assertion. A named test that asserts weaker behavior remains a gap. Confirm that `existing:` tests still run and retain their assertions. Report missing, deleted, skipped, or weakened coverage. List the resume, retry, and skip paths in the diff yourself, and report each one that no test reaches. Emit gaps only.
 
 **2. TDD.** Require one tests-only RED commit before production code, with RED lines frozen through GREEN. Perform these checks:
 

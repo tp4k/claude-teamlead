@@ -609,6 +609,16 @@ def case_untracked_or_linked_targets_refused(tmp: Path) -> None:
     check("a generic run whose only changed path is a symlink mutates nothing",
           outside.read_text() == "secret == value\n" and "link.txt" not in out
           and repo.status() == "", f"{code} {out}{err}")
+    repo = Repo(tmp / "repo3")
+    repo.write("sub/a.py", "secret = 1\n")
+    commit = repo.commit("stream: sub/a.py")
+    patch = write_probes(repo, [{"probe": "p", "file": "sub",
+                                 "old": "secret", "new": "public"}])
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--probes", patch, "--max-generic", "0")
+    check("a probe whose file is a directory is a usage error that touches no file",
+          code == 2 and (repo.root / "sub" / "a.py").read_text() == "secret = 1\n",
+          f"{code} {out}{err}")
 
 
 def case_deleted_file_in_stream(tmp: Path) -> None:
@@ -749,6 +759,24 @@ def case_glob_named_ignored_file_refused(tmp: Path) -> None:
           f"{code} {out}{err}")
 
 
+def case_glob_named_regular_file_accepted(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("a!x.py", "plain = 1 < 2\n")
+    repo.base = repo.commit("base: a!x.py")
+    repo.write("a*.py", "secret = 1 < 2\n")
+    commit = repo.commit("stream: regular a*.py")
+    patch = write_probes(repo, [{"probe": "p", "file": "a*.py",
+                                 "old": "secret", "new": "public"}])
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--probes", patch, "--max-generic", "0")
+    check("a probe on a regular glob-named file is run, not refused",
+          code == 1 and "SURVIVED  a*.py:1" in out, f"{code} {out}{err}")
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--max-generic", "1000")
+    check("a generic run mutates a regular glob-named file",
+          "a*.py:1" in out, f"{code} {out}{err}")
+
+
 CASES = [
     case_survivor_fails_gate,
     case_all_killed_passes,
@@ -777,6 +805,7 @@ CASES = [
     case_interrupt_reports_leftover,
     case_glob_named_symlink_refused,
     case_glob_named_ignored_file_refused,
+    case_glob_named_regular_file_accepted,
 ]
 
 

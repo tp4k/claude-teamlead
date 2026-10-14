@@ -35,7 +35,7 @@ ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"
        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
        "PYTHONDONTWRITEBYTECODE": "1"}
 
-LIB_BASE = "def base():\n    return 1\n"
+LIB_BASE = "BASE = 1\n"
 LIB_ADDED = "def below(n):\n    return n < 10\n"
 WEAK_TEST = ("import os, sys\n"
              "root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n"

@@ -540,6 +540,17 @@ def case_baseline_failures_leave_the_mutation_gate(tmp: Path) -> None:
     check("every command failing at the base leaves nothing to kill mutants → halt",
           r.code == 1 and "halt:" in r.out and not r.kinds(), r.detail())
 
+    w4 = World(tmp / "timeout")
+    w4.pin_base()
+    w4.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: FAIL\n\n## Commands\n"
+           "\npython3 -m unittest discover → TIMEOUT\nruff check . → exit 0\n")
+    w4.report(1, 1, [w4.commit("work")])
+    r = w4.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    mutate = next((ln for ln in p.splitlines() if "mutate.py" in ln), "")
+    check("a command that timed out at the base is absent from mutate.py --cmd",
+          "--cmd 'ruff check .'" in mutate and "unittest" not in mutate, r.detail())
+
 
 def case_probes_file_reaches_the_mutation_gate(tmp: Path) -> None:
     w = World(tmp)

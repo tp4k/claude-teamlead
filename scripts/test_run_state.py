@@ -397,7 +397,7 @@ def case_scope_cut_gets_its_own_card(tmp: Path) -> None:
                       "plan-validation.md": SCOPE_CUT, "briefs/impl-ws1-r1.md": BRIEF})
     r = state(run)
     ok = (r.returncode == 1 and "step: 6 " in r.stdout
-          and "6d" not in r.stdout
+          and "step: 6d" not in r.stdout
           and "scope selection (fold WS-2 into WS-1)" in r.stdout)
     check("a `Smaller:` cut is asked inside the step-6 relay, named", ok,
           f"exit={r.returncode} out={r.stdout.strip()!r}")

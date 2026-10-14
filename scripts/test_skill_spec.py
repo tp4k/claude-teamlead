@@ -252,6 +252,19 @@ def check_delegate_names_next_py_and_gate() -> None:
                    "decisions-log.md", "ledger.py apply"):
         results.append((f"delegate loop names {needle!r}", needle in loop,
                         needle))
+    order = ("4a. ", "6. Relay", "scripts/next.py $RUN", "baseline", "8a. ",
+             "9. Reviewers", "10. TRIAGE", "10a. CODEX GATE", "ledger.py apply")
+    at, cursor, in_order = [], 0, True
+    for needle in order:
+        found = loop.find(needle, cursor)
+        in_order = in_order and found >= 0
+        at.append(found)
+        cursor = found + 1 if found >= 0 else cursor
+    results.append(("delegate loop runs 4a, relay, next.py, baseline, 8a, 9, 10, "
+                    "10a, ledger in that order", in_order, str(at)))
+    results.append(("delegate loop states verify, review, triage, gate, close order",
+                    "Then verify (8a), review (9), triage (10), the Codex gate "
+                    "(10a), and close (11)." in loop, "order sentence"))
 
 
 def check_delegate_asks_one_batch() -> None:
@@ -281,8 +294,10 @@ def check_followups_only_for_out_of_scope_rows() -> None:
     results.append(("delegate step 11 prints no codex-review one-liner for the gate",
                     "without running it" not in step11, "step 11"))
     results.append(("cycle step 10 runs no separate Codex review after the gate",
-                    "in-loop" in cycle and "codexCodeReview=off" in cycle,
-                    "cycle step 10"))
+                    "in-loop" in cycle and "codexCodeReview=off" in cycle
+                    and "After a clean finish" not in cycle
+                    and "Do not start a separate `/teamlead:codex-review` after it"
+                    in cycle, "cycle step 10"))
     results.append(("codex-review says the loop already gates the diff in-loop",
                     "in-loop" in review, "codex-review intro"))
 
@@ -320,6 +335,42 @@ def check_readme_defaults_match_paths() -> None:
                     and "`off` skips the gate" in flat(options), "opt-in"))
 
 
+def check_readme_fences() -> None:
+    """README fences alternate open/close: a stray bare fence turns prose to code."""
+    lines = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+    heading = "### `/teamlead:cycle` \u2014 the same run, plus the tree it runs in"
+    inside, closed_at, stray, heading_inside = False, -1, [], None
+    for number, line in enumerate(lines, 1):
+        if line == heading:
+            heading_inside = inside
+        if not line.startswith("```"):
+            continue
+        if not inside and number == closed_at + 1 and line == "```":
+            stray.append(number)
+        if inside:
+            closed_at = number
+        inside = not inside
+    results.append(("README has no bare fence right after a closing fence",
+                    not stray, f"stray fence at lines {stray}"))
+    results.append(("README cycle heading sits outside a code fence",
+                    heading_inside is False, f"inside fence: {heading_inside}"))
+    results.append(("README closes every code fence", not inside, "unclosed fence"))
+
+
+def check_delegate_run_options_match_paths() -> None:
+    """Defaults the delegate Run options prose states equal paths.DEFAULTS."""
+    options = flat(section(SKILLS / "delegate" / "SKILL.md", "## Run options",
+                           "## The coordination loop"))
+    pairs = re.findall(r"`(\w+)=([\w-]+)`", options)
+    checked = [(k, v) for k, v in pairs if k in run_config.OPTION_KEYS]
+    results.append(("delegate Run options states at least one default",
+                    bool(options) and bool(checked), str(pairs)))
+    for key, value in checked:
+        results.append((f"delegate Run options default of {key} is "
+                        f"{paths.DEFAULTS[key]!r}",
+                        value == str(paths.DEFAULTS[key]), f"says {value!r}"))
+
+
 def section(path: Path, start: str, end: str | None) -> str:
     """The text of `path` from `start` up to the next `end` (or EOF); '' if absent."""
     text = path.read_text(encoding="utf-8")
@@ -338,6 +389,8 @@ def main() -> int:
     check_delegate_asks_one_batch()
     check_followups_only_for_out_of_scope_rows()
     check_readme_defaults_match_paths()
+    check_readme_fences()
+    check_delegate_run_options_match_paths()
     skills = sorted(SKILLS.glob("*/SKILL.md"))
     results.append(("skills were found", bool(skills), str(SKILLS)))
     for skill_md in skills:

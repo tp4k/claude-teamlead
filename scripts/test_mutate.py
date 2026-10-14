@@ -568,14 +568,19 @@ def case_prose_lines_not_mutated(tmp: Path) -> None:
     repo = Repo(tmp / "repo")
     repo.write("doc.py", '"""Module notes\nthe flag is true\n"""\nX = 1 < 2\n')
     repo.write("notes.md", "the flag is true\nread more == here\n")
+    repo.write("guide.rst", "read more == here\n")
+    repo.write("intro.markdown", "read more == here\n")
     commit = repo.commit("stream: docs")
     code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
                             "--max-generic", "1000")
-    hit = {(f, int(n)) for f, n in re.findall(r"(\S+\.(?:py|md)):(\d+)", out)}
+    hit = {(f, int(n)) for f, n in
+           re.findall(r"(\S+\.(?:py|md|rst|markdown)):(\d+)", out)}
     check("a docstring line and a Markdown line are never mutated; code still is",
           ("doc.py", 4) in hit
           and not any(f == "doc.py" and n <= 3 for f, n in hit)
-          and not any(f == "notes.md" for f, _ in hit), out + err)
+          and not any(f == "notes.md" for f, _ in hit)
+          and not any(f in ("guide.rst", "intro.markdown") for f, _ in hit),
+          out + err)
 
 
 def case_untracked_or_linked_targets_refused(tmp: Path) -> None:
@@ -718,7 +723,7 @@ def case_glob_named_symlink_refused(tmp: Path) -> None:
                                  "old": "secret", "new": "public"}])
     code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
                             "--probes", patch, "--max-generic", "0")
-    check("a probe on a symlink named like a glob is a usage error that touches no file",
+    check("a probe on a glob-named symlink is a usage error that touches no file",
           code == 2 and (repo.root / "real.py").read_bytes() == original,
           f"{code} {out}{err}")
     code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,

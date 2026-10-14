@@ -435,6 +435,7 @@ def run(args: argparse.Namespace) -> int:
         for m in queue:
             if time.monotonic() >= deadline:
                 rows.append(Row(m, NOT_RUN))
+                print(describe(rows[-1]), flush=True)
                 continue
             done, result = evaluate(repo, m, args, deadline)
             rows.append(Row(done, result))
@@ -448,9 +449,6 @@ def run(args: argparse.Namespace) -> int:
     finally:
         for s, handler in old_handlers.items():
             signal.signal(s, handler)
-    for row in rows:
-        if row.result in (NOT_RUN, NOT_APPLIED):
-            print(describe(row))
     leftover = status_porcelain(repo)
     if leftover:
         print(f"cannot run: the tree is not clean after the run:\n{leftover}",

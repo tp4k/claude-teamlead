@@ -294,8 +294,10 @@ def check_followups_only_for_out_of_scope_rows() -> None:
     results.append(("delegate step 11 prints no codex-review one-liner for the gate",
                     "without running it" not in step11, "step 11"))
     results.append(("cycle step 10 runs no separate Codex review after the gate",
-                    "in-loop" in cycle and "codexCodeReview=off" in cycle
-                    and "After a clean finish" not in cycle
+                    "in-loop" in cycle and "codexCodeReview=off" in cycle,
+                    "cycle step 10"))
+    results.append(("cycle step 10 forbids the separate codex-review after the gate",
+                    "After a clean finish" not in cycle
                     and "Do not start a separate `/teamlead:codex-review` after it"
                     in cycle, "cycle step 10"))
     results.append(("codex-review says the loop already gates the diff in-loop",

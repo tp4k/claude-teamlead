@@ -667,6 +667,45 @@ def case_forged_label_cannot_fake_summary(tmp: Path) -> None:
           and "killed=9" not in lines[0], out + err)
 
 
+def case_in_repo_symlink_alias_refused(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("real.txt", "secret == value\n")
+    os.symlink("real.txt", repo.root / "alias.txt")
+    commit = repo.commit("stream: alias")
+    patch = write_probes(repo, [{"probe": "p", "file": "alias.txt",
+                                 "old": "secret", "new": "public"}])
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--probes", patch, "--max-generic", "0")
+    check("a probe on a symlink that points inside the repo is a usage error too",
+          code == 2 and (repo.root / "real.txt").read_text() == "secret == value\n",
+          f"{code} {out}{err}")
+
+
+def case_interrupt_reports_leftover(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    marker = tmp / "started"
+    errlog = tmp / "stderr"
+    cmd = f"touch stray.txt; touch {shlex.quote(str(marker))}; sleep 30"
+    with errlog.open("w") as fh:
+        proc = subprocess.Popen(
+            [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,
+             "--cmd", cmd, "--commits", commit], env=ENV,
+            stdout=subprocess.DEVNULL, stderr=fh)
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    check("an interrupted run names the files it could not leave clean",
+          proc.returncode == 3 and "stray.txt" in errlog.read_text(),
+          f"rc={proc.returncode} {errlog.read_text()}")
+
+
 CASES = [
     case_survivor_fails_gate,
     case_all_killed_passes,
@@ -691,6 +730,8 @@ CASES = [
     case_probe_old_replaced_once,
     case_no_bytecode_in_the_tree,
     case_forged_label_cannot_fake_summary,
+    case_in_repo_symlink_alias_refused,
+    case_interrupt_reports_leftover,
 ]
 
 

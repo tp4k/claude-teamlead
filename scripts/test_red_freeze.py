@@ -344,6 +344,24 @@ def case_run_refuses_dirty_tree(tmp: Path) -> None:
           and not (repo.root / "ran.txt").exists(), out)
 
 
+def case_run_keeps_ignored_files(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("local.cfg", "fixture\n")
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    repo.git("rm", "-q", "local.cfg")
+    repo.write(".gitignore", "local.cfg\n")
+    head = repo.commit("untrack local.cfg")
+    repo.write("local.cfg", "MY-REAL-SECRET\n")
+    code, out = run(repo, red, cmd="cat local.cfg")
+    cfg = repo.root / "local.cfg"
+    check("--run never overwrites an ignored file that RED tracked: exit 2, file kept",
+          code == 2 and cfg.exists() and cfg.read_text() == "MY-REAL-SECRET\n"
+          and "RED run" not in out
+          and repo.git("symbolic-ref", "--short", "HEAD") == "main"
+          and repo.git("rev-parse", "HEAD") == head, out)
+
+
 def case_run_restores_on_sigterm(tmp: Path) -> None:
     repo = Repo(tmp)
     repo.write("tests/check.py", CHECK)
@@ -415,6 +433,7 @@ CASES = [
     case_run_sees_untracked_deps,
     case_run_restores_branch_and_head,
     case_run_refuses_dirty_tree,
+    case_run_keeps_ignored_files,
     case_run_restores_on_sigterm,
     case_run_restores_a_detached_head,
 ]

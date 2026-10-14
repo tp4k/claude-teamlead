@@ -293,6 +293,55 @@ def case_run_leaves_the_repo_alone(tmp: Path) -> None:
           status == "" and not (repo.root / "stray.txt").exists(), status)
 
 
+def case_run_sees_untracked_deps(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write(".gitignore", "deps/\n")
+    repo.write("tests/check.py",
+               "print('dep says', open('deps/lib.txt').read().strip())\n" + CHECK)
+    red = repo.red()
+    repo.write("src/limit.py", "def hit(**kw):\n    return Resp(429)\n")
+    repo.commit("green")
+    repo.write("deps/lib.txt", "installed")
+    code, out = run(repo, red, cmd=CHECK_CMD)
+    check("--run sees an ignored, untracked dependency directory of the worktree",
+          f"RED run {red[:9]}: exit 1" in out and "dep says installed" in out
+          and "expected 429, got NotImplementedError" in out, out)
+
+
+def case_run_restores_branch_and_head(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    repo.write("src/limit.py", "def hit(**kw):\n    return Resp(429)\n")
+    green = repo.commit("green")
+    code, out = run(repo, red, cmd=f"{CHECK_CMD}; git rev-parse HEAD")
+    block = out.split("RED run", 1)[-1]
+    check("--run runs on the RED commit in place, then restores branch and HEAD",
+          red in block and repo.git("symbolic-ref", "--short", "HEAD") == "main"
+          and repo.git("rev-parse", "HEAD") == green
+          and repo.git("status", "--porcelain") == "", out)
+    # A command that exits non-zero must not leave HEAD on the RED commit either.
+    run(repo, red, cmd="exit 3")
+    check("branch and HEAD are restored after a failing command too",
+          repo.git("symbolic-ref", "--short", "HEAD") == "main"
+          and repo.git("rev-parse", "HEAD") == green, repo.git("status", "-sb"))
+
+
+def case_run_refuses_dirty_tree(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    head = repo.commit("more")
+    repo.write("src/limit.py", "def hit(**kw):\n    return 'local edit'\n")
+    code, out = run(repo, red, cmd=f"{CHECK_CMD}; touch ran.txt")
+    check("--run refuses a dirty tree: clear message, no checkout, edit kept",
+          code == 2 and "clean" in out and "RED run" not in out
+          and repo.git("symbolic-ref", "--short", "HEAD") == "main"
+          and repo.git("rev-parse", "HEAD") == head
+          and "local edit" in (repo.root / "src/limit.py").read_text()
+          and not (repo.root / "ran.txt").exists(), out)
+
+
 LONG = ("for i in range(1, 301):\n    print(f'line {i}')\n"
         "raise SystemExit(1)\n")
 
@@ -327,6 +376,9 @@ CASES = [
     case_run_catches_a_red_that_passes,
     case_run_leaves_the_repo_alone,
     case_run_marks_omitted_lines,
+    case_run_sees_untracked_deps,
+    case_run_restores_branch_and_head,
+    case_run_refuses_dirty_tree,
 ]
 
 

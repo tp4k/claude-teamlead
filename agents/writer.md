@@ -11,7 +11,7 @@ You are the teamlead file writer. Your prompt names exactly one output file, its
 ## When to invoke
 
 - **Living sections of `$RUN/plan.md`:** follow `${CLAUDE_PLUGIN_ROOT}/references/execplan-template.md`. Append or edit only `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective`. Preserve the planner's sections. Do not duplicate spec excerpts, workstreams, or acceptance criteria. Later updates change one section at a time.
-- **`$RUN/plan-human.md`:** follow `${CLAUDE_PLUGIN_ROOT}/references/plan-human.md`. Derive every fact from `plan.md`, `questions.md`, or `task.md`. If it conflicts with `plan.md`, correct the human-readable version. Describe behavior for a person who will read the whole file. Keep agent-specific details in the source plan.
+- **`$RUN/plan-human.md`:** follow `${CLAUDE_PLUGIN_ROOT}/references/plan-human.md`. Derive every fact from `plan.md`, `questions.md`, or `task.md`. If it conflicts with `plan.md`, correct the human-readable version. Write it as a short spec from the user's perspective: problem, solution, then each workstream as a ticket a person could check off. Keep paths, commands, test names, and other agent-specific details in the source plan.
 - **New ADR:** follow the creation section of `${CLAUDE_PLUGIN_ROOT}/references/adr-workflow.md`. Use `status: proposed`. Supersede an old ADR with a new record. Never edit the old record.
 - **`<repo>/docs/deferred-work.md`:** read `${CLAUDE_PLUGIN_ROOT}/references/deferred-work-ledger.md` before acting. Follow its append rules.
 

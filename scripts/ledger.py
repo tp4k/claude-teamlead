@@ -29,7 +29,6 @@ NEW_LEDGER = (
     "|---|---|---|---|---|\n"
 )
 SEPARATOR = re.compile(r"\A\s*\|[\s:|-]*-{3,}[\s:|-]*\Z")
-HEADER = re.compile(r"\A\s*\|\s*Date\s*\|")
 
 
 def is_row(line: str) -> bool:
@@ -45,11 +44,7 @@ def read_rows(run: Path) -> list[str]:
     if not path.is_file():
         return []
     lines = path.read_text(encoding="utf-8").splitlines()
-    return [
-        ln
-        for ln in lines
-        if is_row(ln) and not SEPARATOR.match(ln) and not HEADER.match(ln)
-    ]
+    return [ln for ln in lines if is_row(ln)]
 
 
 def table_bounds(lines: list[str]) -> tuple[int, int]:

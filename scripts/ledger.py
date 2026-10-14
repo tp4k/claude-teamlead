@@ -28,11 +28,11 @@ NEW_LEDGER = (
     "| Date | Run | Item | Why deferred | Source |\n"
     "|---|---|---|---|---|\n"
 )
-SEPARATOR = re.compile(r"\A\s*\|[\s:|-]*-{3,}[\s:|-]*\Z")
+SEPARATOR = re.compile(r"\A\|[\s:|-]+\Z")
 
 
 def is_row(line: str) -> bool:
-    return line.lstrip().startswith("|")
+    return line.startswith("|")
 
 
 def gap_index(row_id: str, rows: int) -> int:
@@ -50,7 +50,7 @@ def read_rows(run: Path) -> list[str]:
 def table_bounds(lines: list[str]) -> tuple[int, int]:
     """(index of the first data row, one past the last contiguous data row)."""
     for i, line in enumerate(lines):
-        if SEPARATOR.match(line):
+        if SEPARATOR.match(line) and "---" in line:
             end = i + 1
             while end < len(lines) and is_row(lines[end]):
                 end += 1
@@ -58,14 +58,25 @@ def table_bounds(lines: list[str]) -> tuple[int, int]:
     raise ValueError("ledger has no table separator line")
 
 
+def line_ending(lines: list[str]) -> str:
+    """The ending of the last terminated line, `\\n` when there is none."""
+    for line in reversed(lines):
+        if line.endswith("\r\n"):
+            return "\r\n"
+        if line.endswith("\n"):
+            return "\n"
+    return "\n"
+
+
 def insert_row(lines: list[str], row: str, row_id: str) -> list[str]:
     """`lines` keep their line endings; the new line is spliced in alone."""
     plain = [ln.rstrip("\r\n") for ln in lines]
     first, end = table_bounds(plain)
     at = first + gap_index(row_id, end - first)
+    eol = line_ending(lines[:at])
     if at == len(lines) and lines and not lines[-1].endswith("\n"):
-        return lines[:-1] + [lines[-1] + "\n", row]
-    return lines[:at] + [row + "\n"] + lines[at:]
+        return lines[:-1] + [lines[-1] + eol, row]
+    return lines[:at] + [row + eol] + lines[at:]
 
 
 def apply(run: Path, ledger: Path) -> int:
@@ -73,12 +84,12 @@ def apply(run: Path, ledger: Path) -> int:
     if not rows:
         print(f"LEDGER rows=0 file={ledger}")
         return 0
-    text = ledger.read_text(encoding="utf-8") if ledger.is_file() else NEW_LEDGER
+    text = ledger.read_bytes().decode("utf-8") if ledger.is_file() else NEW_LEDGER
     lines = text.splitlines(keepends=True)
     for n, row in enumerate(rows, start=1):
         lines = insert_row(lines, row, f"{run.resolve().name}-{n}")
     ledger.parent.mkdir(parents=True, exist_ok=True)
-    ledger.write_text("".join(lines), encoding="utf-8")
+    ledger.write_bytes("".join(lines).encode("utf-8"))
     print(f"LEDGER rows={len(rows)} file={ledger}")
     return 0
 

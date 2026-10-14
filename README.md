@@ -120,7 +120,6 @@ flowchart TD
     REPORT -.->|"a row was demoted or a refactor deferred"| LEDGER
     REPORT -.->|"the task is a review-followup.md"| RERUN
 ```
-```
 
 Five workflow rules explain the diagram:
 
@@ -327,7 +326,7 @@ Config files are optional. Copy [`config.example.json`](config.example.json) to 
 | `maxAgeDays` | `30` | A run directory older than this is prunable. |
 | `keepLastPerRepo` | `5` | ...unless it is among the newest N runs of its repo. |
 | `scopeFence` | `true` | Whether the scope-fence hook refuses out-of-scope implementer writes. |
-| `planValidatorPasses` | `1` | How many falsification passes the plan validator makes. Pass 1 runs at 4a beside the design review. |
+| `planValidatorPasses` | `1` | Recorded in `config.json`; no longer changes routing. Pass 1 runs at 4a beside the design review, and pass 2 (6c) runs only when the Fix round returned `new_paths=yes`. |
 | `codexPlanReviewAxes` | all five | Which of `decomposition`, `task-fit`, `acceptance`, `design-fit`, `failure-modes` the plan design review covers. |
 | the eight [run options](#run-options) | per the table | Same keys, same values as the flags, defaults in the Default column — a config entry is how you stop typing one. |
 

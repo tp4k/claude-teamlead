@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
@@ -58,6 +59,7 @@ import signal
 import subprocess
 import sys
 import time
+import tokenize
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Union
@@ -68,6 +70,8 @@ EXIT_PASS, EXIT_FAIL, EXIT_USAGE, EXIT_CANNOT_RUN = 0, 1, 2, 3
 DEFAULT_MAX_GENERIC = 20
 DEFAULT_TIME_BOX = 600.0
 COMMENT_PREFIXES = ("#", "//", "/*", "*", "--")
+PROSE_SUFFIXES = (".md", ".markdown", ".rst")
+REGULAR_FILE_MODES = ("100644", "100755")
 KILL_GRACE = 5.0
 
 KILLED, SURVIVED, INVALID = "KILLED", "SURVIVED", "INVALID"
@@ -133,6 +137,45 @@ def generic_mutations(line: str) -> list[tuple[str, str]]:
 def is_candidate_line(text: str) -> bool:
     stripped = text.strip()
     return bool(stripped) and not stripped.startswith(COMMENT_PREFIXES)
+
+
+def docstring_lines(text: str) -> set[int]:
+    """Lines of `text` that hold a bare string statement (a docstring)."""
+    found: set[int] = set()
+    first = -1
+    only_strings = True
+    seen = False
+    skip = (tokenize.NL, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT)
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type in skip:
+                continue
+            if tok.type in (tokenize.NEWLINE, tokenize.ENDMARKER):
+                if seen and only_strings:
+                    found.update(range(first, tok.start[0] + 1))
+                first, only_strings, seen = -1, True, False
+                continue
+            if not seen:
+                first, seen = tok.start[0], True
+            if tok.type != tokenize.STRING:
+                only_strings = False
+    except (tokenize.TokenError, SyntaxError):
+        return found
+    return found
+
+
+def tracked_regular_file(repo: str, rel: str) -> bool:
+    """`rel` is a tracked regular file that resolves inside the repo, not in .git."""
+    try:
+        entry = git(repo, "ls-files", "-s", "--", rel).split()
+    except GitError:
+        return False
+    if not entry or entry[0] not in REGULAR_FILE_MODES:
+        return False
+    root = Path(repo).resolve()
+    resolved = (root / rel).resolve()
+    return root in resolved.parents and (root / ".git") not in (
+        resolved, *resolved.parents)
 
 
 def read_text(path: Path) -> str:
@@ -209,19 +252,21 @@ def generic_mutants(repo: str, scope: dict[str, set[int]],
                     cap: int) -> list[Mutant]:
     keyed: list[tuple[str, str, int, int, Mutant]] = []
     for path, numbers in scope.items():
-        if TEST_PATH.search(path):
+        if TEST_PATH.search(path) or path.endswith(PROSE_SUFFIXES):
             continue
         target = Path(repo) / path
-        if not target.is_file():
+        if not tracked_regular_file(repo, path) or not target.is_file():
             continue
-        lines = read_text(target).splitlines(keepends=True)
+        content = read_text(target)
+        lines = content.splitlines(keepends=True)
+        prose = docstring_lines(content) if path.endswith(".py") else set()
         for number in sorted(numbers):
             if not 1 <= number <= len(lines):
                 continue
             raw = lines[number - 1]
             body = raw.rstrip("\r\n")
             ending = raw[len(body):]
-            if not is_candidate_line(body):
+            if number in prose or not is_candidate_line(body):
                 continue
             for idx, (op, text) in enumerate(generic_mutations(body)):
                 replacement = "" if op == DELETE_LINE else text + ending
@@ -231,7 +276,7 @@ def generic_mutants(repo: str, scope: dict[str, set[int]],
     return [row[4] for row in keyed[:max(cap, 0)]]
 
 
-def load_probes(path: str) -> list[Mutant]:
+def load_probes(path: str, repo: str) -> list[Mutant]:
     try:
         data = json.loads(Path(path).read_text())
     except (OSError, ValueError) as exc:
@@ -249,6 +294,9 @@ def load_probes(path: str) -> list[Mutant]:
         if rel.is_absolute() or ".." in rel.parts:
             raise UsageError(f"--probes {path}: entry {i} file must be "
                              "repo-relative")
+        if not tracked_regular_file(repo, item["file"]):
+            raise UsageError(f"--probes {path}: entry {i} file must be a tracked "
+                             "regular file inside the repo")
         probes.append(Mutant(item["file"], 0, item["probe"], old=item["old"],
                              new=item["new"], is_probe=True))
     return probes
@@ -362,11 +410,16 @@ def classify(repo: str, m: Mutant, text: str, args: argparse.Namespace,
     return UNCLASSIFIED
 
 
+def one_line(text: str) -> str:
+    return text.replace("\r", " ").replace("\n", " ")
+
+
 def describe(row: Row) -> str:
     m = row.mutant
-    where = f"{m.file}:{m.line}" if m.line else m.file
+    file = one_line(m.file)
+    where = f"{file}:{m.line}" if m.line else file
     kind = "probe" if m.is_probe else "op"
-    return f"{row.result}  {where}  {kind}={m.label}"
+    return f"{row.result}  {where}  {kind}={one_line(m.label)}"
 
 
 def write_report(path: str, rows: list[Row], summary: str) -> None:
@@ -408,6 +461,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def on_signal(signum: int, _frame: object) -> None:
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, signal.SIG_IGN)
     raise Terminated(signum)
 
 
@@ -418,7 +473,7 @@ def run(args: argparse.Namespace) -> int:
         if status_porcelain(repo):
             print("cannot run: the working tree is not clean", file=sys.stderr)
             return EXIT_CANNOT_RUN
-        probes = load_probes(args.probes) if args.probes else []
+        probes = load_probes(args.probes, repo) if args.probes else []
         scope = stream_lines(repo, base, args.commits, args.files)
     except GitError as exc:
         print(f"usage error: {exc}", file=sys.stderr)
@@ -427,38 +482,53 @@ def run(args: argparse.Namespace) -> int:
         print(f"usage error: {exc}", file=sys.stderr)
         return EXIT_USAGE
     queue = probes + generic_mutants(repo, scope, args.max_generic)
-    deadline = time.monotonic() + args.time_box
-    rows: list[Row] = []
     old_handlers = {s: signal.signal(s, on_signal)
                     for s in (signal.SIGTERM, signal.SIGINT)}
     try:
-        for m in queue:
-            if time.monotonic() >= deadline:
-                rows.append(Row(m, NOT_RUN))
-                print(describe(rows[-1]), flush=True)
-                continue
-            done, result = evaluate(repo, m, args, deadline)
-            rows.append(Row(done, result))
-            print(describe(rows[-1]), flush=True)
-    except Terminated as exc:
-        print(f"cannot run: interrupted by signal {exc.signum}", file=sys.stderr)
-        return EXIT_CANNOT_RUN
-    except RestoreError as exc:
-        print(f"cannot run: {exc}", file=sys.stderr)
-        return EXIT_CANNOT_RUN
+        return run_queue(repo, queue, args)
     finally:
         for s, handler in old_handlers.items():
             signal.signal(s, handler)
+
+
+def report_leftover(repo: str) -> str:
     leftover = status_porcelain(repo)
     if leftover:
         print(f"cannot run: the tree is not clean after the run:\n{leftover}",
               file=sys.stderr)
+    return leftover
+
+
+def run_queue(repo: str, queue: list[Mutant], args: argparse.Namespace) -> int:
+    deadline = time.monotonic() + args.time_box
+    rows: list[Row] = []
+    try:
+        try:
+            for m in queue:
+                if time.monotonic() >= deadline:
+                    rows.append(Row(m, NOT_RUN))
+                    print(describe(rows[-1]), flush=True)
+                    continue
+                done, result = evaluate(repo, m, args, deadline)
+                rows.append(Row(done, result))
+                print(describe(rows[-1]), flush=True)
+        except Terminated as exc:
+            print(f"cannot run: interrupted by signal {exc.signum}", file=sys.stderr)
+            report_leftover(repo)
+            return EXIT_CANNOT_RUN
+        except RestoreError as exc:
+            print(f"cannot run: {exc}", file=sys.stderr)
+            return EXIT_CANNOT_RUN
+        if report_leftover(repo):
+            return EXIT_CANNOT_RUN
+        summary, code = summarize(rows)
+        if args.out:
+            write_report(args.out, rows, summary)
+        print(summary)
+        return code
+    except Terminated as exc:
+        print(f"cannot run: interrupted by signal {exc.signum}", file=sys.stderr)
         return EXIT_CANNOT_RUN
-    summary, code = summarize(rows)
-    if args.out:
-        write_report(args.out, rows, summary)
-    print(summary)
-    return code
 
 
 def main(argv: Optional[list[str]] = None) -> int:

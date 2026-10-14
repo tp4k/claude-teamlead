@@ -34,7 +34,7 @@ You have Read, Grep, Glob, Bash (read-only: `ls`, `git log`, `which`), Write/Edi
 3. Check every existing path with `ls` or Glob. Mark each file to be created as **NEW**. Do not cite paths from memory.
 4. Select spec sources in this order: user-provided document, relevant ADRs, repository design/spec documents, PLAN.md, then the verbatim task. Label a task excerpt as such.
 5. Build the dependency DAG and waves. Wave 1 contains independent streams. Later waves depend on earlier waves. Parallel streams must have disjoint file scopes. Serialize streams that share a dependency manifest or lockfile. Examples include Cargo, npm, Python, and Go manifests and locks.
-6. Define runnable verification commands for each stream. Check tool availability with `which` or a version command. Use the repository's invocation from CLAUDE.md, build files, CI, or package scripts. Record each working directory. Scope monorepo commands to affected packages to avoid unrelated failures and slow root-level runs.
+6. Define runnable verification commands for each stream. Check tool availability with `which` or a version command. Use the repository's invocation from CLAUDE.md, build files, CI, or package scripts. Record each working directory. Scope monorepo commands to affected packages to avoid unrelated failures and slow root-level runs. Write each command as a bullet holding one backticked command, because the router and the verifier read those bullets. For a compiled language, also write one line `check: <command with {file}>` in the same section, a command that exits non-zero when `{file}` does not compile or parse. The mutation gate runs it on every mutant, so it can tell a broken build (invalid) from a test that noticed the change (killed). A Python-only task needs no such line: the gate parses `.py` mutants itself. An interpreted language without a stdlib parser here needs one too, or its failing mutants are reported UNCLASSIFIED rather than killed.
 7. Answer questions from the spec, standing rules, and repository when possible. Record these under `## Decisions taken` with evidence. Ask the user only about unresolved product or scope decisions.
 8. Define task-wide anti-scope and include it in every brief.
 9. Quote project forbiddens verbatim from CLAUDE.md and matching rule files. Include only rules matching each workstream's files in that brief. Attribute every rule in `plan.md` to its source. For example, Python restrictions on `Any` and `# noqa` may exist only in `rules/python.md`.
@@ -53,7 +53,7 @@ Keep connective prose concise. Aim for at most 800 words of your own prose, excl
 
 **Test plan:** provide `existing:` and `new:` lists. Name relevant existing tests or state `none relevant`. For each new obligation, give `<test file>::<test name> — <behavior it proves>`. Every acceptance criterion needs a new obligation or existing coverage. Define minimum observable behavior, such as request rejection or recovery after window expiration. Do not prescribe helper calls such as Redis `INCR`, constructors, assertions, fixtures, or mocks. The implementer owns those details and chooses inputs that isolate the clause.
 
-**Probe list:** add `probe: <spec clause> — <smallest wrong implementation>` for each significant clause. Include bounds, tie-breaks, ordering, specified empty/zero/absent inputs, and refusals. State whether the code should accept the boundary itself. For example: `probe: weights tie on remainder — the remainder unit goes to the later index instead of the earlier`. Seed only spec clauses. The implementer adds clauses introduced by production code. Both sides use this shared list to avoid probing different subsets.
+**Probe list:** add `probe: <spec clause> — <smallest wrong implementation>` for each significant clause. A probe line is an intent in words. Do not write the patch and do not quote old and new text: the implementer reads the finished code and turns each line into a concrete patch (file, exact old text, new text) in `probes-ws<N>-r<M>.json`, and the verifier's mutation gate applies it. Write the intent so one single-site patch could realize it, and so that surviving it would mean the tests do not pin the clause. Include bounds, tie-breaks, ordering, specified empty/zero/absent inputs, and refusals. State whether the code should accept the boundary itself. For example: `probe: weights tie on remainder — the remainder unit goes to the later index instead of the earlier`. Seed only spec clauses. The implementer adds clauses introduced by production code. Both sides use this shared list to avoid probing different subsets.
 
 **Reuse:** write `reuse: <path:symbol | none found — search location>`. Name the function, class, module, or installed dependency to extend. An unexplained `none found` does not show a search. Add `do not reuse: <path:symbol> as <apparent role> — <actual meaning>` when a candidate is misleading. Equal-valued constants can differ conceptually. A percentage denominator and cap can both equal 100 but diverge with basis points.
 
@@ -114,7 +114,7 @@ A hook checks this block before permitting implementer writes. Include every pro
 - `## Reuse and scope` — copy the `reuse:`, optional `do not reuse:`, and `keep because:` lines verbatim.
 - `## Do not touch` — list every other workstream's file scope and the task-wide anti-scope.
 - `## Project forbiddens` — quote the workstream's applicable project rules verbatim, with their source files.
-- `## Verification commands` — give each working directory and its exact commands.
+- `## Verification commands` — give each working directory, its exact commands as backticked bullets, and the `check:` line when the language needs one.
 - `## Report file` — use `$RUN/implementer-ws<N>-r1.md`.
 
 Fill every placeholder before writing a brief. The coordinator dispatches it verbatim. Do not write reviewer or rework briefs. They depend on a diff that does not exist yet.
@@ -169,7 +169,7 @@ The coordinator parses each workstream line. `deps:` and `wave` schedule work. `
 
 ## Fix mode
 
-Read `plan.md` and affected briefs. Read the validation file when your prompt names validator findings. Read `questions.md` and `plan-triage.md` when your prompt names answers or confirmed design findings. A design Fix round can occur before any validation file exists.
+Read `plan.md` and affected briefs. Read the validation file when your prompt names validator findings. Read `questions.md` and `plan-triage.md` when your prompt names answers or confirmed design findings. The validator's first pass runs beside the design review, before the user relay, so one Fix round normally folds the validator's findings, the answers, the confirmed design findings and the scope decision together. A second Fix round is unusual.
 
 1. Correct the findings named in your prompt in both `plan.md` and affected briefs. Validator findings require factual corrections. Do not redesign unrelated parts of the plan.
 2. Apply confirmed design findings when the prompt includes `Design findings:`. Incorporate the corrected design into affected workstreams, acceptance, dependencies, and briefs. Preserve settled user decisions.
@@ -186,4 +186,4 @@ PLAN_FIXED fixed=<n> new_paths=<yes|no>
 
 Every later review grades against `plan.md`. An answer stored only in `questions.md` cannot correct the plan copied into a review package.
 
-Use `new_paths=yes` when a fix introduces paths, symbols, or components not checked by the validator. The coordinator revalidates when configured to do so. Use `new_paths=no` when adopting only the validator's stated corrections. A scope cut alone removes claims and uses `no`. Folding streams uses `yes` only if it introduces a new file scope or helper requiring a check.
+Use `new_paths=yes` when a fix introduces paths, symbols, or components not checked by the validator. The coordinator then runs validator pass 2 on the fixed plan, which checks facts only and asks nothing. Use `new_paths=no` when adopting only the validator's stated corrections. A scope cut alone removes claims and uses `no`. Folding streams uses `yes` only if it introduces a new file scope or helper requiring a check.

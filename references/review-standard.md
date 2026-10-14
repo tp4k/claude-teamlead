@@ -6,7 +6,7 @@ Read this file before reviewing and again immediately before writing the report.
 
 1. **Verdict:** one line containing APPROVED, APPROVED_WITH_NOTES, or NEEDS_REWORK.
 2. **Coverage:** code axis only. Give one line identifying checked requirements and referring to failures in the table. Do not enumerate passes.
-3. **Probes:** code axis only. Include executed round-1 probes. In rework, include probes only when production lines requiring probes changed.
+3. **Probes:** code axis only. Grade the rows of the verifier's mutation report (`$RUN/mutation-ws<N>-r<M>.md`) for round-1 production lines. In rework, include rows only for production lines the rework changed.
 4. **Findings:** one row per fix, highest severity first. Use an empty table when no findings exist.
 5. **Notes:** optional, at most five lines, for observations that are not blocking defects.
 6. **Verification:** always begin with `per $RUN/verifier-r<M>.md: PASS` or FAIL. Use the workstream filename when applicable. Code review then lists only its own failed commands and errors. Do not list passing commands.
@@ -19,13 +19,13 @@ Do not add praise, repeated spec text, passing requirements, or non-issues. The 
 
 Start Probes with `list: <n> brief + <n> added; off-list clauses: <n>; LIST_GAP: <n>`.
 
-For each executed probe, use `criterion → mutation at <file>:<line> → killed by <file>::<test_name> | SURVIVED`. Add `[off-list]` after a criterion absent from the shared list.
+For each graded probe, use `criterion → mutation at <file>:<line> → killed by <file>::<test_name> | SURVIVED | NOT PROBED — <why>`. Add `[off-list]` after a criterion absent from the shared list.
 
-Cite the actual mutated line. For a kill, copy the existing test name from runner output. Both references must resolve. An unresolvable citation cannot establish an executed probe.
+Cite the mutated line as the mutation report prints it. For a kill, name an existing test you have read. Both references must resolve. An unresolvable citation cannot establish a probe. Reviewers run no mutation of their own: the verifier's gate ran them all.
 
-Include killed probes as well as survivors. Without this section, a reader cannot distinguish a clean review from one that never probed. Every SURVIVED record needs a corresponding findings row. Use LIST_GAP for an off-list survivor. All-killed outcomes are normal.
+Include killed probes as well as survivors. Without this section, a reader cannot distinguish a clean review from one that never probed. Every SURVIVED record needs a corresponding findings row (the gate normally refuses a report with a survivor, so one signals a gate or evidence defect). Use LIST_GAP for an off-list survivor. All-killed outcomes are normal.
 
-Follow `roles/reviewer.md` for mutation selection and fixture reachability.
+Follow `roles/reviewer.md` for grading the mutation report and for fixture reachability.
 
 ## Verdict and findings
 

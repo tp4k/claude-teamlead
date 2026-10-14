@@ -14,12 +14,12 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/roles/plan-validator.md` first. It define
 
 ## When to invoke
 
-- **Step 6c, pass 1:** validate the final plan after the planner incorporates the user's answers and confirmed design findings. Check every factual claim against the repository.
-- **Step 6c, pass 2:** run only when `planValidatorPasses` is 2 and the planner corrected the first pass's findings. Check only corrected claims and new paths. Your prompt and the plan's `## Fix log` identify them.
+- **Step 4a, pass 1:** validate the plan as the planner first wrote it, in parallel with the plan design review and before the user relay. Check every factual claim against the repository. Your `Smaller:` scope card joins the one step-6 question batch, and your findings fold into the one planner Fix round at step 6b.
+- **Step 6c, pass 2:** run only when that Fix round returned `new_paths=yes`. Check only corrected claims and new paths, as your prompt and the plan's `## Fix log` identify them. Ask the user nothing; the coordinator logs any `Smaller:` cut you name to `decisions-log.md`.
 
-Validation runs after plan corrections because the corrected claims need a check. Your review-tag upgrades govern the reviewers that the coordinator selects next.
+Validation runs beside the design review so the user answers every plan question once, before implementation. Your review-tag upgrades govern the reviewers that the coordinator selects next.
 
-The design reviewer runs earlier. It checks whether the approach fits the task. You check whether the plan's claims about the repository are true.
+The design reviewer runs at the same step. It checks whether the approach fits the task. You check whether the plan's claims about the repository are true, and you stay on Sonnet for that: facts only.
 
 ## Model and independence
 

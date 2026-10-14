@@ -592,7 +592,7 @@ def plan_written_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     return None
 
 
-def relay_owed(r: Run, q: str) -> str:
+def relay_owed(r: Run, q: str, ask_cut: bool = True) -> str:
     """What the step-6 relay still has to ask: questions and/or the scope cut.
 
     A relay with nothing in it to answer often leaves no `## Answers` behind: step 6
@@ -606,12 +606,44 @@ def relay_owed(r: Run, q: str) -> str:
     if "## Answers" not in q and "No open questions." not in q:
         owed.append("one card per CONFIRMED design choice, then one per question "
                     "in questions.md")
-    cut = scope_cut(r)
+    cut = scope_cut(r) if ask_cut else ""
     chosen = next((ln for ln in q.splitlines() if ln.startswith("scope:")), "")
     if cut and not chosen:
         owed.append(f"the scope selection ({cut}): one option per A)/B)/C) line, "
                     "its `scope:` line appended to questions.md's ## Answers")
     return "; and ".join(owed)
+
+
+def last_fix_added_paths(r: Run) -> bool:
+    """Whether the last `PLAN_FIXED` line of plan.md says `new_paths=yes`."""
+    fixed = [ln for ln in r.text("plan.md").splitlines()
+             if ln.strip().startswith("PLAN_FIXED")]
+    return bool(fixed) and "new_paths=yes" in fixed[-1]
+
+
+def pass_two_cut(r: Run) -> str:
+    """The `Smaller:` cut a validator pass 2 named, else "".
+
+    Pass 2 is the validation written after a Fix round that added paths, so it
+    is newer than plan.md and plan.md's last Fix round said `new_paths=yes`.
+    """
+    plan, pv = r.run / "plan.md", r.run / "plan-validation.md"
+    try:
+        if pv.stat().st_mtime_ns <= plan.stat().st_mtime_ns:
+            return ""
+    except OSError:
+        return ""
+    return scope_cut(r) if last_fix_added_paths(r) else ""
+
+
+def log_cut(r: Run, cut: str) -> None:
+    """Append a pass-2 scope cut to decisions-log.md, once."""
+    log = r.run / "decisions-log.md"
+    row = f"- plan-validation.md (pass 2): scope cut named, not asked — {cut}"
+    existing = log.read_text(errors="replace") if log.exists() else ""
+    if row not in existing:
+        head = existing if existing else "# Decisions log\n\n"
+        log.write_text(head.rstrip("\n") + "\n" + row + "\n")
 
 
 def pass_two_owed(r: Run) -> bool:
@@ -627,9 +659,7 @@ def pass_two_owed(r: Run) -> bool:
             return False
     except OSError:
         return False
-    fixed = [ln for ln in r.text("plan.md").splitlines()
-             if ln.strip().startswith("PLAN_FIXED")]
-    return bool(fixed) and "new_paths=yes" in fixed[-1]
+    return last_fix_added_paths(r)
 
 
 def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
@@ -658,7 +688,11 @@ def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
         return ("4a", "plan unvalidated", "spawn the PLAN VALIDATOR (brief V) beside "
                 "the plan design review; it asks nothing, and a `Smaller:` cut it "
                 "names joins the step-6 relay", False)
-    asked = "" if autopilot(r) else relay_owed(r, q)
+    chosen_cut = any(ln.startswith("scope:") for ln in q.splitlines())
+    late_cut = "" if chosen_cut else pass_two_cut(r)
+    if late_cut:
+        log_cut(r, late_cut)
+    asked = "" if autopilot(r) else relay_owed(r, q, ask_cut=not late_cut)
     if asked:
         return (6, "user relay outstanding", "send the ONE relay turn: plan summary "
                 "and the plan-triage counts as text, then ONE AskUserQuestion call — "

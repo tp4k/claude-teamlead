@@ -21,7 +21,9 @@ and the head each Codex gate saw):
     The base SHA is pinned to `base-sha.txt` on the first call (or `--base`).
   * Stages are a barrier: baseline, implementer, verifier, reviewers, triage,
     writer. The lowest stage any workstream is at is dispatched as one batch,
-    so no verifier (which moves HEAD for its RED run) runs beside a writer.
+    so no verifier runs beside a writer. Verifiers are the exception: they move
+    HEAD (the RED run) and patch files (the mutation gate) in the one shared
+    repo, so they are serialised, lowest workstream first, one per call.
   * The commits a report lists are looked up before a verifier is paid for:
     they must exist, descend from the base and be on HEAD's history.
   * The verifier's prompt carries the RED run (`red_freeze.py --run`, this
@@ -97,6 +99,7 @@ MUTATION = re.compile(r"^MUTATION:\s*(PASS|FAIL)\b", re.M)
 DOCS_FIXED = re.compile(r"DOCS_FIXED\s+rows=\d+\s+commit=([0-9a-fA-F]{7,40})")
 TERMINAL = re.compile(r"^\S+\s+(done|failed):\s*(.*?)\s*$")
 RECOMMENDED = re.compile(r"recommended:\s*(.+)")
+BASELINE_ROW = re.compile(r"^(.*?)\s*→\s*(?:exit\s+(\d+)|TIMEOUT)\b")
 
 
 class Halt(Exception):
@@ -305,6 +308,22 @@ class Router:
         touched = TOUCHED.findall(ver.read_text(errors="replace"))
         return bool(touched) and all(t.lower() == "no" for t in touched)
 
+    def gate_commands(self, ws: int, cmds: list[str]) -> list[str]:
+        """The brief commands that do not already fail in baseline-ws<N>.md.
+
+        A command that fails at the base fails every mutant's run, so keeping it
+        in mutate.py's --cmd would report every mutant killed over nothing."""
+        rows = self.r.text(f"baseline-ws{ws}.md").splitlines()
+        failing = {m.group(1) for ln in rows
+                   if (m := BASELINE_ROW.match(ln)) and m.group(2) != "0"}
+        passing = [c for c in cmds if c not in failing]
+        if not passing:
+            raise Halt(f"every verification command of WS-{ws} already fails in "
+                       f"baseline-ws{ws}.md, so the mutation gate has no command "
+                       "that could tell a killed mutant from a broken base: fix "
+                       "the base or the brief's commands")
+        return passing
+
     def gate_driven(self, ws: int, rnd: int) -> bool:
         """Whether round `rnd` was asked for by the gate, not by stream review.
 
@@ -464,12 +483,12 @@ class Router:
                        "yourself and append it, then call again")
         if tv == "STOP":
             raise Halt(f"{tri.name} says STOP: read it and take it to the user")
+        docs = self.run / "briefs" / f"docs-ws{ws}-r{rnd}.md"
         if tv == "NEEDS_DECISION":
             self.log_decisions(tri)
-            tv = "APPROVED_WITH_NOTES"
+            tv = "NEEDS_REWORK" if docs.exists() else "APPROVED_WITH_NOTES"
         if tv != "NEEDS_REWORK":
             return None
-        docs = self.run / "briefs" / f"docs-ws{ws}-r{rnd}.md"
         if docs.exists():
             out = self.run / f"docs-fix-ws{ws}-r{rnd}.md"
             if not out.exists():
@@ -612,8 +631,9 @@ class Router:
             extra.append(f"{n}. RED run — quote its output under `## RED run`:\n"
                          f"   {steps[0]}")
             n += 1
-        extra.append(f"{n}. Mutation gate — run it after every brief command "
-                     "passed, quote its last `MUTATION:` line under `## Mutation`:\n"
+        extra.append(f"{n}. Mutation gate — run it after every command that is not "
+                     "pre-existing passed, quote its last `MUTATION:` line under "
+                     "`## Mutation`:\n"
                      f"   {steps[-1]}")
         baseline = self.run / f"baseline-ws{ws}.md"
         lines = [
@@ -639,7 +659,8 @@ class Router:
         tag = self.r.tag(ws, rnd)
         out = self.run / f"verifier-{tag}.md"
         prompt = self.verifier_prompt(
-            ws, rnd, " && ".join(cmds), check, commits, self.new_reds(ws, rnd, rep),
+            ws, rnd, " && ".join(self.gate_commands(ws, cmds)), check, commits,
+            self.new_reds(ws, rnd, rep),
             out, self.run / f"mutation-{tag}.md",
             f"Inputs: {self.r.brief(ws, rnd)} (## Verification commands), "
             f"{rep} (commits:), {self.run}/repo.txt.",
@@ -718,6 +739,8 @@ class Router:
                        "lines in questions.md form a cycle")
         low = min(n.rank for n in active)
         batch = [n for n in active if n.rank == low]
+        if batch[0].kind == "verify":
+            batch = batch[:1]
         plan = Plan(step=f"{batch[0].kind} — " + ", ".join(
             f"WS-{n.ws} round {n.rnd}" for n in batch))
         plan.step = f"{STAGE_LABEL[batch[0].kind]} — " + ", ".join(
@@ -750,7 +773,7 @@ class Router:
         check = ""
         for ws in self.r.roster:
             c, ck, _ = self.brief_commands(ws, self.r.round_of(ws))
-            cmds += [x for x in c if x not in cmds]
+            cmds += [x for x in self.gate_commands(ws, c) if x not in cmds]
             check = check or ck
         return cmds, check
 

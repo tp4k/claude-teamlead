@@ -365,6 +365,19 @@ def case_run_restores_on_sigterm(tmp: Path) -> None:
           and repo.git("status", "--porcelain") == "", repo.git("status", "-sb"))
 
 
+def case_run_restores_a_detached_head(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    green = repo.commit("more")
+    repo.git("checkout", "-q", "--detach", green)
+    run(repo, red, cmd=CHECK_CMD)
+    check("--run started on a detached HEAD puts that commit back, still detached",
+          repo.git("branch", "--show-current") == ""
+          and repo.git("rev-parse", "HEAD") == green
+          and repo.git("status", "--porcelain") == "", repo.git("status", "-sb"))
+
+
 LONG = ("for i in range(1, 301):\n    print(f'line {i}')\n"
         "raise SystemExit(1)\n")
 
@@ -403,6 +416,7 @@ CASES = [
     case_run_restores_branch_and_head,
     case_run_refuses_dirty_tree,
     case_run_restores_on_sigterm,
+    case_run_restores_a_detached_head,
 ]
 
 

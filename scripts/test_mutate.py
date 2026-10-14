@@ -733,6 +733,22 @@ def case_glob_named_symlink_refused(tmp: Path) -> None:
           and "a*.py" not in out, f"{code} {repo.status()} {out}{err}")
 
 
+def case_glob_named_ignored_file_refused(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("a!x.py", "plain = 1 < 2\n")
+    repo.base = repo.commit("base: a!x.py")
+    repo.write(".gitignore", "a*.py\n!a!x.py\n")
+    repo.write("a*.py", "secret = 1\n")
+    commit = repo.commit("stream: ignore a*.py")
+    patch = write_probes(repo, [{"probe": "p", "file": "a*.py",
+                                 "old": "secret", "new": "public"}])
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--probes", patch, "--max-generic", "0")
+    check("a probe on an ignored file whose name globs a tracked one is refused",
+          code == 2 and (repo.root / "a*.py").read_text() == "secret = 1\n",
+          f"{code} {out}{err}")
+
+
 CASES = [
     case_survivor_fails_gate,
     case_all_killed_passes,
@@ -760,6 +776,7 @@ CASES = [
     case_in_repo_symlink_alias_refused,
     case_interrupt_reports_leftover,
     case_glob_named_symlink_refused,
+    case_glob_named_ignored_file_refused,
 ]
 
 

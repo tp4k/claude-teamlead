@@ -57,6 +57,10 @@ SELF_REPORT_RE = re.compile(
     r"|^(?:implementer|verifier|triage)-"
     r"|^review-r\d"
 )
+# The triage file's two lists the Codex final gate re-judges, and the file the
+# ledger writer appends to mid-run (`references/deferred-work-ledger.md`).
+NOTE_SECTIONS = ("## Demoted to Notes", "## Notes for the user")
+DEFERRED_ROWS_FILE = "deferred-rows.md"
 ANSWERS_RE = re.compile(r"^## Answers$(.*?)(?=^## |\Z)", re.MULTILINE | re.DOTALL)
 MD_REF_RE = re.compile(r"([\w.+-]+\.md)\b")
 # A run that closes an earlier review: delegate step 3 writes `followup-of:` to
@@ -556,6 +560,41 @@ def user_answers(run_dir: Path | None) -> str:
     return f"# Answers\n\n{body}\n" if body else ""
 
 
+def notes_to_rejudge(run_dir: Path | None) -> list[tuple[str, list[str]]]:
+    """(triage file name, its demoted and Note lines) for every triage file.
+
+    A demoted row is never dropped: it becomes a ledger row or a report line, and
+    the gate re-judges it against the final head. Every round's file is read —
+    the last one alone would lose the rounds that demoted the most — and a
+    section that says `none` contributes no line.
+    """
+    if run_dir is None:
+        return []
+    found: list[tuple[str, list[str]]] = []
+    for triage in sorted(run_dir.glob("triage-*.md")):
+        text = triage.read_text(errors="replace")
+        lines = [
+            line.strip()
+            for heading in NOTE_SECTIONS
+            for line in section_body(text, heading).splitlines()
+            if line.strip() and line.strip().lower() != "none"
+        ]
+        if lines:
+            found.append((triage.name, lines))
+    return found
+
+
+def deferred_rows(run_dir: Path | None) -> list[str]:
+    """The rows the writer appended to `deferred-rows.md`, not yet in the ledger."""
+    if run_dir is None:
+        return []
+    rows_file = run_dir / DEFERRED_ROWS_FILE
+    if not rows_file.is_file():
+        return []
+    text = rows_file.read_text(errors="replace")
+    return [line for line in text.splitlines() if line.strip()]
+
+
 def numstat(repo: Path, base: str, head: str) -> list[tuple[str, str, str]]:
     rows = []
     out = git(repo, "diff", "--numstat", f"{base}..{head}")
@@ -634,6 +673,12 @@ def build_prompt(ctx: dict) -> str:
     add(f"- Branch: `{ctx['branch']}`")
     add(f"- Base commit: `{base}`")
     add(f"- Head commit: `{head_sha}`")
+    add("")
+    add(
+        f"This review is against the final HEAD, `{head_sha}`: docs, "
+        "deferred-work rows and the PR body are checked against that commit, "
+        "not against an earlier round."
+    )
     add("")
     add("Read the whole change with:")
     add("")
@@ -834,6 +879,34 @@ def build_prompt(ctx: dict) -> str:
             add(f"- `{entry}`")
         add("")
 
+    if ctx["notes"] or ctx["deferred"]:
+        add("## Notes to re-judge")
+        add("")
+        add(
+            "The run's triage demoted the rows and collected the Notes below "
+            "instead of sending them back for rework, and a deferred-work row "
+            "is a promise about the code. Judge each against the head above, "
+            "not against the round that wrote it:"
+        )
+        add("")
+        for name, note_lines in ctx["notes"]:
+            add(f"From `{name}`:")
+            add("")
+            for note in note_lines:
+                add(note)
+            add("")
+        if ctx["deferred"]:
+            add(f"From `{DEFERRED_ROWS_FILE}` (rows not yet in the ledger):")
+            add("")
+            for row in ctx["deferred"]:
+                add(row)
+            add("")
+        add(
+            "Report a demoted row that is now a defect as a table row, and a "
+            "deferred-work row the head already contradicts under check 6."
+        )
+        add("")
+
     add("## What to check")
     add("")
     if ctx["plan_structured"]:
@@ -881,6 +954,20 @@ def build_prompt(ctx: dict) -> str:
         "mistake the code makes. This axis matters most: in a previous run of "
         "this workflow, both rework rounds were caused by assertions that "
         "measured nothing, and none by broken production code."
+    )
+    add(
+        "5. **Simplicity, duplication and test bloat.** Is there a simpler "
+        "way to get the same behaviour? Does the change copy logic the "
+        "repo already has, or add a second place a bug fix must land? Are "
+        "there tests beyond the few that each reject a named wrong "
+        "implementation?"
+    )
+    add(
+        "6. **Docs, deferred-work rows and PR body against the final HEAD.** "
+        "Read every doc, deferred-work row and PR-body claim the change "
+        "touches or relies on, and check each against the code and tests "
+        "at the head above. A claim with no supporting line, or a row the "
+        "head already contradicts, is a finding."
     )
     add("")
 
@@ -933,7 +1020,7 @@ def build_prompt(ctx: dict) -> str:
     )
     add("")
     add(
-        "**3. `## Per axis`** — one line for each of the four checks above: "
+        "**3. `## Per axis`** — one line for each of the six checks above: "
         "verdict, then the specific thing that carried it. \"Clean\" is a "
         "useful answer, but say what you read to conclude it — an axis nobody "
         "can tell you looked at is an axis nobody can rely on."
@@ -1160,6 +1247,8 @@ def main(argv: list[str]) -> int:
             "numstat": rows,
             "worktree": working_tree_changes(repo),
             "diff_file": diff_file,
+            "notes": notes_to_rejudge(run_dir),
+            "deferred": deferred_rows(run_dir),
             "followup": followup is not None,
             "followup_head": base if from_followup else None,
         }

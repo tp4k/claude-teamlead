@@ -876,12 +876,13 @@ def global_config(tmp: Path, **values: object) -> Path:
     return home / "config.json"
 
 
-def case_opus_fallback_defaults_off(tmp: Path) -> None:
+def case_opus_fallback_defaults_to_fallback(tmp: Path) -> None:
     _, run, base = scaffold(tmp, None)
     _, proc = package(tmp, run, base)
     line = opus_line(proc)
-    check("no config and no flag → opusCodeReview=off from default",
-          proc.returncode == 0 and "opusCodeReview=off" in line and "(default)" in line,
+    check("no config and no flag → opusCodeReview=fallback from default",
+          proc.returncode == 0 and "opusCodeReview=fallback" in line
+          and "(default)" in line,
           f"line={line!r} err={proc.stderr!r}")
 
 
@@ -920,7 +921,8 @@ def case_opus_fallback_typo_is_skipped(tmp: Path) -> None:
     _, proc = package(tmp, run, base)
     line = opus_line(proc)
     check("an invalid config value is skipped and the default answers",
-          "opusCodeReview=off" in line and "(default)" in line, f"line={line!r}")
+          "opusCodeReview=fallback" in line and "(default)" in line,
+          f"line={line!r}")
 
 
 FINDINGS = "## Findings to fix\n\n1. HIGH a.txt:1 says two\n"
@@ -1220,7 +1222,7 @@ CASES = [
     case_followup_without_reviewed_head_warns,
     case_explicit_base_outranks_the_reviewed_head,
     case_reviewed_head_off_the_branch_warns,
-    case_opus_fallback_defaults_off,
+    case_opus_fallback_defaults_to_fallback,
     case_opus_fallback_from_global_config,
     case_opus_fallback_repo_beats_global,
     case_opus_fallback_flag_beats_config,

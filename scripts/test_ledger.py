@@ -128,6 +128,22 @@ def case_existing_lines_byte_identical_crlf(root: Path) -> None:
     )
 
 
+def case_mixed_line_endings_row_takes_table_ending(root: Path) -> None:
+    name = run_name_for(4, 5)
+    table = "".join(f"{ln}\r\n" for ln in [COLS, "|---|---|---|---|---|", *OLD])
+    text = "# Deferred work\n\nnote\n\n" + table + "\nOther notes\n"
+    _, ledger = apply(root, name, NEW, text)
+    got = ledger.read_bytes()
+    new_lines = [r.encode() for r in NEW]
+    lines = got.splitlines(keepends=True)
+    stripped = b"".join(ln for ln in lines if ln.rstrip(b"\r\n") not in new_lines)
+    record(
+        "mixed endings: new rows end in the table's crlf, existing bytes unchanged",
+        stripped == text.encode() and all(r + b"\r\n" in got for r in new_lines),
+        f"got={got!r}",
+    )
+
+
 def case_crlf_without_trailing_newline(root: Path) -> None:
     name = run_name_for(4, 5)
     text = (HEAD + "\n".join(OLD)).replace("\n", "\r\n")
@@ -263,6 +279,7 @@ CASES = [
     case_gap_index_from_hash,
     case_existing_lines_byte_identical,
     case_existing_lines_byte_identical_crlf,
+    case_mixed_line_endings_row_takes_table_ending,
     case_crlf_without_trailing_newline,
     case_dashless_pipe_line_is_not_separator,
     case_long_near_miss_line_above_table,

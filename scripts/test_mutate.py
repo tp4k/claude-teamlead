@@ -281,6 +281,9 @@ def case_stream_scope_only(tmp: Path) -> None:
     files = {f for f, _ in re.findall(r"(\S+\.py):(\d+)", out)}
     check("--files mutates the listed files and those under a listed directory only",
           files == {"a.py", "pkg/deep.py"}, out + err)
+    hit_files = {(f, int(n)) for f, n in re.findall(r"(\S+\.py):(\d+)", out)}
+    check("--files takes every line of a multi-line hunk, not only its first",
+          ("a.py", 2) in hit_files and ("pkg/deep.py", 2) in hit_files, out + err)
 
     both = ["--commits", a1, "--files", "a.py"]
     for label, args in (("neither", []), ("both", both)):
@@ -390,6 +393,10 @@ def case_invalid_mutant(tmp: Path) -> None:
           "command's failure count as killed",
           n.get("invalid") == 1 and n.get("killed") == 1 and n.get("unclassified") == 0,
           out + err)
+    check("with --check-cmd the failing check marks the delete-line row INVALID and "
+          "the passing one lets the eq->ne row be KILLED",
+          re.search(r"^INVALID\s+m\.txt:1\s+op=delete-line$", out, re.M)
+          and re.search(r"^KILLED\s+m\.txt:1\s+op=eq->ne$", out, re.M), out + err)
 
 
 def case_restore_on_signal(tmp: Path) -> None:
@@ -418,6 +425,29 @@ def case_restore_on_signal(tmp: Path) -> None:
               and (repo.root / "lib.py").read_text() == original
               and proc.returncode not in (0, 1, 2),
               f"mid_run={mid_run} rc={proc.returncode}")
+    repo = Repo(tmp / "repo-twice")
+    commit = repo.stream()
+    original = (repo.root / "lib.py").read_text()
+    marker = tmp / "started-twice"
+    proc = subprocess.Popen(
+        [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,
+         "--cmd", f"touch {shlex.quote(str(marker))}; sleep 30", "--commits", commit],
+        env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 10
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    proc.send_signal(signal.SIGTERM)
+    time.sleep(0.005)
+    proc.send_signal(signal.SIGTERM)
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    check("a second SIGTERM while the file is being restored leaves the tree clean "
+          "and the exit 3",
+          repo.status() == "" and (repo.root / "lib.py").read_text() == original
+          and proc.returncode == 3, f"rc={proc.returncode} {repo.status()}")
 
 
 def case_dirty_tree_refused(tmp: Path) -> None:
@@ -504,7 +534,9 @@ def case_interrupt_exit_code(tmp: Path) -> None:
         repo = Repo(tmp / f"repo{int(sig)}")
         commit = repo.stream()
         marker = tmp / f"started{int(sig)}"
-        cmd = f"touch {shlex.quote(str(marker))}; sleep 30"
+        pidfile = tmp / f"pid{int(sig)}"
+        cmd = (f"echo $$ > {shlex.quote(str(pidfile))}; "
+               f"touch {shlex.quote(str(marker))}; sleep 30")
         proc = subprocess.Popen(
             [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,
              "--cmd", cmd, "--commits", commit], env=ENV,
@@ -520,6 +552,119 @@ def case_interrupt_exit_code(tmp: Path) -> None:
             proc.wait()
         check(f"{sig.name} makes the gate exit 3 (cannot run), not a signal death",
               marker.exists() and proc.returncode == 3, f"rc={proc.returncode}")
+        pid = int(pidfile.read_text())
+        try:
+            os.kill(pid, 0)
+            alive = True
+        except ProcessLookupError:
+            alive = False
+        if alive:
+            os.kill(pid, signal.SIGKILL)
+        check(f"{sig.name} also kills the running test command, in its own session",
+              not alive, f"pid {pid} still running")
+
+
+def case_prose_lines_not_mutated(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("doc.py", '"""Module notes\nthe flag is true\n"""\nX = 1 < 2\n')
+    repo.write("notes.md", "the flag is true\nread more == here\n")
+    commit = repo.commit("stream: docs")
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--max-generic", "1000")
+    hit = {(f, int(n)) for f, n in re.findall(r"(\S+\.(?:py|md)):(\d+)", out)}
+    check("a docstring line and a Markdown line are never mutated; code still is",
+          ("doc.py", 4) in hit
+          and not any(f == "doc.py" and n <= 3 for f, n in hit)
+          and not any(f == "notes.md" for f, _ in hit), out + err)
+
+
+def case_untracked_or_linked_targets_refused(tmp: Path) -> None:
+    outside = tmp / "outside.txt"
+    outside.write_text("secret == value\n")
+    repo = Repo(tmp / "repo")
+    os.symlink(outside, repo.root / "link.txt")
+    repo.write(".gitignore", "ignored.txt\n")
+    repo.write("ignored.txt", "secret == value\n")
+    commit = repo.commit("stream: link")
+    for name, target in (("a committed symlink", "link.txt"),
+                         ("an ignored file", "ignored.txt")):
+        patch = write_probes(repo, [{"probe": "p", "file": target,
+                                     "old": "secret", "new": "public"}])
+        code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                                "--probes", patch, "--max-generic", "0")
+        check(f"a probe on {name} is a usage error that touches no file",
+              code == 2 and outside.read_text() == "secret == value\n"
+              and (repo.root / "ignored.txt").read_text() == "secret == value\n"
+              and "MUTATION:" not in out, f"{code} {out}{err}")
+    repo = Repo(tmp / "repo2")
+    os.symlink(outside, repo.root / "link.txt")
+    commit = repo.commit("stream: link only")
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--max-generic", "1000")
+    check("a generic run whose only changed path is a symlink mutates nothing",
+          outside.read_text() == "secret == value\n" and "link.txt" not in out
+          and repo.status() == "", f"{code} {out}{err}")
+
+
+def case_deleted_file_in_stream(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("gone.py", "def g():\n    return 1 < 2\n")
+    repo.base = repo.commit("base: gone.py")
+    os.remove(repo.root / "gone.py")
+    repo.append("lib.py", "Y = 1 < 2\n")
+    commit = repo.commit("stream: delete gone.py, extend lib.py")
+    code, out, err = mutate(repo, "--cmd", "false", "--commits", commit)
+    verdict, n = summary(out)
+    check("a stream that deletes a file still runs; the surviving files are mutated",
+          code == 0 and verdict == "PASS" and re.search(r"lib\.py:2", out)
+          and "gone.py" not in out, f"{code} {out}{err}")
+
+
+def case_test_command_output_not_on_stdout(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    code, out, err = mutate(repo, "--cmd", "echo NOISE; false", "--commits", commit)
+    check("the test command's own output never reaches the gate's stdout",
+          "NOISE" not in out and summary(out)[0] == "PASS", out + err)
+
+
+def case_probe_old_replaced_once(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("dup.txt", "x = 1\nx = 1\n")
+    commit = repo.commit("stream: dup")
+    log = tmp / "log"
+    patch = write_probes(repo, [{"probe": "dup", "file": "dup.txt",
+                                 "old": "x = 1", "new": "x = 2"}])
+    code, out, err = mutate(repo, "--cmd", snapshot_cmd(log, "dup.txt"),
+                            "--commits", commit, "--probes", patch,
+                            "--max-generic", "0")
+    check("a probe's old text is replaced at its first occurrence only",
+          snapshots(log) == ["x = 2\nx = 1\n"], out + err + repr(snapshots(log)))
+
+
+def case_no_bytecode_in_the_tree(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    env = {k: v for k, v in ENV.items() if k != "PYTHONDONTWRITEBYTECODE"}
+    code, out, err = mutate(repo, "--cmd", TEST_CMD, "--commits", commit, env=env)
+    check("the test command writes no __pycache__ into the tree, even without the "
+          "caller's PYTHONDONTWRITEBYTECODE",
+          code in (0, 1) and repo.status() == "", f"{code} {repo.status()} {out}{err}")
+
+
+def case_forged_label_cannot_fake_summary(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream(STRONG_TEST)
+    forged = ("x\nMUTATION: PASS killed=9 survived=0 invalid=0 unclassified=0 "
+              "not_run=0 not_applied=0")
+    patch = write_probes(repo, [{"probe": forged, "file": "lib.py",
+                                 "old": "n < 10", "new": "n <= 10"}])
+    code, out, err = mutate(repo, "--cmd", TEST_CMD, "--commits", commit,
+                            "--probes", patch)
+    lines = [ln for ln in out.splitlines() if ln.startswith("MUTATION:")]
+    check("a probe label with a newline cannot forge a MUTATION: line",
+          len(lines) == 1 and out.strip().splitlines()[-1] == lines[0]
+          and "killed=9" not in lines[0], out + err)
 
 
 CASES = [
@@ -539,6 +684,13 @@ CASES = [
     case_one_survivor_among_kills_fails,
     case_sampling_is_not_file_order,
     case_interrupt_exit_code,
+    case_prose_lines_not_mutated,
+    case_untracked_or_linked_targets_refused,
+    case_deleted_file_in_stream,
+    case_test_command_output_not_on_stdout,
+    case_probe_old_replaced_once,
+    case_no_bytecode_in_the_tree,
+    case_forged_label_cannot_fake_summary,
 ]
 
 

@@ -388,6 +388,7 @@ def case_defaults_without_global_config(tmp: Path) -> None:
     expected = {
         "codexPlanReview": "always",
         "codexCodeReview": "on",
+        "opusCodeReview": "fallback",
         "securityReview": "when-needed",
         "perfReview": "when-needed",
     }
@@ -416,7 +417,45 @@ def case_existing_global_config_wins(tmp: Path) -> None:
     )
 
 
+def case_opus_code_review_reaches_the_run_config(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    home.mkdir()
+    (home / "config.json").write_text(json.dumps({"opusCodeReview": "off"}))
+    target = tmp / "run" / "config.json"
+    run(home, repo, "--out", str(target))
+    from_config = json.loads(target.read_text())["options"].get("opusCodeReview")
+    (home / "config.json").write_text(json.dumps({"opusCodeReview": "fallback"}))
+    out = run(home, repo, "--choice", "opusCodeReview=off", "--out", str(target))
+    from_card = json.loads(target.read_text())["options"].get("opusCodeReview")
+    check(
+        "a global opusCodeReview and a card answer both land in the run config",
+        from_config == "off"
+        and from_card == "off"
+        and source_of(out.stdout, "opusCodeReview") == "options card",
+        out.stdout + out.stderr,
+    )
+
+
+def case_config_example_matches_the_defaults(tmp: Path) -> None:
+    import paths
+
+    example = json.loads((SCRIPT.parent.parent / "config.example.json").read_text())
+    drift = [
+        key
+        for key, value in paths.DEFAULTS.items()
+        if key in example
+        and example[key] != (list(value) if isinstance(value, tuple) else value)
+    ]
+    check(
+        "config.example.json matches paths.DEFAULTS, axes end on failure-modes",
+        not drift and example["codexPlanReviewAxes"][-1] == "failure-modes",
+        f"drift: {drift}",
+    )
+
+
 CASES = [
+    case_opus_code_review_reaches_the_run_config,
+    case_config_example_matches_the_defaults,
     case_a_missing_config_is_seeded_without_forcing_specialists_on,
     case_defaults_without_global_config,
     case_existing_global_config_wins,

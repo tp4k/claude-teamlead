@@ -106,6 +106,118 @@ def token_present(path: Path, token: str) -> bool:
     return re.search(rf"\b{re.escape(token)}\b", routing_line(path), re.I) is not None
 
 
+def wait(files: list[str], *, timeout: int = 480, poll: int = 5,
+         rewritten: list[str] | None = None,
+         expect: list[tuple[str, str]] | None = None,
+         baseline: list[tuple[str, str]] | None = None) -> tuple[int, list[str]]:
+    """The wait loop behind the CLI: (exit code, the lines `main` prints).
+
+    next.py waits through this rather than shelling out to the CLI, so the two
+    cannot drift. A `--baseline` that is not an integer raises ValueError (the CLI
+    turns it into a usage error); every other refusal is exit 2 and a line.
+    """
+    rewritten_args = list(rewritten or [])
+    expect_args = list(expect or [])
+    baseline_args = list(baseline or [])
+    out: list[str] = []
+    paths = [Path(f) for f in files]
+    last_size: dict[Path, int] = {}
+    ready: set[Path] = set()
+    # Only files that ALREADY exist need the mtime bump. A `--rewritten` file missing
+    # at launch is being created for the first time, and existence plus size
+    # stability already prove that.
+    rewrites = {Path(f) for f in rewritten_args}
+    start_mtime_ns = {f: f.stat().st_mtime_ns for f in rewrites if f.exists()}
+    for f_arg, ns_arg in baseline_args:
+        if Path(f_arg) not in rewrites:
+            out.append(f"--baseline {Path(f_arg).name} is not a --rewritten file; "
+                       "nothing waits on it")
+            return 2, out
+        try:
+            start_mtime_ns[Path(f_arg)] = int(ns_arg)
+        except ValueError:
+            raise ValueError(f"--baseline {f_arg}: {ns_arg!r} is not an integer")
+    for f in rewrites:
+        if f not in set(paths):
+            out.append(f"--rewritten {f.name} is not in the wait list; "
+                       "nothing waits on it")
+            return 2, out
+    expected: dict[Path, str] = {Path(f): token for f, token in expect_args}
+    for f in expected:
+        if f not in set(paths):
+            out.append(f"--expect {f.name} is not in the wait list; "
+                       "nothing waits on it")
+            return 2, out
+    deadline = time.monotonic() + timeout
+
+    while True:
+        for f in paths:
+            if f in ready or not f.exists():
+                continue
+            st = f.stat()
+            size = st.st_size
+            stale = f in start_mtime_ns and st.st_mtime_ns <= start_mtime_ns[f]
+            # A half-rewritten file is fresh-mtime and size-stable in the gap
+            # between two Edit calls, so size stability alone cannot tell
+            # "finished" from "paused". The awaited token can.
+            unmarked = f in expected and not token_present(f, expected[f])
+            if size > 0 and not stale and not unmarked and last_size.get(f) == size:
+                ready.add(f)
+                # Match the routing line only, not the whole file: a spec
+                # excerpt quoting `status: blocked` is not this phase
+                # reporting itself blocked.
+                line = routing_line(f)
+                if EARLY.search(line):
+                    out.append(f"EARLY_EXIT {f.name}: {line}")
+                    return 1, out
+            last_size[f] = size
+        if len(ready) == len(paths):
+            out.extend(f"{f.name}: {routing_line(f)}" for f in paths)
+            return 0, out
+        if time.monotonic() >= deadline:
+            # One reason per pending file; "not rewritten yet", "token present
+            # but not newer" and "not there at all" need different follow-ups.
+            def why(f: Path) -> str:
+                # A writer can replace or remove the file between these checks;
+                # report it as missing rather than lose the RETRY line below.
+                try:
+                    return reason(f)
+                except OSError:
+                    return f.name
+
+            def reason(f: Path) -> str:
+                if not f.exists():
+                    return f.name
+                if f.stat().st_size == 0:
+                    return f"{f.name} (exists but is empty)"
+                has_token = f not in expected or token_present(f, expected[f])
+                if not has_token:
+                    return (f"{f.name} (exists, no {expected[f]} in its routing "
+                            "line yet)")
+                if f in start_mtime_ns and f.stat().st_mtime_ns <= start_mtime_ns[f]:
+                    if f in expected:
+                        return (f"{f.name} (has {expected[f]} but its mtime is not "
+                                "newer than the baseline)")
+                    return f"{f.name} (still the pre-dispatch copy)"
+                return f"{f.name} (not yet size-stable)"
+
+            pending = [why(f) for f in paths if f not in ready]
+            out.append(f"TIMEOUT after {timeout}s; missing: {', '.join(pending)}")
+            retry = [sys.executable, str(Path(__file__).resolve()),
+                     "--timeout", str(timeout), "--poll", str(poll)]
+            for f_arg in rewritten_args:
+                retry += ["--rewritten", f_arg]
+            for f_arg, token in expect_args:
+                retry += ["--expect", f_arg, token]
+            for f_arg in rewritten_args:
+                base_ns = start_mtime_ns.get(Path(f_arg), FIRST_WRITE_NS)
+                retry += ["--baseline", f_arg, str(base_ns)]
+            retry += ["--", *files]
+            out.append("RETRY: " + shlex.join(retry))
+            return 2, out
+        time.sleep(poll)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__,
@@ -127,101 +239,15 @@ def main() -> int:
                          "in the RETRY line, not typed by hand")
     ap.add_argument("files", nargs="+")
     a = ap.parse_args()
-
-    files = [Path(f) for f in a.files]
-    last_size: dict[Path, int] = {}
-    ready: set[Path] = set()
-    # Only files that ALREADY exist need the mtime bump. A `--rewritten` file missing
-    # at launch is being created for the first time, and existence plus size
-    # stability already prove that.
-    rewritten = {Path(f) for f in a.rewritten}
-    start_mtime_ns = {f: f.stat().st_mtime_ns for f in rewritten if f.exists()}
-    for f_arg, ns_arg in a.baseline:
-        if Path(f_arg) not in rewritten:
-            print(f"--baseline {Path(f_arg).name} is not a --rewritten file; "
-                  "nothing waits on it")
-            return 2
-        try:
-            start_mtime_ns[Path(f_arg)] = int(ns_arg)
-        except ValueError:
-            ap.error(f"--baseline {f_arg}: {ns_arg!r} is not an integer")
-    for f in rewritten:
-        if f not in set(files):
-            print(f"--rewritten {f.name} is not in the wait list; nothing waits on it")
-            return 2
-    expect: dict[Path, str] = {Path(f): token for f, token in a.expect}
-    for f in expect:
-        if f not in set(files):
-            print(f"--expect {f.name} is not in the wait list; nothing waits on it")
-            return 2
-    deadline = time.monotonic() + a.timeout
-
-    while True:
-        for f in files:
-            if f in ready or not f.exists():
-                continue
-            st = f.stat()
-            size = st.st_size
-            stale = f in start_mtime_ns and st.st_mtime_ns <= start_mtime_ns[f]
-            # A half-rewritten file is fresh-mtime and size-stable in the gap
-            # between two Edit calls, so size stability alone cannot tell
-            # "finished" from "paused". The awaited token can.
-            unmarked = f in expect and not token_present(f, expect[f])
-            if size > 0 and not stale and not unmarked and last_size.get(f) == size:
-                ready.add(f)
-                # Match the routing line only, not the whole file: a spec
-                # excerpt quoting `status: blocked` is not this phase
-                # reporting itself blocked.
-                line = routing_line(f)
-                if EARLY.search(line):
-                    print(f"EARLY_EXIT {f.name}: {line}")
-                    return 1
-            last_size[f] = size
-        if len(ready) == len(files):
-            for f in files:
-                print(f"{f.name}: {routing_line(f)}")
-            return 0
-        if time.monotonic() >= deadline:
-            # One reason per pending file; "not rewritten yet", "token present
-            # but not newer" and "not there at all" need different follow-ups.
-            def why(f: Path) -> str:
-                # A writer can replace or remove the file between these checks;
-                # report it as missing rather than lose the RETRY line below.
-                try:
-                    return reason(f)
-                except OSError:
-                    return f.name
-
-            def reason(f: Path) -> str:
-                if not f.exists():
-                    return f.name
-                if f.stat().st_size == 0:
-                    return f"{f.name} (exists but is empty)"
-                has_token = f not in expect or token_present(f, expect[f])
-                if not has_token:
-                    return f"{f.name} (exists, no {expect[f]} in its routing line yet)"
-                if f in start_mtime_ns and f.stat().st_mtime_ns <= start_mtime_ns[f]:
-                    if f in expect:
-                        return (f"{f.name} (has {expect[f]} but its mtime is not "
-                                "newer than the baseline)")
-                    return f"{f.name} (still the pre-dispatch copy)"
-                return f"{f.name} (not yet size-stable)"
-
-            pending = [why(f) for f in files if f not in ready]
-            print(f"TIMEOUT after {a.timeout}s; missing: {', '.join(pending)}")
-            retry = [sys.executable, str(Path(__file__).resolve()),
-                     "--timeout", str(a.timeout), "--poll", str(a.poll)]
-            for f_arg in a.rewritten:
-                retry += ["--rewritten", f_arg]
-            for f_arg, token in a.expect:
-                retry += ["--expect", f_arg, token]
-            for f_arg in a.rewritten:
-                baseline = start_mtime_ns.get(Path(f_arg), FIRST_WRITE_NS)
-                retry += ["--baseline", f_arg, str(baseline)]
-            retry += ["--", *a.files]
-            print("RETRY: " + shlex.join(retry))
-            return 2
-        time.sleep(a.poll)
+    try:
+        code, lines = wait(a.files, timeout=a.timeout, poll=a.poll,
+                           rewritten=a.rewritten, expect=a.expect,
+                           baseline=a.baseline)
+    except ValueError as exc:
+        ap.error(str(exc))
+    for line in lines:
+        print(line)
+    return code
 
 
 if __name__ == "__main__":

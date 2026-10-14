@@ -62,6 +62,16 @@ def rework_cap(run: Path) -> int:
     return cast(int, paths.setting("reworkCap", repo, valid=paths.positive_int))
 
 
+def cap_reached(rnd: int, cap: int) -> bool:
+    """Whether a NEEDS_REWORK after round `rnd` is one rework too many.
+
+    `reworkCap` counts reworks, not rounds: cap 3 allows rework rounds 2 to 4, so
+    round 4 is spawned and a NEEDS_REWORK after it stops for the user. Gate-driven
+    and ordinary rework add to the same count because both create the next round.
+    """
+    return rnd > cap
+
+
 def verdict(path: Path) -> str:
     """The routing token of a phase file — PASS, PLAN_VALID, DONE, APPROVED — or "".
 
@@ -154,9 +164,18 @@ class Run:
             and not (ws and self.skip_record(ws, rnd, a).exists())))
         if rnd < 2 or not ws:
             return allowed
-        prev = self.phase_file("triage", ws, rnd - 1)
-        carried = carried_axes(prev.read_text(errors="replace")) if prev else ()
+        carried = self.carried(ws, rnd)
         return tuple(a for a in allowed if a == "code" or a not in carried)
+
+    def carried(self, ws: int, rnd: int) -> tuple[str, ...]:
+        """The axes the previous round's triage carried forward, if any.
+
+        review_briefs.py skips exactly these, and `axes` stops expecting them, so
+        both read the one function: a disagreement is a resumed run waiting for a
+        report nobody was asked to write.
+        """
+        prev = self.phase_file("triage", ws, rnd - 1) if rnd > 1 else None
+        return carried_axes(prev.read_text(errors="replace")) if prev else ()
 
     def setting(self, axis: str) -> str:
         """on, when-needed or off for one reviewer axis.
@@ -182,8 +201,15 @@ class Run:
         run file; without this record a resumed run cannot tell a skipped
         reviewer from an outstanding one.
         """
-        infix = f"ws{ws}-" if self.multi else ""
-        return self.run / "briefs" / f"review-{infix}r{rnd}-{axis}.skip"
+        return self.run / "briefs" / f"review-{self.tag(ws, rnd)}-{axis}.skip"
+
+    def infix(self, ws: int) -> str:
+        """`ws<N>-` when several workstreams share the run, else nothing."""
+        return f"ws{ws}-" if self.multi else ""
+
+    def tag(self, ws: int, rnd: int) -> str:
+        """`ws<N>-r<M>` or `r<M>`: the suffix every per-round file carries."""
+        return f"{self.infix(ws)}r{rnd}"
 
     def brief(self, ws: int, rnd: int) -> Path:
         return self.run / "briefs" / f"impl-ws{ws}-r{rnd}.md"
@@ -226,7 +252,7 @@ def stream_line(r: Run, ws: int) -> str:
 def stream_next(r: Run, ws: int) -> tuple[int, str, str, bool] | None:
     """(step, label, action, needs_user) for this stream, or None once approved."""
     rnd = r.round_of(ws)
-    tag = f"ws{ws}-r{rnd}" if r.multi else f"r{rnd}"
+    tag = r.tag(ws, rnd)
     if not r.brief(ws, rnd).exists():
         return (10, "rework brief missing", f"re-dispatch teamlead:triage (brief T, "
                 f"round {rnd - 1}) to write briefs/impl-ws{ws}-r{rnd}.md, then brief I",
@@ -283,7 +309,7 @@ def stream_next(r: Run, ws: int) -> tuple[int, str, str, bool] | None:
                 "`VERDICT:` line, so nothing can route on it; decide the verdict "
                 "yourself and append the line before going on", False)
     if tv == "NEEDS_REWORK":
-        if rnd > r.cap:
+        if cap_reached(rnd, r.cap):
             return (10, "rework cap reached", f"STOP and take it to the user: round "
                     f"{rnd} still needs rework past a cap of {r.cap}, so the plan or "
                     f"the spec is wrong, not the coder", True)
@@ -540,16 +566,12 @@ def validator_fix_applied(r: Run) -> bool:
     return newer and "## Fix log" in r.text("plan.md")
 
 
-def pre_validation_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
-    """Steps 3 to 6: everything the plan validator has to come after.
+def plan_written_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
+    """Steps 3 and 4: what has to exist before anything can read the plan.
 
-    The validator runs at 6c, after the relay and any Fix round it triggers,
-    because its word has to be on the plan that will be built: every claim a Fix
-    round rewrites is a claim nobody has checked. This half used to end at the
-    design reviews and put the validator straight after them, at "step 4" —
-    the order the skill had before the plan design review existed — so a resume
-    or a spawn gate read off it sent the coordinator to validate a plan the
-    user had not seen yet.
+    This is all the plan validator needs. It runs at step 4a, beside the design
+    review and ahead of the relay, so that the scope cut it may name joins the
+    single step-6 batch instead of costing a second round trip to the user.
     """
     if not (r.run / "task.md").exists():
         return (3, "kickoff incomplete", "write $RUN/task.md: the task verbatim, flags "
@@ -567,6 +589,63 @@ def pre_validation_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
         return (4, "plan not on disk", "spawn the opus PLANNER (brief P) — "
                 "questions.md is written last, so its absence means the plan is "
                 "not finished", False)
+    return None
+
+
+def relay_owed(r: Run, q: str) -> str:
+    """What the step-6 relay still has to ask: questions and/or the scope cut.
+
+    A relay with nothing in it to answer often leaves no `## Answers` behind: step 6
+    sends the go line and continues in the same turn, so there is nothing to append.
+    Three of ten recorded runs look exactly like this, and reading them as "the user
+    has not replied yet" would park a resume on a decision point that never existed.
+    The validator's `Smaller:` cut is now known before the relay, so it is asked in
+    the same batch; a cut is a real decision, so it holds even with no questions.
+    """
+    owed = []
+    if "## Answers" not in q and "No open questions." not in q:
+        owed.append("one card per CONFIRMED design choice, then one per question "
+                    "in questions.md")
+    cut = scope_cut(r)
+    chosen = next((ln for ln in q.splitlines() if ln.startswith("scope:")), "")
+    if cut and not chosen:
+        owed.append(f"the scope selection ({cut}): one option per A)/B)/C) line, "
+                    "its `scope:` line appended to questions.md's ## Answers")
+    return "; and ".join(owed)
+
+
+def pass_two_owed(r: Run) -> bool:
+    """Whether the validator's second pass is due: the Fix round added paths.
+
+    Pass 2 re-checks facts on the fixed plan only, and only the paths that round
+    introduced are unchecked, so it is owed when plan.md is newer than the
+    validation and the last `PLAN_FIXED` line says `new_paths=yes`.
+    """
+    plan, pv = r.run / "plan.md", r.run / "plan-validation.md"
+    try:
+        if plan.stat().st_mtime_ns <= pv.stat().st_mtime_ns:
+            return False
+    except OSError:
+        return False
+    fixed = [ln for ln in r.text("plan.md").splitlines()
+             if ln.strip().startswith("PLAN_FIXED")]
+    return bool(fixed) and "new_paths=yes" in fixed[-1]
+
+
+def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
+    """The pre-dispatch half of the loop: steps 3 to 6c.
+
+    The order is the one that lets every question reach the user in one batch.
+    The validator grades the plan at 4a, beside the design review; the relay at
+    step 6 then carries the answers, the design findings and the validator's
+    scope cut together; one planner Fix round at 6b folds all of that and the
+    validator's PLAN_NEEDS_FIX findings; and a second validator pass at 6c runs
+    only when that round added paths, asks nothing, and logs any `Smaller:` cut
+    it names to `$RUN/decisions-log.md`.
+    """
+    gap = plan_written_gap(r)
+    if gap:
+        return gap
     q = r.text("questions.md")
     if "adr_conflict=yes" in q and "## Answers" not in q:
         return (5, "ADR conflict", "HALT per references/adr-workflow.md: name the ADR "
@@ -574,57 +653,47 @@ def pre_validation_gap(r: Run) -> tuple[int | str, str, str, bool] | None:
     gap = design_gap(r)
     if gap:
         return gap
-    # A relay with nothing in it to answer often leaves no `## Answers` behind: step 6
-    # sends the go line and continues in the same turn, so there is nothing to append.
-    # Three of ten recorded runs look exactly like this, and reading them as "the user
-    # has not replied yet" would park a resume on a decision point that never existed.
-    if "## Answers" not in q and "No open questions." not in q and not autopilot(r):
+    pv_file = r.run / "plan-validation.md"
+    if not pv_file.exists():
+        return ("4a", "plan unvalidated", "spawn the PLAN VALIDATOR (brief V) beside "
+                "the plan design review; it asks nothing, and a `Smaller:` cut it "
+                "names joins the step-6 relay", False)
+    asked = "" if autopilot(r) else relay_owed(r, q)
+    if asked:
         return (6, "user relay outstanding", "send the ONE relay turn: plan summary "
                 "and the plan-triage counts as text, then ONE AskUserQuestion call — "
-                "one card per CONFIRMED design choice, then one per question in "
-                "questions.md, options labelled with their own words", True)
-    fold = fold_owed(r, q)
-    if fold:
-        return ("6b", "plan Fix round not run", "spawn a fresh opus planner in Fix "
-                f"mode (brief F) folding {fold}, then wait with --rewritten "
-                "$RUN/plan.md --expect $RUN/plan.md PLAN_FIXED — the validator "
-                "grades the plan after this round, not before it", False)
-    return None
-
-
-def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
-    """The pre-dispatch half of the loop: steps 3 to 6d."""
-    gap = pre_validation_gap(r)
-    if gap:
-        return gap
-    if not (r.run / "plan-validation.md").exists():
-        return ("6c", "plan unvalidated", "fold any answer that changes the plan "
-                "into ONE planner Fix round first (step 6b, brief F), then spawn "
-                "the PLAN VALIDATOR (brief V)", False)
-    pv = verdict(r.run / "plan-validation.md")
-    if pv == "PLAN_NEEDS_FIX" and not validator_fix_applied(r):
-        return ("6c", "plan needs fixing", "spawn a fresh opus planner in Fix mode "
-                "(brief F), then wait with --rewritten $RUN/plan.md "
-                "--expect $RUN/plan.md PLAN_FIXED", False)
-    # The validator's `Smaller:` cut is only known now, after the relay, so it is
-    # asked on its own card at the hold gate — and a cut is a real decision, so
-    # it holds even on a run that had no questions.
-    q = r.text("questions.md")
-    cut = scope_cut(r)
+                f"{asked}. The validator's findings ride along in the same turn; "
+                "options labelled with their own words", True)
+    pv = verdict(pv_file)
     chosen = next((ln for ln in q.splitlines() if ln.startswith("scope:")), "")
-    if cut and not chosen and not autopilot(r):
-        return ("6d", "scope cut unanswered", f"ask the scope selection ({cut}) "
-                "on ONE AskUserQuestion card, one option per A)/B)/C) line, and "
-                "append its `scope:` line to questions.md's ## Answers", True)
     # A cut the user accepted and nobody applied is the exact failure the selection
     # exists to prevent, and it is derivable: Fix mode logs `scope: chose …` into
     # plan.md, so an accepted letter with no such line means the round never ran.
-    if chosen and not chosen[7:].lstrip().startswith("A") \
-            and "scope: chose" not in r.text("plan.md"):
-        return ("6d", "accepted scope cut not applied", "spawn a fresh opus planner "
-                f"in Fix mode (brief F) with `Scope decision: {chosen[7:].strip()}`, "
-                "then wait with --rewritten $RUN/plan.md "
-                "--expect $RUN/plan.md PLAN_FIXED", False)
+    cut_owed = (chosen and not chosen[7:].lstrip().startswith("A")
+                and "scope: chose" not in r.text("plan.md"))
+    fold = fold_owed(r, q)
+    findings = pv == "PLAN_NEEDS_FIX" and not validator_fix_applied(r)
+    if fold or cut_owed or findings:
+        parts = []
+        if fold:
+            parts.append(f"folding {fold}")
+        if cut_owed:
+            parts.append(f"`Scope decision: {chosen[7:].strip()}`")
+        if findings:
+            parts.append("the validator's findings in plan-validation.md")
+        # 6b is where the answers and the cut fold; a round that is owed only for
+        # the validator's findings keeps its own label.
+        step = "6b" if fold or cut_owed else "6c"
+        label = "plan Fix round not run" if step == "6b" else "plan needs fixing"
+        return (step, label, "spawn a fresh opus planner in Fix mode (brief F) "
+                f"{' and '.join(parts)}, then wait with --rewritten $RUN/plan.md "
+                "--expect $RUN/plan.md PLAN_FIXED — the validator grades the plan "
+                "after this round, not before it", False)
+    if pass_two_owed(r):
+        return ("6c", "plan changed after validation", "spawn the PLAN VALIDATOR "
+                "(brief V, pass 2): the Fix round added paths, so check them. It "
+                "asks nothing; a `Smaller:` cut it names is logged to "
+                "$RUN/decisions-log.md", False)
     return None
 
 
@@ -652,7 +721,7 @@ def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     gap = cycle_gap(r)
     if gap or role == "planner":
         return gap
-    return pre_validation_gap(r) if role == "plan-validator" else plan_next(r)
+    return plan_written_gap(r) if role == "plan-validator" else plan_next(r)
 
 
 FOLLOWUP_OF = re.compile(r"^followup-of:\s*(\S.*)$", re.M)

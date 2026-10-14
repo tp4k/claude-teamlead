@@ -143,7 +143,7 @@ def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
     old = {s: signal.signal(s, _raise_exit)
            for s in (signal.SIGINT, signal.SIGTERM)}
     try:
-        git(repo, "checkout", "-q", "--detach", sha)
+        git(repo, "checkout", "-q", "--no-overwrite-ignore", "--detach", sha)
         proc = subprocess.run(cmd, shell=True, cwd=repo, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     finally:

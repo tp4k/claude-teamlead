@@ -462,6 +462,66 @@ def case_out_report(tmp: Path) -> None:
           and all(result_word.search(r) for r in rows), out + err + "\n".join(rows))
 
 
+def case_time_box_zero_runs_nothing(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream(STRONG_TEST)
+    log = tmp / "log"
+    code, out, err = mutate(repo, "--cmd", snapshot_cmd(log, "lib.py", "false"),
+                            "--commits", commit, "--max-generic", "1000",
+                            "--time-box", "0")
+    verdict, n = summary(out)
+    check("with no time left every mutant, even an unparsable one, is NOT RUN "
+          "and none is applied",
+          n.get("not_run") == 4 and sum(n.values()) == 4 and snapshots(log) == []
+          and code == 0 and repo.status() == "", out + err)
+
+
+def case_one_survivor_among_kills_fails(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream(STRONG_TEST)
+    patch = write_probes(repo, [{"probe": "no-op edit", "file": "lib.py",
+                                 "old": "n < 10", "new": "n < 10  # same"}])
+    code, out, err = mutate(repo, "--cmd", TEST_CMD, "--commits", commit,
+                            "--probes", patch)
+    verdict, n = summary(out)
+    check("one survivor fails the gate even when more mutants were killed",
+          code == 1 and verdict == "FAIL" and n.get("survived") == 1
+          and n.get("killed", 0) >= 2, out + err)
+
+
+def case_sampling_is_not_file_order(tmp: Path) -> None:
+    repo, log, code, out = run_ops(tmp, "--max-generic", "5")
+    picked = {changed_line(OPS_LINES, s)[0] for s in snapshots(log)}
+    per_line = [i for i in range(len(OPS_LINES))
+                for _ in range(1 + len(OPS_EXPECTED[OPS_LINES[i]]))]
+    check("the sample is neither the first nor the last mutants in file order",
+          len(snapshots(log)) == 5 and picked != set(per_line[:5])
+          and picked != set(per_line[-5:]), f"{picked}\n{out}")
+
+
+def case_interrupt_exit_code(tmp: Path) -> None:
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        repo = Repo(tmp / f"repo{int(sig)}")
+        commit = repo.stream()
+        marker = tmp / f"started{int(sig)}"
+        cmd = f"touch {shlex.quote(str(marker))}; sleep 30"
+        proc = subprocess.Popen(
+            [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,
+             "--cmd", cmd, "--commits", commit], env=ENV,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        proc.send_signal(sig)
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        check(f"{sig.name} makes the gate exit 3 (cannot run), not a signal death",
+              marker.exists() and proc.returncode == 3, f"rc={proc.returncode}")
+
+
 CASES = [
     case_survivor_fails_gate,
     case_all_killed_passes,
@@ -475,6 +535,10 @@ CASES = [
     case_restore_on_signal,
     case_dirty_tree_refused,
     case_out_report,
+    case_time_box_zero_runs_nothing,
+    case_one_survivor_among_kills_fails,
+    case_sampling_is_not_file_order,
+    case_interrupt_exit_code,
 ]
 
 

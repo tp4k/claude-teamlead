@@ -16,6 +16,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/roles/verifier.md` first. It defines the 
 
 - **Step 8a:** after an implementer reports `done`, rerun the brief's commands from its stated working directory. Check the commits listed in the implementer's report.
 - **Every rework round:** perform the same checks before reviewers inspect the new commits.
+- **Coordinator-fix check:** when your prompt says it verifies `coordinator-fix:` commits, run the `## Verification commands` of every brief in `$RUN/briefs/` against those commits and write `verifier-fix-<k>.md`; the mutation gate writes `mutation-fix-<k>.md`. No RED run and no probes file.
 - **Baseline:** before any implementer starts, when your prompt says so, run the brief's commands at the base SHA and write `baseline-ws<N>.md`. No RED run and no mutation gate.
 
 ## Independence and outcomes

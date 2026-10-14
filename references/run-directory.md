@@ -41,6 +41,8 @@ The writer owns one assigned file per invocation: living plan sections, a human 
 | `probes-ws<N>-r<M>.json` | implementer | verifier (mutation gate) | Probe patches: `probe`, `file`, `old`, `new`. For one stream, `probes-r<M>.json`. |
 | `baseline-ws<N>.md` | verifier (sonnet), at the base SHA | verifier, triage | The brief's commands run before any implementer started. A failure here is pre-existing. |
 | `verifier-r<M>.md` | verifier (sonnet) | reviewers, triage | PASS, FAIL, or CANNOT_RUN with per-command exit codes, output, touched-file analysis, a `## RED run` block and a `## Mutation` line. |
+| `verifier-fix-<k>.md` | verifier (sonnet), via next.py | next.py, triage | Same shape as `verifier-r<M>.md`, for the `coordinator-fix:` commits made after the streams were approved. Commands come from every brief's `## Verification commands`; no RED run. |
+| `mutation-fix-<k>.md` | `mutate.py` | next.py | The mutation gate's report for those `coordinator-fix:` commits. A survivor fails `verifier-fix-<k>.md`. |
 | `mutation-ws<N>-r<M>.md` | `mutate.py` | code reviewer, triage | Per mutant: KILLED, SURVIVED, INVALID, UNCLASSIFIED, NOT RUN or NOT APPLIED. A survivor fails the verifier. |
 | `settled-ws<N>-r<M>.md` | coordinator | review_briefs.py | Settled decisions with accepted consequences, and any step 8a verifier note; `none` when empty. |
 | `briefs/review-r<M>-<axis>.md` | review_briefs.py | reviewer | Brief R for one axis, with settled-ws<N>-r<M>.md copied verbatim. |

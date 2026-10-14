@@ -16,7 +16,8 @@ Use three outcomes. A test failure and an unavailable command require different 
 - `$RUN/implementer-ws<N>-r<M>.md` — the implementer's report. Its `commits:` line lists the commits under test. Confirm that every listed commit belongs to the expected HEAD supplied in your prompt. Parallel workstreams can contribute later commits to that snapshot.
 - `Expected HEAD:` in your prompt — the full SHA after all repository writers in this wave finish. Check it with `git rev-parse HEAD`. A mismatch requires `CANNOT_RUN`.
 - `$RUN/repo.txt` — the absolute repo path, one line.
-- `$RUN/baseline-ws<N>.md` (`baseline-<tag>` naming as for the other reports) — the baseline verifier's result at the base SHA, before any implementer started. A failure it already shows is pre-existing.
+- `$RUN/baseline-ws<N>.md` (always `baseline-ws<N>.md`, with no round suffix) — the baseline verifier's result at the base SHA, before any implementer started. A failure it already shows is pre-existing.
+- Coordinator-fix check — when your prompt says it verifies `coordinator-fix:` commits (`next.py` dispatches this after every stream is approved and before the Codex gate), the commits under test are the `coordinator-fix:` commits after the last verified SHA, not an implementer report's `## Commits`. The commands are the `## Verification commands` of every brief in `$RUN/briefs/` (latest round of each), duplicates removed. Write `$RUN/verifier-fix-<k>.md`; the mutation gate writes `$RUN/mutation-fix-<k>.md`. There is no workstream, no RED hash and no probes file.
 - The RED run and mutation-gate commands your prompt supplies, with this round's RED hash, the base SHA and the commit list. Run them as written. Do not compose your own hashes or flags.
 - `$RUN/probes-ws<N>-r<M>.json` — the implementer's probe patches. The mutation command your prompt supplies already names it when it exists.
 
@@ -40,7 +41,7 @@ When your prompt says it is a baseline check at the base SHA, run the brief's co
 
 Run these after every brief command. Your prompt supplies each command line. They move HEAD or patch files in the shared checkout and put them back, so they run only in the verifier phase, while every repository writer is idle.
 
-1. **RED run** — only when this round has a RED commit. The command is `red_freeze.py` with its run option and this round's RED hash alone: an earlier RED predates this round's tests. It checks the RED commit out in place, runs the targeted tests there and restores the branch. Copy its `RED run <sha>: exit <n>` block, and any `RED_FROZEN`, `RED_CHANGED` or `RED_PASSES` line, verbatim under `## RED run`. Exit 1 is a result to report, not a failure of yours: reviewers judge a changed or passing RED. Exit 2 (for example a dirty tree) is `CANNOT_RUN`.
+1. **RED run** — only when this round has a RED commit. The command is `red_freeze.py` with its run option and this round's RED hash alone: an earlier RED predates this round's tests. It checks the RED commit out in place, runs the targeted tests there and restores the branch. Copy its `RED run <sha>: exit <n>` block, and any `RED_FROZEN`, `RED_CHANGED` or `RED_PASSES` line, verbatim under `## RED run`, with every pasted line prefixed `> ` (a quoted block). Exit 1 is a result to report, not a failure of yours: reviewers judge a changed or passing RED. Exit 2 (for example a dirty tree) is `CANNOT_RUN`.
 2. **Mutation gate** — `mutate.py --commits <the hashes from the implementer report's ## Commits>`, with `--check-cmd` taken from the brief's `check:` line when one exists and `--probes $RUN/probes-ws<N>-r<M>.json` when that file exists. Its test command is the brief's commands that are not pre-existing. Run it only when every such command passed. If one failed, skip it and write `not run — <command> failed` under `## Mutation`. The gate writes `$RUN/mutation-ws<N>-r<M>.md` itself (`mutation-r<M>.md` for one stream): never edit it. Copy its last line, `MUTATION: PASS|FAIL killed=<n> survived=<n> ...`, under `## Mutation`.
 
 Exit 0 is PASS and 1 is FAIL: a surviving mutant or an unapplied probe. Exit 2 (usage) and 3 (dirty tree, interrupted, restore failed) are `CANNOT_RUN`. UNCLASSIFIED and NOT RUN rows are reported in the mutation file and do not fail the gate. Let the gate finish within its own time box; if you must stop it, send SIGTERM so it restores the file it is mutating. A `MUTATION: FAIL` makes `OUTCOME: FAIL`, even though every brief command passed. Never write the survivors up as a note beside `OUTCOME: PASS`: the next phase spawns reviewers on PASS, and a survivor is a test that pins nothing.
@@ -74,11 +75,11 @@ tree: CLEAN | DIRTY | CHANGED | UNCHECKED
 
 <per command, in run order>
 <command> → exit <code> | CANNOT_RUN(<reason>) | TIMEOUT
-<for anything non-zero: the last ~20 lines of output, verbatim, including the test names and the assertion/traceback line>
+<for anything non-zero: the last ~20 lines of output, verbatim, every line prefixed `> `, including the test names and the assertion/traceback line>
 
 ## RED run
 
-<the RED run block, verbatim; or `none — this round has no RED commit`; or `none — baseline check`>
+<the RED run block, verbatim, every line prefixed `> `; or `none — this round has no RED commit`; or `none — baseline check`>
 
 ## Mutation
 
@@ -91,7 +92,11 @@ tree: CLEAN | DIRTY | CHANGED | UNCHECKED
 ## Flaky
 
 <commands that failed once and passed on retry, with both results; or `none`>
+
+OUTCOME: PASS | FAIL | CANNOT_RUN   <- the same line repeated; the last line of the file
 ```
+
+Routing reads the last line that looks like `OUTCOME:`, `VERDICT:` or `status:` (any case, searched from the end of the file). A pasted failure dump can contain `status: 200,` or similar, so quote every pasted output line with `> ` and end the file with the `OUTCOME:` line repeated, so that no pasted text can outrank it.
 
 Outcome definitions:
 

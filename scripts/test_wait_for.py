@@ -549,6 +549,41 @@ def case_file_vanishing_during_diagnosis_still_prints_retry(tmp: Path) -> None:
               f"err={r.stderr.strip()[-200:]!r}")
 
 
+def case_wait_is_importable(tmp: Path) -> None:
+    """next.py waits through the same loop the CLI runs: `wait` returns the exit
+    code and the lines `main` would print, and a bad --baseline is a ValueError."""
+    sys.path.insert(0, str(WAIT_FOR.parent))
+    import wait_for
+    fn = getattr(wait_for, "wait", None)
+    check("wait_for.wait exists", callable(fn), "no `wait` function")
+    if not callable(fn):
+        return
+    done = tmp / "done.md"
+    done.write_text("# R\n\nOUTCOME: PASS\n")
+    code, lines = fn([str(done)], timeout=5, poll=0)
+    check("an importable wait returns 0 and the routing lines",
+          code == 0 and lines == ["done.md: OUTCOME: PASS"], f"{code} {lines}")
+    blocked = tmp / "blocked.md"
+    blocked.write_text("```\nstatus: blocked\n```\n")
+    code, lines = fn([str(blocked)], timeout=5, poll=0)
+    check("an importable wait returns the early exit",
+          code == 1 and lines and lines[0].startswith("EARLY_EXIT blocked.md"),
+          f"{code} {lines}")
+    code, lines = fn([str(tmp / "never.md")], timeout=0, poll=0,
+                     expect=[(str(tmp / "never.md"), "PLAN_FIXED")])
+    retry = [ln for ln in lines if ln.startswith("RETRY: ")]
+    check("a timeout returns 2 with the TIMEOUT and RETRY lines",
+          code == 2 and lines[0].startswith("TIMEOUT after 0s; missing: never.md")
+          and len(retry) == 1 and "--expect" in retry[0], f"{code} {lines}")
+    try:
+        fn([str(done)], timeout=0, poll=0, rewritten=[str(done)],
+           baseline=[(str(done), "soon")])
+        raised = False
+    except ValueError as exc:
+        raised = "not an integer" in str(exc)
+    check("a non-integer baseline raises ValueError", raised, "no ValueError")
+
+
 CASES = [
     case_spec_quote_routes_on_verdict,
     case_outcome_at_top,
@@ -577,6 +612,7 @@ CASES = [
     case_retry_keeps_dash_separator,
     case_empty_file_reason,
     case_file_vanishing_during_diagnosis_still_prints_retry,
+    case_wait_is_importable,
 ]
 
 

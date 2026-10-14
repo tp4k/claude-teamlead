@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from review_briefs import mode, write_briefs
+from review_briefs import TOOLS, mode, write_briefs
 from run_state import AXES, Run
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -119,6 +119,15 @@ class ReviewBriefTests(unittest.TestCase):
         self.assertIn("Workstream: WS-2 (b)", code)
         self.assertIn("$RUN/verifier-ws2-r1.md", code)
         self.assertIn("Output: $RUN/review-ws2-r1-code.md", code)
+
+    def test_tools_no_probe_clones(self) -> None:
+        """The verifier's RED run and mutation report are read, not repeated: a
+        reviewer is never told it may clone the repo to probe it."""
+        self.assertNotIn("clone", TOOLS.lower())
+        self.config("on", "on")
+        write_briefs(self.rundir, 1, 1, TAGS, "abc", "")
+        for brief in sorted(self.briefs.glob("review-r1-*.md")):
+            self.assertNotIn("clone", brief.read_text().lower(), brief.name)
 
     def test_cli_rejects_missing_tag(self) -> None:
         self.config("on", "on")

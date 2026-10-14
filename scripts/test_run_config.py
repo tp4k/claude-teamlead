@@ -3,13 +3,9 @@
 
 Two rules here are worth more than the code that implements them.
 
-The first is the seed. Every run option defaults to off in `paths.DEFAULTS`, so
-a machine with no config file would run with no security review and no perf
-review — and the failure is invisible, because a reviewer that never ran and a
-reviewer that found nothing produce the same silence in the final report. The
-seed is what keeps "everything defaults to off" from meaning "the two reviewers
-you already had are gone". It must therefore fire exactly once, and never touch
-a config the user has since edited.
+The first is the seed. The in-code defaults already enable the specialists
+(`when-needed`), so the seed writes only a comment. It must fire exactly once
+and never touch a config the user has since edited (D15).
 
 The second is the asymmetry between a bad config value and a bad flag. A config
 typo is skipped so the next tier answers; a flag typo stops the run. The reason

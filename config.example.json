@@ -1,6 +1,6 @@
 {
   "_comment": "Copy to $TEAMLEAD_HOME/config.json (default ~/.teamlead/config.json). Every key is optional; scripts/paths.py holds the defaults, so no config file at all is a supported state. Per-repo overrides go in <repo>/.teamlead.json (same shape) and win. A value of the wrong type — or one an option does not admit — is skipped, not fatal: the next tier, then the default, answers instead. The same value passed as a FLAG is fatal, because someone typed it seconds ago and is watching.",
-  "_run_options": "The seven keys below are the run options. `scripts/run_config.py` resolves them per run (card answer > flag > repo config > this file > default) and writes the result to $RUN/config.json. The in-code defaults are codexPlanReview always, securityReview and perfReview when-needed, codexCodeReview on, opusCodeReview fallback, everything else off; the first run on a machine seeds this file with only a comment, so a config you already have is never migrated and wins over these defaults.",
+  "_run_options": "The eight keys below are the run options. `scripts/run_config.py` resolves them per run (card answer > flag > repo config > this file > default) and writes the result to $RUN/config.json. The in-code defaults are codexPlanReview always, securityReview and perfReview when-needed, codexCodeReview on, opusCodeReview fallback, everything else off; the first run on a machine seeds this file with only a comment, so a config you already have is never migrated and wins over these defaults.",
 
   "_codexPlanReview": "off | hard | always. Codex reviews the plan's DESIGN before any code exists — decomposition, task fit, acceptance quality, design fit, failure modes (restart, cold start, abort, retry, degraded dependency, what each metric counts). `hard` runs it only when the planner returns complex=yes (3+ workstreams or any L stream). A design defect costs a paragraph here and a whole implementation round later. Needs a saved Codex CLI login; when Codex cannot run, the run says so and continues.",
   "codexPlanReview": "always",
@@ -17,10 +17,10 @@
   "_perfReview": "off | when-needed | on. Exactly as securityReview, against the planner's `hot path:` tag.",
   "perfReview": "when-needed",
 
-  "_codexCodeReview": "off | on. On a clean finish, end the run with the /teamlead:codex-review one-liner for the finished diff. It is offered rather than run: that review is its own 10–20 minute loop with its own findings triage.",
+  "_codexCodeReview": "off | on. `on` (default) runs the in-loop Codex final gate after the streams are approved: review_package.py builds the package, run_codex_review.py --artifact-stem codex-gate runs it, triage goes in triage-gate-r<K>.md, and gate rework counts against reworkCap. `off` skips the gate and the run closes.",
   "codexCodeReview": "on",
 
-  "_opusCodeReview": "off | fallback. When /teamlead:codex-review cannot run Codex (not installed, no login, runner error, timeout), the bundled teamlead:code-reviewer agent reviews the same package instead of the review stopping. Read by review_package.py at packaging time, so the choice is made before the wait; `--opus-code-review=<v>` on /teamlead:codex-review overrides it. The ledger names the reviewer — an Opus review shares a model family with the implementers and is not the cross-vendor read Codex gives.",
+  "_opusCodeReview": "off | fallback. When /teamlead:codex-review cannot run Codex (not installed, no login, runner error, timeout), the bundled teamlead:code-reviewer agent reviews the same package instead of the review stopping. Read by review_package.py at packaging time, so the choice is made before the wait; `--opus-code-review=<v>` on /teamlead:codex-review overrides it. The in-loop gate reads the same key when Codex cannot run, and `off` there halts the run. The ledger names the reviewer — an Opus review shares a model family with the implementers and is not the cross-vendor read Codex gives.",
   "opusCodeReview": "fallback",
 
   "_adr": "off | on. Write an ADR for decisions that pass the 3-part test (hard to reverse AND surprising without context AND a real trade-off). Reading ADRs is always on and needs no setting.",

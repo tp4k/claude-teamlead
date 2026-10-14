@@ -40,6 +40,7 @@ OPTION_KEYS: tuple[str, ...] = (
     "securityReview",
     "perfReview",
     "codexCodeReview",
+    "opusCodeReview",
     "adr",
 )
 

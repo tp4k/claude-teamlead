@@ -310,6 +310,25 @@ def case_fix_round_with_new_paths_revalidates(tmp: Path) -> None:
            "7", "FRESH sonnet implementer", 0)
 
 
+def case_pass_two_cut_is_logged_not_asked(tmp: Path) -> None:
+    """Pass 2 asks nothing: a `Smaller:` cut it names first is logged to
+    decisions-log.md and the run goes on to dispatch, never back to the relay."""
+    fixed = PLAN + "\n## Fix log\nclaim → fix\nPLAN_FIXED fixed=1 new_paths=yes\n"
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": fixed, "questions.md": ANSWERED,
+                      "plan-validation.md": SCOPE_CUT,
+                      "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(run / "plan-validation.md", run / "plan.md")
+    expect("a cut first named by validator pass 2 → dispatch, not the relay", run,
+           "7", "FRESH sonnet implementer", 0)
+    log = run / "decisions-log.md"
+    text = log.read_text() if log.exists() else ""
+    check("…and the cut is in decisions-log.md", "fold WS-2 into WS-1" in text, text)
+    state(run)
+    again = log.read_text() if log.exists() else ""
+    check("…once however often the state is read",
+          again.count("fold WS-2 into WS-1") == 1, again)
+
+
 def case_validator_findings_fold_into_the_one_round(tmp: Path) -> None:
     """The validator's PLAN_NEEDS_FIX and the user's changed answer are one Fix
     round, not two: the round the answer owes names the findings too."""
@@ -1091,6 +1110,7 @@ CASES = [
     case_fix_log_present_moves_on,
     case_design_fix_log_does_not_answer_the_validator,
     case_fix_round_with_new_paths_revalidates,
+    case_pass_two_cut_is_logged_not_asked,
     case_validator_findings_fold_into_the_one_round,
     case_scope_cut_gets_its_own_card,
     case_smaller_none_is_not_a_decision,

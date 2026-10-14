@@ -484,6 +484,43 @@ def case_verifier_spawn_carries_red_run(tmp: Path) -> None:
           and f"--commits {red2} {green2}" in p, r.detail())
 
 
+def case_baseline_failures_leave_the_mutation_gate(tmp: Path) -> None:
+    """A command that already fails at the base kills every mutant, so the gate
+    would report PASS over nothing: it must not be in mutate.py's --cmd."""
+    w = World(tmp)
+    w.pin_base()
+    w.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: FAIL\n\n## Commands\n\n"
+          "python3 -m unittest discover → exit 1\nruff check . → exit 0\n")
+    w.report(1, 1, [w.commit("work")])
+    r = w.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    mutate = next((ln for ln in p.splitlines() if "mutate.py" in ln), "")
+    check("a baseline-failing command is absent from mutate.py --cmd, the passing "
+          "one stays", "--cmd 'ruff check .'" in mutate and "unittest" not in mutate,
+          r.detail())
+    check("the mutation step waits for the commands that are not pre-existing",
+          "not pre-existing" in p, p)
+
+    w2 = World(tmp / "clean")
+    w2.pin_base()
+    w2.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: PASS\n\n## Commands\n"
+           "\npython3 -m unittest discover → exit 0\nruff check . → exit 0\n")
+    w2.report(1, 1, [w2.commit("work")])
+    r = w2.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    check("a clean baseline leaves the whole command joined",
+          "--cmd 'python3 -m unittest discover && ruff check .'" in p, r.detail())
+
+    w3 = World(tmp / "allfail")
+    w3.pin_base()
+    w3.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: FAIL\n\n## Commands\n"
+           "\npython3 -m unittest discover → exit 1\nruff check . → exit 2\n")
+    w3.report(1, 1, [w3.commit("work")])
+    r = w3.step()
+    check("every command failing at the base leaves nothing to kill mutants → halt",
+          r.code == 1 and "halt:" in r.out and not r.kinds(), r.detail())
+
+
 def case_implementer_and_reviewer_prompts_have_no_run(tmp: Path) -> None:
     w = World(tmp, securityReview="on")
     w.pin_base()
@@ -617,14 +654,24 @@ def case_barrier_orders_stages(tmp: Path) -> None:
     w.report(2, 1, [b])
     r = w.step()
     prompts = r.prompts("teamlead:verifier")
-    ok = (len(prompts) == 2 and f"Expected HEAD: {w.head()}" in prompts[0]
-          and f"Expected HEAD: {w.head()}" in prompts[1]
+    ok = (r.kinds() == ["teamlead:verifier"]
+          and f"Expected HEAD: {w.head()}" in prompts[0]
           and "verifier-ws1-r1.md" in prompts[0]
-          and "verifier-ws2-r1.md" in prompts[1]
-          and f"--commits {a}" in prompts[0] and f"--commits {b}" in prompts[1]
-          and f"--commits {a} {b}" not in r.out)
-    check("every writer done → both verifiers in one batch at one HEAD, each "
-          "mutating only its own commits", ok, r.detail())
+          and f"--commits {a}" in prompts[0] and f"--commits {a} {b}" not in r.out)
+    check("every writer done → ONE verifier (WS-1's), at HEAD, mutating only its "
+          "own commits: in-place gates move HEAD, so they never run side by side",
+          ok, r.detail())
+
+    w.verifier(1, 1)
+    w.mutation(1, 1)
+    r = w.step()
+    prompts = r.prompts("teamlead:verifier")
+    ok = (r.kinds() == ["teamlead:verifier"]
+          and f"Expected HEAD: {w.head()}" in prompts[0]
+          and "verifier-ws2-r1.md" in prompts[0]
+          and f"--commits {b}" in prompts[0] and f"--commits {a} {b}" not in r.out)
+    check("WS-1's gate landed → the next call prints WS-2's verifier alone", ok,
+          r.detail())
 
     for ws in (1, 2):
         w.verifier(ws, 1)
@@ -701,6 +748,17 @@ def case_needs_decision_logged(tmp: Path) -> None:
     check("NEEDS_DECISION beside a rework brief → routed as NEEDS_REWORK",
           r.code == 0 and r.kinds() == ["teamlead:implementer"]
           and "use half-even" in w2.read("decisions-log.md"), r.detail())
+
+    w3 = World(tmp / "docs")
+    w3.pin_base()
+    w3.finished_round(1, 1, "NEEDS_DECISION")
+    w3.put("triage-r1.md", "# Triage\n\nrecommended: reword the README row\n\n"
+           "VERDICT: NEEDS_DECISION decisions=1 docs_only=yes\n")
+    w3.put("briefs/docs-ws1-r1.md", "# Docs fix\n")
+    r = w3.step()
+    check("NEEDS_DECISION beside a docs brief → the writer, decision logged",
+          r.code == 0 and r.kinds() == ["teamlead:writer"]
+          and "reword the README row" in w3.read("decisions-log.md"), r.detail())
 
 
 def case_docs_only_routes_to_writer(tmp: Path) -> None:
@@ -1090,6 +1148,7 @@ CASES = [
     case_dependent_stream_waits,
     case_commits_checked_before_verifier,
     case_verifier_spawn_carries_red_run,
+    case_baseline_failures_leave_the_mutation_gate,
     case_implementer_and_reviewer_prompts_have_no_run,
     case_mutation_fail_routes_to_rework,
     case_pass_routes_to_reviewers,

@@ -10,6 +10,8 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/review_package.py *), 
 
 `$PLUGIN` is the plugin root, two levels above this skill's directory. Substitute its absolute path in commands. Literal placeholders may reach Bash without expansion.
 
+`/teamlead:delegate` already runs this review as its in-loop final gate (`codexCodeReview=on`, the default), with the same Codex-first, Opus-fallback order, and folds its findings into rework rounds before the run closes. Run this skill standalone for a run that skipped the gate, for pasted findings, and to follow up the out-of-scope rows you pick.
+
 Perform the four steps below in order. Codex performs the initial review. If enabled, the fallback agent performs it when Codex cannot run. The coordinator triages findings and must reject them only with evidence.
 
 ## 1. Build the package

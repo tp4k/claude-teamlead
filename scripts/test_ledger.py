@@ -28,6 +28,8 @@ NEW = [
     "| 2026-10-14 | new | second | why | triage |",
 ]
 TAIL = "\nOther notes\n"
+LONG_RUN = 5000
+LONG_LINE_TIMEOUT = 10
 
 results: list[tuple[str, bool, str]] = []
 
@@ -111,6 +113,63 @@ def case_existing_lines_byte_identical(root: Path) -> None:
         )
 
 
+def case_existing_lines_byte_identical_crlf(root: Path) -> None:
+    name = run_name_for(4, 5)
+    text = (HEAD + "\n".join(OLD) + "\n" + TAIL).replace("\n", "\r\n")
+    _, ledger = apply(root, name, NEW, text)
+    got = ledger.read_bytes()
+    new_lines = [r.encode() for r in NEW]
+    lines = got.splitlines(keepends=True)
+    stripped = b"".join(ln for ln in lines if ln.rstrip(b"\r\n") not in new_lines)
+    record(
+        "existing bytes unchanged (crlf)",
+        stripped == text.encode() and all(r + b"\r\n" in got for r in new_lines),
+        f"got={got!r}",
+    )
+
+
+def case_long_near_miss_line_above_table(root: Path) -> None:
+    name = run_name_for(4, 5)
+    long_line = "|" + "-" * LONG_RUN + "x"
+    head = f"# Deferred work\n\n{long_line}\n\n{COLS}\n|---|---|---|---|---|\n"
+    run = root / name
+    run.mkdir()
+    (run / "deferred-rows.md").write_text("\n".join(NEW) + "\n")
+    ledger = root / "docs" / "deferred-work.md"
+    ledger.parent.mkdir()
+    ledger.write_text(head + "\n".join(OLD) + "\n")
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "apply", str(run), "--ledger", str(ledger)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=LONG_LINE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        record("long near-miss line above the table", False, "timed out")
+        return
+    want = head + "\n".join(expected(OLD, NEW, name)) + "\n"
+    got = ledger.read_text()
+    record(
+        "long near-miss line above the table: fast, unchanged, not a separator",
+        proc.returncode == 0 and got == want,
+        f"rc={proc.returncode} err={proc.stderr!r} got_tail={got[-300:]!r}",
+    )
+
+
+def case_ledger_without_table(root: Path) -> None:
+    original = "# Deferred work\n\nnote\n"
+    proc, ledger = apply(root, run_name_for(0, 0), NEW[:1], original)
+    record(
+        "ledger without a table separator: exit 2, no write",
+        proc.returncode == 2
+        and "no table separator" in proc.stderr
+        and ledger.read_bytes() == original.encode(),
+        f"rc={proc.returncode} err={proc.stderr!r} got={ledger.read_bytes()!r}",
+    )
+
+
 def case_deterministic(root: Path) -> None:
     name = run_name_for(2, 3)
     outs = []
@@ -177,6 +236,9 @@ def case_no_rows_no_write(root: Path) -> None:
 CASES = [
     case_gap_index_from_hash,
     case_existing_lines_byte_identical,
+    case_existing_lines_byte_identical_crlf,
+    case_long_near_miss_line_above_table,
+    case_ledger_without_table,
     case_deterministic,
     case_multiple_rows_sequential,
     case_creates_missing_ledger,

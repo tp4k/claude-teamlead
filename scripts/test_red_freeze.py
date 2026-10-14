@@ -287,10 +287,11 @@ def case_run_leaves_the_repo_alone(tmp: Path) -> None:
     red = repo.red()
     repo.write("src/limit.py", "def hit(**kw):\n    return Resp(429)\n")
     repo.commit("green")
-    run(repo, red, cmd=f"{CHECK_CMD}; echo junk > stray.txt")
+    run(repo, red, cmd=f"{CHECK_CMD}; echo junk >> src/limit.py")
     status = repo.git("status", "--porcelain")
-    check("--run works in an export: the repo's tree and status are untouched",
-          status == "" and not (repo.root / "stray.txt").exists(), status)
+    check("--run restores a clean tree even if the command edits a tracked file",
+          status == "" and "junk" not in (repo.root / "src/limit.py").read_text(),
+          status)
 
 
 def case_run_sees_untracked_deps(tmp: Path) -> None:

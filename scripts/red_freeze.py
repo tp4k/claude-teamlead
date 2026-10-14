@@ -22,8 +22,9 @@ line (exit 1). A bad revision, or a RED commit that is not an ancestor of
 `--head`, is a usage error (exit 2). A RED commit touching a file that does not
 look like a test is a `note:`, not a failure — the reviewer judges that one.
 
-`--run "<test command>"` also runs that command in a clean export of each RED
-commit and prints `RED run <sha>: exit <n>` with the output's tail. That is the
+`--run "<test command>"` also runs that command with each RED commit checked
+out in place — so the worktree's untracked dependencies (node_modules, a venv)
+are there — and prints `RED run <sha>: exit <n>` with the output's tail. That is the
 failure the report's `red:` lines quote: a report written after GREEN has only
 HEAD's and the probes' output at hand, and quotes one of those instead. A RED
 run that exits 0 is `RED_PASSES <sha>` (exit 1) — tests green on arrival. Only
@@ -32,20 +33,21 @@ it shows as a `red:` line with no matching failure in the block — unless
 the block opens with `(... N earlier lines omitted)`, when the failure may sit
 above the tail and the reviewer reruns the command to see it. Every RED
 given gets the same command, so on a rework round pass `--run` this round's RED
-alone — an earlier RED predates this round's tests. The export holds tracked
-files only, so the command must work from a fresh clone.
+alone — an earlier RED predates this round's tests. `--run` needs a tree with no
+tracked changes (exit 2 otherwise, nothing checked out) and puts the branch and
+HEAD back afterwards, also on SIGINT/SIGTERM. It moves HEAD, so only the
+verifier runs it, while every repository writer is idle; the implementer and
+the reviewers run the freeze check without `--run`.
 
 No dependencies beyond git, for the same reason as the rest of `scripts/`.
 """
 from __future__ import annotations
 
 import argparse
-import io
 import re
+import signal
 import subprocess
 import sys
-import tarfile
-import tempfile
 from collections import Counter
 
 TEST_PATH = re.compile(
@@ -122,21 +124,34 @@ def check(repo: str, head: str, reds: list[str]) -> tuple[list[str], list[str], 
 TAIL = 200
 
 
+def _raise_exit(signum: int, _frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
 def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
-    """Run `cmd` in an export of `red`; return (exit code, output tail)."""
-    tar = subprocess.run(["git", "-C", repo, "archive", "--format=tar", red],
-                         capture_output=True)
-    if tar.returncode != 0:
-        raise GitError(f"git archive {red}: {tar.stderr.decode().strip()}")
-    with tempfile.TemporaryDirectory() as tree:
-        with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as tf:
-            # The data filter exists from 3.9.17/3.12; older 3.9s extract as before.
-            if hasattr(tarfile, "data_filter"):
-                tf.extractall(tree, filter="data")
-            else:
-                tf.extractall(tree)
-        proc = subprocess.run(cmd, shell=True, cwd=tree, text=True,
+    """Run `cmd` on `red` checked out in place; return (exit code, output tail).
+
+    The tree must have no tracked changes. HEAD goes back to the branch (or the
+    detached commit) it was on, also on SIGINT/SIGTERM and when `cmd` fails.
+    """
+    if git(repo, "status", "--porcelain", "--untracked-files=no").strip():
+        raise GitError("the working tree must be clean for --run "
+                       "(commit or stash tracked changes first)")
+    sha = git(repo, "rev-parse", "--verify", f"{red}^{{commit}}").strip()
+    branch = git(repo, "branch", "--show-current").strip()
+    origin = branch or git(repo, "rev-parse", "HEAD").strip()
+    old = {s: signal.signal(s, _raise_exit)
+           for s in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        git(repo, "checkout", "-q", "--detach", sha)
+        proc = subprocess.run(cmd, shell=True, cwd=repo, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    finally:
+        # -f drops edits the command made to tracked files; the tree was clean.
+        back = ["checkout", "-q", "-f", *([] if branch else ["--detach"]), origin]
+        git(repo, *back)
+        for s, handler in old.items():
+            signal.signal(s, handler)
     lines = proc.stdout.rstrip("\n").splitlines()
     if len(lines) > TAIL:
         cut = len(lines) - TAIL
@@ -151,7 +166,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--repo", default=".")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--run", metavar="CMD",
-                    help="test command to run in an export of each RED commit")
+                    help="test command to run on each RED commit, checked out "
+                    "in place")
     ap.add_argument("reds", nargs="+", metavar="red-commit")
     args = ap.parse_args(argv)
     runs: list[tuple[str, int, str]] = []

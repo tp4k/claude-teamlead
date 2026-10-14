@@ -1083,7 +1083,134 @@ def case_a_base_equal_to_the_reviewed_head_is_the_iteration(tmp: Path) -> None:
     )
 
 
+TRIAGE_R1 = """# Triage — round 1
+
+Verdict: APPROVED_WITH_NOTES
+
+## Rows
+| Sev | Location | Req/Concern (reviewers) | Problem → Fix |
+| HIGH | x.py:1 | LEAKED-ROW-TEXT | fix it |
+
+## Demoted to Notes
+rename the helper — spec growth (a.py:3)
+split the module in two — out of scope (b.py:9)
+
+## Notes for the user
+the rework cap was one round from firing
+
+## Re-review set
+code: re-run — always
+"""
+TRIAGE_R2 = """# Triage — round 2
+
+Verdict: APPROVED
+
+## Rows
+none
+
+## Demoted to Notes
+cache the parse — premature (c.py:7)
+
+## Notes for the user
+none
+"""
+TRIAGE_NONE = """# Triage — round 1
+
+Verdict: APPROVED
+
+## Demoted to Notes
+none
+
+## Notes for the user
+none
+"""
+DEMOTED_LINES = (
+    "rename the helper — spec growth (a.py:3)",
+    "split the module in two — out of scope (b.py:9)",
+    "cache the parse — premature (c.py:7)",
+    "the rework cap was one round from firing",
+)
+REJUDGE_HEADING = "## Notes to re-judge"
+
+
+def case_gate_lenses_in_rubric(tmp: Path) -> None:
+    _, run, base = scaffold(tmp, None)
+    out, _ = package(tmp, run, base)
+    prompt = (out / "PROMPT.md").read_text()
+    check(
+        "the rubric lists both gate lenses as checks 5 and 6 and counts six",
+        "5. **Simplicity, duplication and test bloat.**" in prompt
+        and "6. **Docs, deferred-work rows and PR body" in prompt
+        and "one line for each of the six checks" in prompt
+        and "four checks" not in prompt,
+        prompt[prompt.find("## What to check"):][:300],
+    )
+
+
+def case_notes_to_rejudge(tmp: Path) -> None:
+    _, run, base = scaffold(tmp, None)
+    (run / "triage-r1.md").write_text(TRIAGE_R1)
+    (run / "triage-ws2-r2.md").write_text(TRIAGE_R2)
+    out, _ = package(tmp, run, base)
+    prompt = (out / "PROMPT.md").read_text()
+    section = prompt.split(REJUDGE_HEADING, 1)[-1]
+    check(
+        "every demoted row and Note of every triage file is quoted, nothing else",
+        REJUDGE_HEADING in prompt
+        and all(line in section for line in DEMOTED_LINES)
+        and "LEAKED-ROW-TEXT" not in prompt,
+        f"section={section[:500]!r}",
+    )
+
+
+def case_no_triage_no_section(tmp: Path) -> None:
+    _, run, base = scaffold(tmp, None)
+    out, proc = package(tmp, run, base)
+    before = (out / "PROMPT.md").read_text()
+    (run / "triage-r1.md").write_text(TRIAGE_NONE)
+    out2, proc2 = package(tmp, run, base)
+    after = (out2 / "PROMPT.md").read_text()
+    check(
+        "no triage file, or one whose Notes are all `none`, builds no re-judge section",
+        proc.returncode == 0
+        and proc2.returncode == 0
+        and REJUDGE_HEADING not in before
+        and REJUDGE_HEADING not in after,
+        f"rc={proc.returncode},{proc2.returncode} err={proc.stderr[-200:]}",
+    )
+
+
+def case_deferred_rows_listed(tmp: Path) -> None:
+    _, run, base = scaffold(tmp, None)
+    (run / "deferred-rows.md").write_text("| 2026-1-1 | tidy the retry loop |\n")
+    out, _ = package(tmp, run, base)
+    prompt = (out / "PROMPT.md").read_text()
+    check(
+        "deferred-rows.md rows are quoted for the docs lens to check against HEAD",
+        "| 2026-1-1 | tidy the retry loop |" in prompt,
+        prompt[-400:],
+    )
+
+
+def case_the_review_is_against_the_final_head(tmp: Path) -> None:
+    repo, run, base = scaffold(tmp, None)
+    head = git(repo, "rev-parse", "HEAD").strip()
+    out, _ = package(tmp, run, base)
+    prompt = (out / "PROMPT.md").read_text()
+    claim = next((ln for ln in prompt.splitlines() if "final HEAD" in ln), "")
+    check(
+        "the prompt states the review is against the final HEAD, by its SHA",
+        head in claim and base not in claim,
+        f"claim={claim!r}",
+    )
+
+
 CASES = [
+    case_gate_lenses_in_rubric,
+    case_notes_to_rejudge,
+    case_no_triage_no_section,
+    case_deferred_rows_listed,
+    case_the_review_is_against_the_final_head,
     case_a_quoted_header_line_does_not_move_the_base,
     case_a_base_equal_to_the_reviewed_head_is_the_iteration,
     case_followup_base_is_the_reviewed_head,

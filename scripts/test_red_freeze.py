@@ -308,8 +308,9 @@ def case_run_sees_untracked_deps(tmp: Path) -> None:
     code, out = run(repo, red, cmd=CHECK_CMD)
     check("--run sees an ignored, untracked dependency directory of the worktree",
           f"RED run {red[:9]}: exit 1" in out and "dep says installed" in out
-          and "expected 429, got NotImplementedError" in out
-          and (repo.root / "notes.txt").read_text() == "scratch", out)
+          and "expected 429, got NotImplementedError" in out, out)
+    check("an untracked, non-ignored file does not block --run and survives it",
+          code == 0 and (repo.root / "notes.txt").read_text() == "scratch", out)
 
 
 def case_run_restores_branch_and_head(tmp: Path) -> None:

@@ -128,6 +128,32 @@ def case_existing_lines_byte_identical_crlf(root: Path) -> None:
     )
 
 
+def case_crlf_without_trailing_newline(root: Path) -> None:
+    name = run_name_for(4, 5)
+    text = (HEAD + "\n".join(OLD)).replace("\n", "\r\n")
+    _, ledger = apply(root, name, NEW, text)
+    want = (HEAD + "\n".join(expected(OLD, NEW, name))).replace("\n", "\r\n")
+    got = ledger.read_bytes()
+    record(
+        "crlf ledger without trailing newline: new row joined with crlf",
+        got == want.encode(),
+        f"got={got!r}",
+    )
+
+
+def case_dashless_pipe_line_is_not_separator(root: Path) -> None:
+    name = run_name_for(4, 5)
+    head = f"# Deferred work\n\n|:|\n\n{COLS}\n|---|---|---|---|---|\n"
+    _, ledger = apply(root, name, NEW, head + "\n".join(OLD) + "\n")
+    want = head + "\n".join(expected(OLD, NEW, name)) + "\n"
+    got = ledger.read_text()
+    record(
+        "a pipe line without a --- run is not the table separator",
+        got == want,
+        f"got={got!r}",
+    )
+
+
 def case_long_near_miss_line_above_table(root: Path) -> None:
     name = run_name_for(4, 5)
     long_line = "|" + "-" * LONG_RUN + "x"
@@ -237,6 +263,8 @@ CASES = [
     case_gap_index_from_hash,
     case_existing_lines_byte_identical,
     case_existing_lines_byte_identical_crlf,
+    case_crlf_without_trailing_newline,
+    case_dashless_pipe_line_is_not_separator,
     case_long_near_miss_line_above_table,
     case_ledger_without_table,
     case_deterministic,

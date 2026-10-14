@@ -30,26 +30,25 @@ PLAN_REVIEW_AXES: tuple[str, ...] = (
     "task-fit",
     "acceptance",
     "design-fit",
+    "failure-modes",
 )
 
-# Every run option defaults to "off". A run with no config and no flags is the
-# plain loop this plugin started as, and a reader of config.json never has to
-# know which keys are secretly on: absence means off, everywhere, for all of
-# them. The two reviewers that predate this rule are restored by the config the
-# first run seeds (`run_config.py`), not by a special case here — a special case
-# is exactly the thing that makes the other twelve keys unreadable.
+# The defaults are the behaviour a run has with no config and no flags: Codex
+# reviews the plan, the specialists review only where the planner tagged a risk,
+# and the final gate runs Codex with the bundled Opus reviewer as its fallback.
+# Everything else is off. Existing user configs are not migrated; they win.
 DEFAULTS: dict[str, object] = {
     "reworkCap": 3,
     "maxAgeDays": 30,
     "keepLastPerRepo": 5,
     "scopeFence": True,
-    "codexPlanReview": "off",
+    "codexPlanReview": "always",
     "opusPlanReview": "off",
     "humanReadablePlan": "off",
-    "securityReview": "off",
-    "perfReview": "off",
-    "codexCodeReview": "off",
-    "opusCodeReview": "off",
+    "securityReview": "when-needed",
+    "perfReview": "when-needed",
+    "codexCodeReview": "on",
+    "opusCodeReview": "fallback",
     "adr": "off",
     "planValidatorPasses": 1,
     "codexPlanReviewAxes": PLAN_REVIEW_AXES,

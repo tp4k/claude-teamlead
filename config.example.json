@@ -1,9 +1,9 @@
 {
   "_comment": "Copy to $TEAMLEAD_HOME/config.json (default ~/.teamlead/config.json). Every key is optional; scripts/paths.py holds the defaults, so no config file at all is a supported state. Per-repo overrides go in <repo>/.teamlead.json (same shape) and win. A value of the wrong type — or one an option does not admit — is skipped, not fatal: the next tier, then the default, answers instead. The same value passed as a FLAG is fatal, because someone typed it seconds ago and is watching.",
-  "_run_options": "The seven keys below are the run options. `scripts/run_config.py` resolves them per run (card answer > flag > repo config > this file > default) and writes the result to $RUN/config.json. Every in-code default is `off`; the first run on a machine seeds this file with securityReview and perfReview set to `on`, so the reviewers you already had do not disappear the day the options arrive.",
+  "_run_options": "The seven keys below are the run options. `scripts/run_config.py` resolves them per run (card answer > flag > repo config > this file > default) and writes the result to $RUN/config.json. The in-code defaults are codexPlanReview always, securityReview and perfReview when-needed, codexCodeReview on, opusCodeReview fallback, everything else off; the first run on a machine seeds this file with only a comment, so a config you already have is never migrated and wins over these defaults.",
 
-  "_codexPlanReview": "off | hard | always. Codex reviews the plan's DESIGN before any code exists — decomposition, task fit, acceptance quality, design fit. `hard` runs it only when the planner returns complex=yes (3+ workstreams or any L stream). A design defect costs a paragraph here and a whole implementation round later. Needs a saved Codex CLI login; when Codex cannot run, the run says so and continues.",
-  "codexPlanReview": "off",
+  "_codexPlanReview": "off | hard | always. Codex reviews the plan's DESIGN before any code exists — decomposition, task fit, acceptance quality, design fit, failure modes (restart, cold start, abort, retry, degraded dependency, what each metric counts). `hard` runs it only when the planner returns complex=yes (3+ workstreams or any L stream). A design defect costs a paragraph here and a whole implementation round later. Needs a saved Codex CLI login; when Codex cannot run, the run says so and continues.",
+  "codexPlanReview": "always",
 
   "_opusPlanReview": "off | fallback | always. The same design review by the bundled teamlead:plan-reviewer agent. `fallback` runs it only when a wanted Codex review could not happen (no login, runner error, timeout) — the failure it exists to prevent is a design review that silently did not occur, since the run continues either way. `always` runs both: a row two independent reviews raise is the cheapest proof a plan is wrong.",
   "opusPlanReview": "off",
@@ -12,16 +12,16 @@
   "humanReadablePlan": "off",
 
   "_securityReview": "off | when-needed | on. `on` is the historical behaviour: the reviewer runs on every workstream, full on opus where the planner tagged `attacker-controlled input: yes`, a bounded sonnet sanity pass where it tagged `no`. `when-needed` skips the `no` streams entirely. That rests on the tag being binding, so it is promoted back to `on` automatically whenever scopeFence is false.",
-  "securityReview": "on",
+  "securityReview": "when-needed",
 
   "_perfReview": "off | when-needed | on. Exactly as securityReview, against the planner's `hot path:` tag.",
-  "perfReview": "on",
+  "perfReview": "when-needed",
 
   "_codexCodeReview": "off | on. On a clean finish, end the run with the /teamlead:codex-review one-liner for the finished diff. It is offered rather than run: that review is its own 10–20 minute loop with its own findings triage.",
-  "codexCodeReview": "off",
+  "codexCodeReview": "on",
 
   "_opusCodeReview": "off | fallback. When /teamlead:codex-review cannot run Codex (not installed, no login, runner error, timeout), the bundled teamlead:code-reviewer agent reviews the same package instead of the review stopping. Read by review_package.py at packaging time, so the choice is made before the wait; `--opus-code-review=<v>` on /teamlead:codex-review overrides it. The ledger names the reviewer — an Opus review shares a model family with the implementers and is not the cross-vendor read Codex gives.",
-  "opusCodeReview": "off",
+  "opusCodeReview": "fallback",
 
   "_adr": "off | on. Write an ADR for decisions that pass the 3-part test (hard to reverse AND surprising without context AND a real trade-off). Reading ADRs is always on and needs no setting.",
   "adr": "off",
@@ -29,8 +29,8 @@
   "_planValidatorPasses": "How many plan-validation passes a run gets. Default 1 — the validator now runs after the plan is final, so a second pass only pays when new paths appeared in a fix round.",
   "planValidatorPasses": 1,
 
-  "_codexPlanReviewAxes": "Which axes the Codex plan review grades. Default: all four. Narrow it only with a reason — an axis nobody grades is a class of defect nobody catches.",
-  "codexPlanReviewAxes": ["decomposition", "task-fit", "acceptance", "design-fit"],
+  "_codexPlanReviewAxes": "Which axes the Codex plan review grades. Default: all five. Narrow it only with a reason — an axis nobody grades is a class of defect nobody catches.",
+  "codexPlanReviewAxes": ["decomposition", "task-fit", "acceptance", "design-fit", "failure-modes"],
 
   "_adrPath": "Root of your ADR store. If absent or its directory is missing, teamlead falls back to <cwd>/docs/adr, then skips ADRs entirely. See references/adr-workflow.md.",
   "adrPath": "/absolute/path/to/your/adr-repo",

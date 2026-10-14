@@ -72,10 +72,9 @@ BARE_FLAGS: dict[str, tuple[str, str]] = {
 MODE_FLAGS: tuple[str, ...] = ("--use-config-options", "--autopilot")
 
 SEED_NOTE = (
-    "Seeded by teamlead on its first run. Every option defaults to off in code "
-    "(scripts/paths.py), so these two lines are what keep the security and "
-    "performance reviews running the way they did before options existed. Edit "
-    "or delete them freely; see the plugin's config.example.json for every key."
+    "Seeded by teamlead on its first run. Every option has a default in code "
+    "(scripts/paths.py), so this file only needs the keys you want to change. "
+    "See the plugin's config.example.json for every key."
 )
 
 
@@ -195,7 +194,7 @@ def seed_global_config() -> Path | None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
             json.dumps(
-                {"_comment": SEED_NOTE, "securityReview": "on", "perfReview": "on"},
+                {"_comment": SEED_NOTE},
                 indent=2,
             )
             + "\n",
@@ -203,7 +202,7 @@ def seed_global_config() -> Path | None:
         )
     except OSError:
         # A home that cannot be written is a machine where every run works
-        # anyway, just with everything off. Reporting that beats failing here.
+        # anyway, on the in-code defaults. Reporting that beats failing here.
         return None
     return target
 
@@ -269,7 +268,7 @@ def render(
 ) -> str:
     lines: list[str] = []
     if seeded is not None:
-        lines.append(f"seeded {seeded} — security and perf reviews stay on")
+        lines.append(f"seeded {seeded} — in-code defaults apply until you add keys")
         lines.append("")
     lines.append("option                 value        set by")
     lines.append("---------------------- ------------ " + "-" * 34)

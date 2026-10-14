@@ -16,12 +16,15 @@ Mutants, in run order:
   * probes — `--probes` is a JSON list of {"probe", "file", "old", "new"}: the
     implementer's concrete patch per brief `probe:` line. `old` is replaced once,
     verbatim. An `old` absent from the file is NOT APPLIED and fails the gate,
-    because an unapplied probe measures nothing. Probes do not count against
-    `--max-generic`.
+    because an unapplied probe measures nothing. `file` must be a tracked regular
+    file (not a symlink, not untracked or ignored) inside the repo, or the run is
+    a usage error. Probes do not count against `--max-generic`.
   * generic — text ops on this stream's changed lines only: delete the line,
     flip `==`/`!=`, `<`/`<=`, `&&`/`||`, `true`/`false`, drop `return`, drop
-    `await`. Blank lines, comment-only lines and test files are skipped. They are
-    sampled by sha256 of `file:line` (stable across runs and machines), at most
+    `await`. Blank lines, comment-only lines, bare-string/docstring lines in `.py`
+    files, files ending `.md`/`.markdown`/`.rst`, test files, and paths that are
+    not tracked regular files inside the repo are skipped. They are sampled by
+    sha256 of `file:line` (stable across runs and machines), at most
     `--max-generic` of them.
 
 Stream scope: parallel implementers share one tree, so candidates are the lines
@@ -40,7 +43,8 @@ The last stdout line is
 `MUTATION: PASS|FAIL killed=<n> survived=<n> invalid=<n> unclassified=<n>
 not_run=<n> not_applied=<n>` on one line.
 Exit 0 PASS, 1 FAIL (any survivor or unapplied probe), 2 usage error (including
-neither or both of `--commits` / `--files`), 3 cannot run (dirty tree at start,
+neither or both of `--commits` / `--files`, or a probe file that is not a
+tracked regular file), 3 cannot run (dirty tree at start,
 restore failed, interrupted, or a dirty tree at the end). SIGTERM and SIGINT
 restore the file being mutated before exiting.
 
@@ -167,10 +171,14 @@ def docstring_lines(text: str) -> set[int]:
 def tracked_regular_file(repo: str, rel: str) -> bool:
     """`rel` is a tracked regular file that resolves inside the repo, not in .git."""
     try:
-        entry = git(repo, "ls-files", "-s", "--", rel).split()
+        listing = git(repo, "--literal-pathspecs", "ls-files", "-s", "-z", "--", rel)
     except GitError:
         return False
-    if not entry or entry[0] not in REGULAR_FILE_MODES:
+    entries = [e for e in listing.split("\0") if e]
+    if len(entries) != 1:
+        return False
+    info, _, path = entries[0].partition("\t")
+    if path != rel or info.split()[0] not in REGULAR_FILE_MODES:
         return False
     root = Path(repo).resolve()
     resolved = (root / rel).resolve()

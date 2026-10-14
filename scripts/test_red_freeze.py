@@ -21,6 +21,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "red_freeze.py"
@@ -343,6 +344,27 @@ def case_run_refuses_dirty_tree(tmp: Path) -> None:
           and not (repo.root / "ran.txt").exists(), out)
 
 
+def case_run_restores_on_sigterm(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    green = repo.commit("more")
+    args = [sys.executable, str(SCRIPT), "--repo", str(repo.root),
+            "--run", "exec sleep 30", red]
+    with subprocess.Popen(args, env=ENV, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT) as proc:
+        deadline = time.monotonic() + 20
+        while (repo.git("branch", "--show-current") != ""
+               and time.monotonic() < deadline):
+            time.sleep(0.05)
+        proc.terminate()
+        proc.wait(timeout=20)
+    check("SIGTERM during --run still puts the branch and HEAD back",
+          repo.git("branch", "--show-current") == "main"
+          and repo.git("rev-parse", "HEAD") == green
+          and repo.git("status", "--porcelain") == "", repo.git("status", "-sb"))
+
+
 LONG = ("for i in range(1, 301):\n    print(f'line {i}')\n"
         "raise SystemExit(1)\n")
 
@@ -380,6 +402,7 @@ CASES = [
     case_run_sees_untracked_deps,
     case_run_restores_branch_and_head,
     case_run_refuses_dirty_tree,
+    case_run_restores_on_sigterm,
 ]
 
 

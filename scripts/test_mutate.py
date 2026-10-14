@@ -706,6 +706,28 @@ def case_interrupt_reports_leftover(tmp: Path) -> None:
           f"rc={proc.returncode} {errlog.read_text()}")
 
 
+def case_glob_named_symlink_refused(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("real.py", "secret = 1 < 2\n")
+    repo.write("a!x.py", "plain = 1 < 2\n")
+    repo.base = repo.commit("base: real.py, a!x.py")
+    original = (repo.root / "real.py").read_bytes()
+    os.symlink("real.py", repo.root / "a*.py")
+    commit = repo.commit("stream: glob-named symlink")
+    patch = write_probes(repo, [{"probe": "p", "file": "a*.py",
+                                 "old": "secret", "new": "public"}])
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--probes", patch, "--max-generic", "0")
+    check("a probe on a symlink named like a glob is a usage error that touches no file",
+          code == 2 and (repo.root / "real.py").read_bytes() == original,
+          f"{code} {out}{err}")
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--max-generic", "1000")
+    check("a generic run does not reach real.py through a glob-named symlink",
+          (repo.root / "real.py").read_bytes() == original and repo.status() == ""
+          and "a*.py" not in out, f"{code} {repo.status()} {out}{err}")
+
+
 CASES = [
     case_survivor_fails_gate,
     case_all_killed_passes,
@@ -732,6 +754,7 @@ CASES = [
     case_forged_label_cannot_fake_summary,
     case_in_repo_symlink_alias_refused,
     case_interrupt_reports_leftover,
+    case_glob_named_symlink_refused,
 ]
 
 

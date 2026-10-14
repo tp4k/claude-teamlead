@@ -329,6 +329,42 @@ def case_pass_two_cut_is_logged_not_asked(tmp: Path) -> None:
           again.count("fold WS-2 into WS-1") == 1, again)
 
 
+def case_pass_two_reads_the_last_plan_fixed_line(tmp: Path) -> None:
+    """Only the newest Fix round says whether paths are unchecked: an earlier
+    `new_paths=yes` that a later round superseded owes no second pass."""
+    fixed = (PLAN + "\n## Fix log\nclaim → fix\nPLAN_FIXED fixed=1 new_paths=yes\n"
+             "second round\nPLAN_FIXED fixed=1 new_paths=no\n")
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": fixed, "questions.md": ANSWERED,
+                      "plan-validation.md": NEEDS_FIX,
+                      "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(run / "plan.md", run / "plan-validation.md")
+    expect("yes then a later no → the last line rules: dispatch, no pass 2", run,
+           "7", "FRESH sonnet implementer", 0)
+
+
+def case_pass_two_cut_logging_has_two_guards(tmp: Path) -> None:
+    """The pass-2 shortcut must not swallow a cut that still needs the user: one
+    the validation named BEFORE the Fix round (older than plan.md), and one the
+    user already answered (the log would restate their decision as the run's)."""
+    fixed = PLAN + "\n## Fix log\nclaim → fix\nPLAN_FIXED fixed=1 new_paths=yes\n"
+    old = mkrun(tmp / "old", {"task.md": TASK, "plan.md": fixed,
+                              "questions.md": ANSWERED,
+                              "plan-validation.md": SCOPE_CUT,
+                              "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(old / "plan.md", old / "plan-validation.md")
+    expect("a cut from a validation older than the Fix round is still asked", old,
+           "6", "scope selection (fold WS-2 into WS-1)", 1)
+    chosen = mkrun(tmp / "chosen", {
+        "task.md": TASK, "plan.md": fixed,
+        "questions.md": ANSWERED + "scope: A — ship as planned\n",
+        "plan-validation.md": SCOPE_CUT, "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(chosen / "plan-validation.md", chosen / "plan.md")
+    expect("an answered cut that pass 2 repeats dispatches", chosen, "7",
+           "FRESH sonnet implementer", 0)
+    check("…and is not logged as the run's own decision",
+          not (chosen / "decisions-log.md").exists(), "decisions-log.md exists")
+
+
 def case_validator_findings_fold_into_the_one_round(tmp: Path) -> None:
     """The validator's PLAN_NEEDS_FIX and the user's changed answer are one Fix
     round, not two: the round the answer owes names the findings too."""
@@ -1111,6 +1147,8 @@ CASES = [
     case_design_fix_log_does_not_answer_the_validator,
     case_fix_round_with_new_paths_revalidates,
     case_pass_two_cut_is_logged_not_asked,
+    case_pass_two_reads_the_last_plan_fixed_line,
+    case_pass_two_cut_logging_has_two_guards,
     case_validator_findings_fold_into_the_one_round,
     case_scope_cut_gets_its_own_card,
     case_smaller_none_is_not_a_decision,

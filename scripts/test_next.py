@@ -409,6 +409,26 @@ def case_commits_checked_before_verifier(tmp: Path) -> None:
           r.code == 1 and "halt:" in r.out and stray[:7] in r.out
           and not r.kinds(), r.detail())
 
+    w = World(tmp / "isbase")
+    w.pin_base()
+    w.commit("work")
+    w.report(1, 1, [w.base])
+    r = w.step()
+    check("the base itself is not one of the run's commits → halt, no verifier",
+          r.code == 1 and "halt:" in r.out and not r.kinds(), r.detail())
+
+    w = World(tmp / "fork")
+    w.pin_base()
+    w.commit("main work")
+    git(w.repo, "checkout", "-q", "-b", "fork", w.base)
+    stray = w.commit("forked from the base")
+    git(w.repo, "checkout", "-q", "-")
+    w.report(1, 1, [stray])
+    r = w.step()
+    check("a commit that descends from the base but is off HEAD's history → halt "
+          "naming that", r.code == 1 and "not on HEAD's history" in r.out
+          and not r.kinds(), r.detail())
+
     w = World(tmp / "before")
     old = w.commit("before the base")
     w.base = w.commit("the base")
@@ -521,6 +541,24 @@ def case_baseline_failures_leave_the_mutation_gate(tmp: Path) -> None:
           r.code == 1 and "halt:" in r.out and not r.kinds(), r.detail())
 
 
+def case_probes_file_reaches_the_mutation_gate(tmp: Path) -> None:
+    w = World(tmp)
+    w.pin_base()
+    w.report(1, 1, [w.commit("work")])
+    w.put("probes-r1.json", "[]\n")
+    r = w.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    mutate = next((ln for ln in p.splitlines() if "mutate.py" in ln), "")
+    check("a probes file beside the run → mutate.py gets --probes with its path",
+          f"--probes {w.run}/probes-r1.json" in mutate, r.detail())
+
+    w2 = World(tmp / "none")
+    w2.pin_base()
+    w2.report(1, 1, [w2.commit("work")])
+    r = w2.step()
+    check("no probes file → no --probes", "--probes" not in r.out, r.detail())
+
+
 def case_implementer_and_reviewer_prompts_have_no_run(tmp: Path) -> None:
     w = World(tmp, securityReview="on")
     w.pin_base()
@@ -586,6 +624,17 @@ def case_mutation_fail_routes_to_rework(tmp: Path) -> None:
           r.code == 0 and "teamlead:implementer" not in r.kinds()
           and r.prompts("code-review"), r.detail())
 
+    w = World(tmp / "unclassified")
+    w.pin_base()
+    w.report(1, 1, [w.commit("work")])
+    w.verifier(1, 1, "FAIL")
+    w.mutation(1, 1)
+    r = w.step()
+    check("a FAIL nobody classified as pre-existing is a rework, not reviewers",
+          r.kinds() == ["teamlead:implementer"]
+          and (w.run / "briefs" / "impl-ws1-r2.md").exists()
+          and not list((w.run / "briefs").glob("review-*")), r.detail())
+
     w = World(tmp / "nomutation")
     w.pin_base()
     c = w.commit("work")
@@ -628,6 +677,20 @@ def case_pass_routes_to_reviewers(tmp: Path) -> None:
     check("the reviewer brief names the commits and the mutation report",
           c in brief and "mutation-r1.md" in brief, brief)
 
+    w2 = World(tmp / "partial", securityReview="on")
+    w2.pin_base()
+    w2.report(1, 1, [w2.commit("work")])
+    w2.verifier(1, 1)
+    w2.mutation(1, 1)
+    w2.step()
+    w2.reviews(1, 1, ("code",))
+    r = w2.step("--redo")
+    check("a required axis still missing → no triage spawn", "teamlead:triage"
+          not in r.kinds(), r.detail())
+    check("a review already written is not spawned again, only the missing axis",
+          len(r.spawns()) == 1 and "code-review" not in r.kinds()
+          and "review-r1-security.md" in r.spawns()[0][1], r.detail())
+
     w.reviews(1, 1, ("code", "security"))
     r = w.step()
     triage = r.prompts("teamlead:triage")
@@ -636,6 +699,43 @@ def case_pass_routes_to_reviewers(tmp: Path) -> None:
           and "reworkCap: 3" in triage[0] and f"{w.run}/triage-r1.md" in triage[0])
     check("all reviews in → the triage spawn with the rework count and cap", ok,
           r.detail())
+
+
+def case_tags_default_to_yes_and_validator_upgrades(tmp: Path) -> None:
+    def reviewed(w: World) -> Result:
+        w.pin_base()
+        w.report(1, 1, [w.commit("work")])
+        w.verifier(1, 1)
+        w.mutation(1, 1)
+        return w.step()
+
+    when = {"securityReview": "when-needed", "perfReview": "when-needed"}
+    w = World(tmp / "silent", **when)
+    w.put("questions.md", "No open questions.\n\n## Routing\nPLAN_WRITTEN ws=1 "
+          "complex=no questions=0 decisions=0 adr_conflict=no\n")
+    r = reviewed(w)
+    check("no routing line for the stream → every tag is yes: the specialists run",
+          "security-review" in r.kinds() and "performance-engineer" in r.kinds(),
+          r.detail())
+
+    w = World(tmp / "no", **when)
+    r = reviewed(w)
+    check("routing tags input: no, hot: no skip the when-needed specialists",
+          r.kinds() == ["code-review"], r.detail())
+
+    w = World(tmp / "upgraded", **when)
+    text = w.read("questions.md").replace("public: yes", "public: no")
+    w.put("questions.md", text)
+    w.put("plan-validation.md", "# Plan validation\n\nVerdict: PLAN_VALID\n\n"
+          "WS-1 stream 1 input: no — the CLI reads a file; requires input: yes\n"
+          "WS-1 stream 1 public: no — exported; requires public: yes\n\n"
+          "Smaller: none\n")
+    r = reviewed(w)
+    code = w.read("briefs/review-r1-code.md")
+    check("the validator upgrades input: no → the security axis runs, and "
+          "public: no → the code brief says public=yes",
+          "security-review" in r.kinds() and "Tag: public=yes" in code,
+          r.detail() + code)
 
 
 def case_barrier_orders_stages(tmp: Path) -> None:
@@ -735,6 +835,10 @@ def case_needs_decision_logged(tmp: Path) -> None:
           ok, r.detail() + log)
     w.step()
     check("the decision is logged once however often next.py runs",
+          w.read("decisions-log.md").count("keep half-up") == 1,
+          w.read("decisions-log.md"))
+    w.step("--redo")
+    check("…and when it is re-routed without waiting",
           w.read("decisions-log.md").count("keep half-up") == 1,
           w.read("decisions-log.md"))
 
@@ -984,6 +1088,29 @@ def case_gate_rework_shares_cap(tmp: Path) -> None:
           r.code == 1 and "halt:" in r.out and "cap" in r.out and not r.kinds(),
           r.detail())
 
+    # A gate NEEDS_REWORK after round 4 that wrote no brief: the re-dispatch of
+    # that triage is where the cap has to stop it, before any brief is asked for.
+    w = World(tmp / "gate-redo", cap=3)
+    w.pin_base()
+    for rnd in (1, 2, 3):
+        w.finished_round(1, rnd, "NEEDS_REWORK" if rnd < 3 else "APPROVED")
+    w.step()
+    w.codex_review(1)
+    w.step()
+    w.gate_triage(1, "NEEDS_REWORK")
+    w.rework_brief(1, 4)
+    w.step()
+    w.gate_round(1, 4)
+    w.step()
+    w.codex_review(2)
+    w.step()
+    w.gate_triage(2, "NEEDS_REWORK")
+    r = w.step()
+    check("a gate NEEDS_REWORK after round 4 with no brief halts at the cap, "
+          "without re-dispatching the triage",
+          r.code == 1 and "halt:" in r.out and "cap" in r.out
+          and "teamlead:triage" not in r.kinds(), r.detail())
+
     # One count: ordinary rework r1 -> r2, then gate reworks r2 -> r3 -> r4 use it up.
     w = World(tmp / "shared", cap=3)
     w.pin_base()
@@ -1019,6 +1146,9 @@ def case_gate_rework_shares_cap(tmp: Path) -> None:
     r = w.step()
     check("a verifier FAIL after round 4 hits the same cap → halt",
           r.code == 1 and "halt:" in r.out and not r.kinds(), r.detail())
+    check("…naming the cap, with no round-5 brief written for the implementer",
+          "cap" in r.out and "teamlead:implementer" not in r.kinds()
+          and not (w.run / "briefs" / "impl-ws1-r5.md").exists(), r.detail())
 
 
 def case_gate_triage_unreadable_or_stop_halts(tmp: Path) -> None:
@@ -1061,6 +1191,35 @@ def case_gate_docs_only_closes_after_the_writer(tmp: Path) -> None:
           and not any("review_package.py" in c for c in r.commands()), r.detail())
 
 
+def case_gate_docs_brief_must_postdate_the_gate(tmp: Path) -> None:
+    w = World(tmp)
+    w.pin_base()
+    w.finished_round(1, 1, "APPROVED")
+    old = w.commit("docs-fix: before the gate", "README.md")
+    w.put("briefs/docs-ws1-r1.md", "# Docs fix\n")
+    w.put("docs-fix-ws1-r1.md", f"DOCS_FIXED rows=1 commit={old}\n")
+    w.step()
+    w.codex_review(1)
+    w.step()
+    w.gate_triage(1, "NEEDS_REWORK", "docs_only=yes")
+    r = w.step()
+    check("a docs brief and fix from before the gate are not the gate's: no close, "
+          "the triage is asked for the brief", "final-report" not in r.out
+          and r.kinds() == ["teamlead:triage"], r.detail())
+
+
+def case_gate_is_fresh_only_at_a_new_head(tmp: Path) -> None:
+    w = World(tmp)
+    all_approved(w)
+    w.step()
+    state = w.read("next-state.json")
+    w.attempt("started")
+    r = w.step("--redo")
+    check("a started Codex run with no verdict yet is not restarted at the same HEAD",
+          r.code == 0 and w.read("next-state.json") == state
+          and json.loads(state)["gates"]["1"]["started_ns"], r.detail())
+
+
 # ------------------------------------------------------- coordinator edits, close
 
 def case_coordinator_fix_reverified(tmp: Path) -> None:
@@ -1082,6 +1241,17 @@ def case_coordinator_fix_reverified(tmp: Path) -> None:
     r = w.step()
     check("verified → the Codex gate sees it", r.code == 0
           and any("review_package.py" in c for c in r.commands()), r.detail())
+
+    w4 = World(tmp / "baseline")
+    all_approved(w4)
+    w4.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: FAIL\n\n## Commands"
+           "\n\npython3 -m unittest discover → exit 1\nruff check . → exit 0\n")
+    w4.commit("coordinator-fix: rename")
+    r = w4.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    mutate = next((ln for ln in p.splitlines() if "mutate.py" in ln), "")
+    check("a coordinator-fix verification leaves baseline-failing commands out of "
+          "the mutation gate too", "--cmd 'ruff check .'" in mutate, r.detail())
 
     w2 = World(tmp / "ordinary")
     all_approved(w2)
@@ -1141,6 +1311,13 @@ def case_base_flag_and_baseline_expectation(tmp: Path) -> None:
     check("--base is accepted and the dispatch repeats", r.code == 0 and r.kinds(),
           r.detail())
 
+    w2 = World(tmp / "unpinned")
+    w2.report(1, 1, [w2.commit("work")])
+    r = w2.step()
+    check("reports but no base pin → halt naming --base, nothing pinned or spawned",
+          r.code == 1 and "halt:" in r.out and "--base" in r.out and not r.kinds()
+          and not (w2.run / "base-sha.txt").exists(), r.detail())
+
 
 CASES = [
     case_exit_codes,
@@ -1148,6 +1325,8 @@ CASES = [
     case_dependent_stream_waits,
     case_commits_checked_before_verifier,
     case_verifier_spawn_carries_red_run,
+    case_probes_file_reaches_the_mutation_gate,
+    case_tags_default_to_yes_and_validator_upgrades,
     case_baseline_failures_leave_the_mutation_gate,
     case_implementer_and_reviewer_prompts_have_no_run,
     case_mutation_fail_routes_to_rework,
@@ -1162,6 +1341,8 @@ CASES = [
     case_gate_rework_shares_cap,
     case_gate_triage_unreadable_or_stop_halts,
     case_gate_docs_only_closes_after_the_writer,
+    case_gate_docs_brief_must_postdate_the_gate,
+    case_gate_is_fresh_only_at_a_new_head,
     case_coordinator_fix_reverified,
     case_close_applies_ledger,
     case_base_flag_and_baseline_expectation,

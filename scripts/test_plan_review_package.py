@@ -220,6 +220,9 @@ def case_an_axis_subset_is_honoured(tmp: Path) -> None:
     )
 
 
+FAILURE_MODE_WORDS = ("restart", "cold start", "abort", "retry", "degraded", "metric")
+
+
 def case_the_failure_modes_axis_is_the_fifth(tmp: Path) -> None:
     _, run = scaffold(tmp)
     out, proc = package(tmp, run)
@@ -231,10 +234,7 @@ def case_the_failure_modes_axis_is_the_fifth(tmp: Path) -> None:
         "the default package has five axes, the fifth about failure modes",
         proc.returncode == 0
         and "6. **" not in body
-        and all(
-            word in fifth
-            for word in ("restart", "cold start", "abort", "retry", "degraded", "metric")
-        )
+        and all(word in fifth for word in FAILURE_MODE_WORDS)
         and alone.returncode == 0
         and "axes    : failure-modes" in alone.stdout
         and "1. **" in alone_body

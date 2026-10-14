@@ -27,6 +27,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 SCRIPT = Path(__file__).resolve().parent / "run_config.py"
 
 results: list[tuple[str, bool, str]] = []
@@ -363,6 +365,21 @@ def case_an_unknown_choice_key_is_rejected(tmp: Path) -> None:
     )
 
 
+def opus_code_review_in(home: Path) -> object:
+    """`opusCodeReview` is no run option, so resolve it the way review_package does."""
+    import paths
+
+    saved = os.environ.get("TEAMLEAD_HOME")
+    os.environ["TEAMLEAD_HOME"] = str(home)
+    try:
+        return paths.setting("opusCodeReview", None, paths.one_of("opusCodeReview"))
+    finally:
+        if saved is None:
+            del os.environ["TEAMLEAD_HOME"]
+        else:
+            os.environ["TEAMLEAD_HOME"] = saved
+
+
 def case_defaults_without_global_config(tmp: Path) -> None:
     home, repo = fixture(tmp)
     target = tmp / "run" / "config.json"
@@ -371,7 +388,6 @@ def case_defaults_without_global_config(tmp: Path) -> None:
     expected = {
         "codexPlanReview": "always",
         "codexCodeReview": "on",
-        "opusCodeReview": "fallback",
         "securityReview": "when-needed",
         "perfReview": "when-needed",
     }
@@ -381,7 +397,8 @@ def case_defaults_without_global_config(tmp: Path) -> None:
             value_of(out, key) == want and source_of(out, key) == "default"
             for key, want in expected.items()
         )
-        and written["codexPlanReviewAxes"][-1] == "failure-modes",
+        and written["codexPlanReviewAxes"][-1] == "failure-modes"
+        and opus_code_review_in(home) == "fallback",
         out + target.read_text(),
     )
 

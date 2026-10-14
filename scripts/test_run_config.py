@@ -67,15 +67,16 @@ def fixture(tmp: Path) -> tuple[Path, Path]:
     return home, repo
 
 
-def case_a_missing_config_is_seeded_with_both_reviewers(tmp: Path) -> None:
+def case_a_missing_config_is_seeded_without_forcing_specialists_on(tmp: Path) -> None:
     home, repo = fixture(tmp)
     out = run(home, repo).stdout
     written = json.loads((home / "config.json").read_text())
     check(
-        "an absent config is seeded, reviewers on",
-        written["securityReview"] == "on"
-        and written["perfReview"] == "on"
-        and value_of(out, "securityReview") == "on"
+        "an absent config is seeded, and the seed does not write specialists on",
+        "securityReview" not in written
+        and "perfReview" not in written
+        and value_of(out, "securityReview") == "when-needed"
+        and value_of(out, "perfReview") == "when-needed"
         and "seeded" in out,
         out,
     )
@@ -149,7 +150,7 @@ def case_a_config_typo_is_skipped_not_fatal(tmp: Path) -> None:
     check(
         "an invalid config value falls through to the default",
         proc.returncode == 0
-        and value_of(proc.stdout, "securityReview") == "off"
+        and value_of(proc.stdout, "securityReview") == "when-needed"
         and source_of(proc.stdout, "securityReview") == "default",
         proc.stdout + proc.stderr,
     )
@@ -212,7 +213,8 @@ def case_task_text_is_not_mistaken_for_flags(tmp: Path) -> None:
     proc = run(home, repo, "--flags", "rewrite the --perf-ish helper in utils")
     check(
         "an unrecognised token is ignored, not an error",
-        proc.returncode == 0 and value_of(proc.stdout, "perfReview") == "on",
+        proc.returncode == 0
+        and value_of(proc.stdout, "perfReview") == "when-needed",
         proc.stdout + proc.stderr,
     )
 
@@ -361,8 +363,46 @@ def case_an_unknown_choice_key_is_rejected(tmp: Path) -> None:
     )
 
 
+def case_defaults_without_global_config(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    target = tmp / "run" / "config.json"
+    out = run(home, repo, "--flags", "rewrite the cache", "--out", str(target)).stdout
+    written = json.loads(target.read_text())
+    expected = {
+        "codexPlanReview": "always",
+        "codexCodeReview": "on",
+        "opusCodeReview": "fallback",
+        "securityReview": "when-needed",
+        "perfReview": "when-needed",
+    }
+    check(
+        "with no config every default is the new one, sourced from default",
+        all(
+            value_of(out, key) == want and source_of(out, key) == "default"
+            for key, want in expected.items()
+        )
+        and written["codexPlanReviewAxes"][-1] == "failure-modes",
+        out + target.read_text(),
+    )
+
+
+def case_existing_global_config_wins(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    home.mkdir()
+    (home / "config.json").write_text(json.dumps({"securityReview": "on"}))
+    out = run(home, repo).stdout
+    check(
+        "a global config saying on still resolves to on, not migrated",
+        value_of(out, "securityReview") == "on"
+        and value_of(out, "perfReview") == "when-needed",
+        out,
+    )
+
+
 CASES = [
-    case_a_missing_config_is_seeded_with_both_reviewers,
+    case_a_missing_config_is_seeded_without_forcing_specialists_on,
+    case_defaults_without_global_config,
+    case_existing_global_config_wins,
     case_an_existing_config_is_never_rewritten,
     case_a_flag_beats_the_config,
     case_a_card_answer_beats_the_flag,

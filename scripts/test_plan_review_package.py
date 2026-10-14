@@ -220,6 +220,29 @@ def case_an_axis_subset_is_honoured(tmp: Path) -> None:
     )
 
 
+def case_the_failure_modes_axis_is_the_fifth(tmp: Path) -> None:
+    _, run = scaffold(tmp)
+    out, proc = package(tmp, run)
+    body = prompt_of(out)
+    alone_out, alone = package(tmp / "alone", run, "--axes", "failure-modes")
+    alone_body = prompt_of(alone_out)
+    fifth = body.split("5. **", 1)[-1].split("\n", 1)[0].lower()
+    check(
+        "the default package has five axes, the fifth about failure modes",
+        proc.returncode == 0
+        and "6. **" not in body
+        and all(
+            word in fifth
+            for word in ("restart", "cold start", "abort", "retry", "degraded", "metric")
+        )
+        and alone.returncode == 0
+        and "axes    : failure-modes" in alone.stdout
+        and "1. **" in alone_body
+        and "2. **" not in alone_body,
+        proc.stdout + proc.stderr + alone.stderr,
+    )
+
+
 def case_an_unknown_axis_is_fatal(tmp: Path) -> None:
     _, run = scaffold(tmp)
     _, proc = package(tmp, run, "--axes", "decomposition,security")
@@ -279,6 +302,7 @@ CASES = [
     case_the_answers_ship_and_are_announced,
     case_no_questions_means_no_answers_file,
     case_an_axis_subset_is_honoured,
+    case_the_failure_modes_axis_is_the_fifth,
     case_an_unknown_axis_is_fatal,
     case_a_run_with_no_plan_is_fatal,
     case_an_external_plan_can_be_reviewed,

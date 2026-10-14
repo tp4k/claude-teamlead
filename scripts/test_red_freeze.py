@@ -304,10 +304,12 @@ def case_run_sees_untracked_deps(tmp: Path) -> None:
     repo.write("src/limit.py", "def hit(**kw):\n    return Resp(429)\n")
     repo.commit("green")
     repo.write("deps/lib.txt", "installed")
+    repo.write("notes.txt", "scratch")
     code, out = run(repo, red, cmd=CHECK_CMD)
     check("--run sees an ignored, untracked dependency directory of the worktree",
           f"RED run {red[:9]}: exit 1" in out and "dep says installed" in out
-          and "expected 429, got NotImplementedError" in out, out)
+          and "expected 429, got NotImplementedError" in out
+          and (repo.root / "notes.txt").read_text() == "scratch", out)
 
 
 def case_run_restores_branch_and_head(tmp: Path) -> None:
@@ -342,6 +344,20 @@ def case_run_refuses_dirty_tree(tmp: Path) -> None:
           and repo.git("rev-parse", "HEAD") == head
           and "local edit" in (repo.root / "src/limit.py").read_text()
           and not (repo.root / "ran.txt").exists(), out)
+
+
+def case_run_refuses_staged_change(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    repo.commit("more")
+    repo.write("src/limit.py", "def hit(**kw):\n    return 'local edit'\n")
+    repo.git("add", "src/limit.py")
+    code, out = run(repo, red, cmd=CHECK_CMD)
+    check("--run refuses a tree whose only change is staged, and keeps it staged",
+          code == 2 and "clean" in out and "RED run" not in out
+          and "local edit" in (repo.root / "src/limit.py").read_text()
+          and repo.git("diff", "--cached", "--name-only") == "src/limit.py", out)
 
 
 def case_run_keeps_ignored_files(tmp: Path) -> None:
@@ -433,6 +449,7 @@ CASES = [
     case_run_sees_untracked_deps,
     case_run_restores_branch_and_head,
     case_run_refuses_dirty_tree,
+    case_run_refuses_staged_change,
     case_run_keeps_ignored_files,
     case_run_restores_on_sigterm,
     case_run_restores_a_detached_head,

@@ -432,12 +432,16 @@ def case_sigterm_kills_compound_command_descendants(tmp: Path) -> None:
     red = repo.red()
     green = repo.commit("more")
     delay = 1.5
+    # Written by the descendant itself, outside the repo (an untracked file in it
+    # would fail the clean-status check below), so SIGTERM cannot land before a
+    # descendant exists.
+    ready = tmp.parent / f"{tmp.name}.ready"
     args = [sys.executable, str(SCRIPT), "--repo", str(repo.root),
-            "--run", f"{late_writer(delay)}; :", red]
+            "--run", f"{late_writer(delay, str(ready))}; :", red]
     with subprocess.Popen(args, env=ENV, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT) as proc:
         deadline = time.monotonic() + 20
-        while (repo.git("branch", "--show-current") != ""
+        while (not (ready.exists() and ready.read_text().isdigit())
                and time.monotonic() < deadline):
             time.sleep(0.05)
         proc.terminate()
@@ -493,6 +497,148 @@ def case_sigterm_while_popen_starts_kills_the_child(tmp: Path) -> None:
           and repo.git("rev-parse", "HEAD") == green
           and LATE_WRITE not in (repo.root / "src/limit.py").read_text(),
           f"{proc.stdout}{proc.stderr}status={status!r}")
+
+
+CLEANUP_HARNESS = """\
+import os, signal, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import red_freeze
+repo, red, cmd, at_kill, at_restore, mode = sys.argv[2:8]
+os.environ["RF_PGID"] = str(os.getpid())
+os.environ["RF_MARK"] = repo + ".mark"
+
+def mine(*_):
+    pass
+
+signal.signal(signal.SIGINT, mine)
+signal.signal(signal.SIGTERM, mine)
+
+def fire(name):
+    if name != "-":
+        os.kill(os.getpid(), getattr(signal, "SIG" + name))
+
+real_kill = red_freeze._kill_group
+real_run = subprocess.run
+
+def kill(proc):
+    fire(at_kill)
+    real_kill(proc)
+
+def run(args, *a, **kw):
+    if "-f" in args:
+        fire(at_restore)
+        if mode == "group":
+            open(os.environ["RF_MARK"], "w").close()
+    return real_run(args, *a, **kw)
+
+red_freeze._kill_group = kill
+subprocess.run = run
+try:
+    print("RETURNED", red_freeze.run_red(repo, red, cmd)[0])
+except SystemExit as e:
+    print("EXIT", e.code)
+print("HANDLERS", signal.getsignal(signal.SIGINT) is mine,
+      signal.getsignal(signal.SIGTERM) is mine)
+try:
+    os.waitpid(-1, os.WNOHANG)
+    print("CHILD-NOT-REAPED")
+except ChildProcessError:
+    print("REAPED")
+if mode == "again":
+    red_freeze._kill_group = real_kill
+    try:
+        print("SECOND RETURNED", red_freeze.run_red(repo, red, "exit 0")[0])
+    except SystemExit as e:
+        print("SECOND EXIT", e.code)
+"""
+
+# Fires a group-wide SIGINT (what a terminal's Ctrl-C sends) as git begins to
+# update HEAD, so only a restore running outside the group survives it.
+GROUP_SIGINT_HOOK = """\
+#!/bin/sh
+[ "$1" = prepared ] && [ -e "$RF_MARK" ] || exit 0
+rm -f "$RF_MARK"
+kill -INT -- "-$RF_PGID"
+sleep 0.3
+"""
+DELAY_SLOW = 1.0
+
+
+def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
+                mode: str = "plain", hook: bool = False) -> tuple[str, str, bool]:
+    """Run run_red in a harness that fires signals inside its cleanup.
+
+    Returns (harness output, detail, True when the repo is back on `main` at the
+    pre-run commit with a clean tree and the late-writing descendant never wrote).
+    """
+    tmp.mkdir(exist_ok=True)
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    green = repo.commit("more")
+    if hook:
+        path = repo.root / ".git/hooks/reference-transaction"
+        path.write_text(GROUP_SIGINT_HOOK)
+        path.chmod(0o755)
+    cmd = "exit 1" if normal else f"{late_writer(DELAY_SLOW)}; :"
+    proc = subprocess.run(
+        [sys.executable, "-c", CLEANUP_HARNESS, str(SCRIPT.parent), str(repo.root),
+         red, cmd, at_kill, at_restore, mode],
+        env=ENV, capture_output=True, text=True, timeout=30,
+        start_new_session=True)
+    time.sleep(DELAY_SLOW + 1.0)
+    status = repo.git("status", "--porcelain")
+    restored = (status == "" and repo.git("branch", "--show-current") == "main"
+                and repo.git("rev-parse", "HEAD") == green
+                and LATE_WRITE not in (repo.root / "src/limit.py").read_text())
+    return proc.stdout, f"{proc.stdout}{proc.stderr}status={status!r}", restored
+
+
+def case_sigterm_at_group_kill_start_still_cleans_up(tmp: Path) -> None:
+    out, detail, restored = cleanup_run(tmp / "a", "TERM", "-")
+    check("a SIGTERM landing as the group kill starts still kills the group, "
+          "restores the checkout and exits 143",
+          out.split()[:2] == ["EXIT", "143"] and "REAPED" in out and restored, detail)
+
+
+def case_sigterm_during_restore_checkout_does_not_abort_it(tmp: Path) -> None:
+    out, detail, restored = cleanup_run(tmp / "a", "-", "TERM")
+    check("a SIGTERM landing during the restore checkout does not abort it; exit 143",
+          out.split()[:2] == ["EXIT", "143"] and restored, detail)
+
+
+def case_second_signal_in_cleanup_keeps_the_first_exit_code(tmp: Path) -> None:
+    out, detail, restored = cleanup_run(tmp / "a", "TERM", "INT")
+    check("a SIGINT after a SIGTERM in cleanup changes nothing: restored, exit 143",
+          out.split()[:2] == ["EXIT", "143"] and restored, detail)
+    out, detail, restored = cleanup_run(tmp / "b", "INT", "TERM")
+    check("a SIGINT in cleanup is protected too, and its code 130 wins over a "
+          "later SIGTERM",
+          out.split()[:2] == ["EXIT", "130"] and restored, detail)
+
+
+def case_signal_in_cleanup_after_a_normal_exit_is_not_swallowed(tmp: Path) -> None:
+    out, detail, restored = cleanup_run(tmp / "a", "TERM", "-", normal=True)
+    check("a SIGTERM in cleanup after the command exited normally still exits 143, "
+          "after the restore",
+          out.split()[:2] == ["EXIT", "143"] and restored, detail)
+
+
+def case_handlers_are_the_callers_after_run_red(tmp: Path) -> None:
+    out, detail, _ = cleanup_run(tmp / "a", "-", "-", normal=True)
+    check("SIGINT and SIGTERM carry the caller's handlers again after run_red returns",
+          out.split()[:2] == ["RETURNED", "1"] and "HANDLERS True True" in out, detail)
+    out, detail, _ = cleanup_run(tmp / "b", "TERM", "INT", normal=True)
+    check("SIGINT and SIGTERM carry the caller's handlers again after run_red raises",
+          out.split()[:2] == ["EXIT", "143"] and "HANDLERS True True" in out, detail)
+
+
+def case_group_sigint_during_restore_does_not_break_it(tmp: Path) -> None:
+    out, detail, restored = cleanup_run(tmp / "a", "-", "-", normal=True, mode="group",
+                                        hook=True)
+    check("a SIGINT to red_freeze's whole process group during the restore "
+          "checkout leaves branch, HEAD and tree restored; exit 130",
+          out.split()[:2] == ["EXIT", "130"] and restored, detail)
 
 
 def case_background_descendant_killed_after_normal_exit(tmp: Path) -> None:
@@ -581,6 +727,12 @@ CASES = [
     case_run_restores_on_sigterm,
     case_sigterm_kills_compound_command_descendants,
     case_sigterm_while_popen_starts_kills_the_child,
+    case_sigterm_at_group_kill_start_still_cleans_up,
+    case_sigterm_during_restore_checkout_does_not_abort_it,
+    case_second_signal_in_cleanup_keeps_the_first_exit_code,
+    case_signal_in_cleanup_after_a_normal_exit_is_not_swallowed,
+    case_handlers_are_the_callers_after_run_red,
+    case_group_sigint_during_restore_does_not_break_it,
     case_background_descendant_killed_after_normal_exit,
     case_descendant_is_dead_before_the_restore,
     case_run_restores_a_detached_head,

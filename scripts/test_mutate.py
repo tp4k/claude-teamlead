@@ -151,6 +151,13 @@ def snapshots(log: Path) -> list[str]:
     return [s for s in log.read_text().split(SNAP_END) if s != ""]
 
 
+def mutant_snapshots(log: Path, original: str) -> list[str]:
+    """The snapshots after the first, which must be the unmutated file (the pre-run)."""
+    snaps = snapshots(log)
+    assert snaps and snaps[0] == original, snaps[:1]
+    return snaps[1:]
+
+
 def changed_line(original: list[str], snap: str) -> tuple[int, str | None]:
     """The one line `snap` differs from `original` in: (index, new text or None)."""
     lines = snap.splitlines()
@@ -777,6 +784,101 @@ def case_glob_named_regular_file_accepted(tmp: Path) -> None:
           "a*.py:1" in out, f"{code} {out}{err}")
 
 
+def case_failing_unmutated_command_refused(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream(STRONG_TEST)
+    original = (repo.root / "lib.py").read_text()
+    log = tmp / "log"
+    report = tmp / "mutation.md"
+    code, out, err = mutate(repo, "--cmd", snapshot_cmd(log, "lib.py", "false"),
+                            "--commits", commit, "--max-generic", "1000",
+                            "--out", str(report))
+    check("a command that fails on the unmutated tree is refused: exit 3, "
+          "`cannot run:` on stderr, no MUTATION: line, no --out report, a clean tree",
+          code == 3 and err.startswith("cannot run:") and "MUTATION:" not in out
+          and not report.exists() and repo.status() == ""
+          and (repo.root / "lib.py").read_text() == original, f"{code} {out}{err}")
+    check("the refusal applies no mutant: the only run saw the unmutated file",
+          snapshots(log) == [original], repr(snapshots(log)))
+    code, out, err = mutate(repo, "--cmd", "false", "--commits", commit)
+    check("a plain failing command is refused too, not counted as every mutant killed",
+          code == 3 and "MUTATION:" not in out, f"{code} {out}{err}")
+
+
+def case_unmutated_command_timeout_refused(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream(STRONG_TEST)
+    start = time.monotonic()
+    code, out, err = mutate(repo, "--cmd", "sleep 5", "--commits", commit,
+                            "--max-generic", "1000", "--time-box", "1.0")
+    took = time.monotonic() - start
+    check("an unmutated command that outlives the time box is refused, not PASS",
+          code == 3 and err.startswith("cannot run:") and "MUTATION:" not in out
+          and took < 4 and repo.status() == "", f"{code} {took:.1f}s {out}{err}")
+
+
+def case_passing_unmutated_command_runs_mutants(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream(STRONG_TEST)
+    original = (repo.root / "lib.py").read_text()
+    saved = tmp / "lib.orig"
+    saved.write_text(original)
+    log = tmp / "log"
+    cmd = snapshot_cmd(log, "lib.py", f"cmp -s lib.py {shlex.quote(str(saved))}")
+    code, out, err = mutate(repo, "--cmd", cmd, "--commits", commit,
+                            "--max-generic", "1000")
+    verdict, n = summary(out)
+    check("a command that passes unmutated and fails on a mutant runs the queue: "
+          "the pre-run is one extra observation, never a counted mutant",
+          code == 0 and verdict == "PASS" and n.get("killed") == 2
+          and n.get("invalid") == 2 and n.get("survived") == 0
+          and len(snapshots(log)) == 3 and snapshots(log)[0] == original
+          and repo.status() == "", f"{code} {out}{err}{snapshots(log)!r}")
+
+
+def case_signal_during_pre_run(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    original = (repo.root / "lib.py").read_text()
+    saved = tmp / "lib.orig"
+    saved.write_text(original)
+    marker = tmp / "started"
+    pidfile = tmp / "pid"
+    outlog = tmp / "stdout"
+    cmd = (f"cmp -s lib.py {shlex.quote(str(saved))} && "
+           f"{{ echo $$ > {shlex.quote(str(pidfile))}; "
+           f"touch {shlex.quote(str(marker))}; sleep 30; }}; exit 0")
+    with outlog.open("w") as fh:
+        proc = subprocess.Popen(
+            [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,
+             "--cmd", cmd, "--commits", commit], env=ENV,
+            stdout=fh, stderr=subprocess.DEVNULL)
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    alive = False
+    if pidfile.exists():
+        pid = int(pidfile.read_text())
+        try:
+            os.kill(pid, 0)
+            alive = True
+        except ProcessLookupError:
+            pass
+        if alive:
+            os.kill(pid, signal.SIGKILL)
+    check("SIGTERM during the unmutated pre-run exits 3, kills the command's group, "
+          "leaves the tree clean and prints no MUTATION: line",
+          marker.exists() and proc.returncode == 3 and not alive
+          and repo.status() == "" and "MUTATION:" not in outlog.read_text(),
+          f"rc={proc.returncode} alive={alive} {outlog.read_text()}")
+
+
 CASES = [
     case_survivor_fails_gate,
     case_all_killed_passes,
@@ -806,6 +908,10 @@ CASES = [
     case_glob_named_symlink_refused,
     case_glob_named_ignored_file_refused,
     case_glob_named_regular_file_accepted,
+    case_failing_unmutated_command_refused,
+    case_unmutated_command_timeout_refused,
+    case_passing_unmutated_command_runs_mutants,
+    case_signal_during_pre_run,
 ]
 
 

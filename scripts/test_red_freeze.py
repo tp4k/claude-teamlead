@@ -330,6 +330,9 @@ def case_run_restores_branch_and_head(tmp: Path) -> None:
     check("branch and HEAD are restored after a failing command too",
           repo.git("symbolic-ref", "--short", "HEAD") == "main"
           and repo.git("rev-parse", "HEAD") == green, repo.git("status", "-sb"))
+    code, out = run(repo, red, cmd="echo ERR-LINE >&2; echo OUT-LINE; exit 3")
+    check("a failing command's exit code and its stderr+stdout tail are reported as before",
+          f"RED run {red[:9]}: exit 3" in out and "ERR-LINE\nOUT-LINE" in out, out)
 
 
 def case_run_refuses_dirty_tree(tmp: Path) -> None:
@@ -447,6 +450,49 @@ def case_sigterm_kills_compound_command_descendants(tmp: Path) -> None:
           and LATE_WRITE not in (repo.root / "src/limit.py").read_text(), status)
 
 
+POPEN_HARNESS = """\
+import os, signal, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import red_freeze
+real_init = subprocess.Popen.__init__
+def init(self, *args, **kwargs):
+    real_init(self, *args, **kwargs)
+    if kwargs.get("shell"):
+        os.kill(os.getpid(), signal.SIGTERM)
+subprocess.Popen.__init__ = init
+try:
+    red_freeze.run_red(sys.argv[2], sys.argv[3], sys.argv[4])
+    print("RETURNED")
+except SystemExit as e:
+    print("EXIT", e.code)
+try:
+    os.waitpid(-1, os.WNOHANG)
+    print("CHILD-NOT-REAPED")
+except ChildProcessError:
+    print("REAPED")
+"""
+
+
+def case_sigterm_while_popen_starts_kills_the_child(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    green = repo.commit("more")
+    delay = 1.0
+    proc = subprocess.run(
+        [sys.executable, "-c", POPEN_HARNESS, str(SCRIPT.parent), str(repo.root),
+         red, f"{late_writer(delay)}; :"],
+        env=ENV, capture_output=True, text=True, timeout=30)
+    time.sleep(delay + 1.0)
+    status = repo.git("status", "--porcelain")
+    check("a SIGTERM landing while Popen starts still kills and reaps the child",
+          proc.stdout.split() == ["EXIT", "143", "REAPED"] and status == ""
+          and repo.git("branch", "--show-current") == "main"
+          and repo.git("rev-parse", "HEAD") == green
+          and LATE_WRITE not in (repo.root / "src/limit.py").read_text(),
+          f"{proc.stdout}{proc.stderr}status={status!r}")
+
+
 def case_background_descendant_killed_after_normal_exit(tmp: Path) -> None:
     repo = Repo(tmp)
     repo.write("tests/check.py", CHECK)
@@ -482,7 +528,8 @@ def case_descendant_is_dead_before_the_restore(tmp: Path) -> None:
     repo.write("tests/check.py", CHECK)
     red = repo.red()
     repo.commit("more")
-    spin = f"while :; do echo {LATE_WRITE} > src/limit.py; done"
+    spin = (f"end=$(( $(date +%s) + 5 )); while [ $(date +%s) -lt $end ]; "
+            f"do echo {LATE_WRITE} > src/limit.py; done")
     run(repo, red, cmd=f"({spin}) >/dev/null 2>&1 & sleep 0.3")
     time.sleep(0.3)
     status = repo.git("status", "--porcelain")
@@ -531,6 +578,7 @@ CASES = [
     case_run_keeps_ignored_files,
     case_run_restores_on_sigterm,
     case_sigterm_kills_compound_command_descendants,
+    case_sigterm_while_popen_starts_kills_the_child,
     case_background_descendant_killed_after_normal_exit,
     case_descendant_is_dead_before_the_restore,
     case_run_restores_a_detached_head,

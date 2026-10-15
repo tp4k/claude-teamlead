@@ -61,12 +61,17 @@ class GitError(Exception):
     pass
 
 
-def git(repo: str, *args: str) -> str:
-    proc = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+def _git(repo: str, args: tuple[str, ...], new_session: bool = False) -> str:
+    proc = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True,
+                          start_new_session=new_session)
     if proc.returncode != 0:
         why = proc.stderr.strip() or f"exited {proc.returncode}"
         raise GitError(f"git {' '.join(args)}: {why}")
     return proc.stdout
+
+
+def git(repo: str, *args: str) -> str:
+    return _git(repo, args)
 
 
 def is_ancestor(repo: str, sha: str, head: str) -> bool:
@@ -126,16 +131,20 @@ def check(repo: str, head: str, reds: list[str]) -> tuple[list[str], list[str], 
 TAIL = 200
 
 
-_starting = False
+_deferring = False
 _deferred: list[int] = []
 
 
 def _raise_exit(signum: int, _frame: object) -> None:
     # While Popen starts, `proc` is not bound yet, so an exit raised there would
-    # skip the group kill. Record the signal; run_red raises once `proc` is bound.
-    if _starting:
+    # skip the group kill; in cleanup, one raised there would skip the kill or the
+    # restore. Record the signal there; run_red exits once it is safe. Raising
+    # also starts deferring, so a signal landing before `finally` runs is recorded.
+    global _deferring
+    if _deferring:
         _deferred.append(signum)
         return
+    _deferring = True
     raise SystemExit(128 + signum)
 
 
@@ -162,32 +171,43 @@ def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
     sha = git(repo, "rev-parse", "--verify", f"{red}^{{commit}}").strip()
     branch = git(repo, "branch", "--show-current").strip()
     origin = branch or git(repo, "rev-parse", "HEAD").strip()
-    global _starting
+    global _deferring
+    _deferring = False
     old = {s: signal.signal(s, _raise_exit)
            for s in (signal.SIGINT, signal.SIGTERM)}
     proc: subprocess.Popen[str] | None = None
+    exiting = False
     try:
         git(repo, "checkout", "-q", "--no-overwrite-ignore", "--detach", sha)
         _deferred.clear()
-        _starting = True
-        try:
-            proc = subprocess.Popen(cmd, shell=True, cwd=repo, text=True,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT,
-                                    start_new_session=True)
-        finally:
-            _starting = False
+        _deferring = True
+        proc = subprocess.Popen(cmd, shell=True, cwd=repo, text=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                start_new_session=True)
         if _deferred:
             raise SystemExit(128 + _deferred[0])
+        _deferring = False
         output, _ = proc.communicate()
+        _deferring = True
+    except BaseException:
+        exiting = True
+        raise
     finally:
-        if proc is not None:
-            _kill_group(proc)
-        # -f drops edits the command made to tracked files; the tree was clean.
-        back = ["checkout", "-q", "-f", *([] if branch else ["--detach"]), origin]
-        git(repo, *back)
-        for s, handler in old.items():
-            signal.signal(s, handler)
+        _deferring = True
+        try:
+            if proc is not None:
+                _kill_group(proc)
+            # -f drops edits the command made to tracked files; the tree was clean.
+            # Its own session keeps a terminal's group-wide SIGINT off git.
+            back = ["checkout", "-q", "-f", *([] if branch else ["--detach"]), origin]
+            _git(repo, tuple(back), new_session=True)
+        finally:
+            for s, handler in old.items():
+                signal.signal(s, handler)
+            _deferring = False
+        if _deferred and not exiting:
+            raise SystemExit(128 + _deferred[0])
     lines = output.rstrip("\n").splitlines()
     if len(lines) > TAIL:
         cut = len(lines) - TAIL

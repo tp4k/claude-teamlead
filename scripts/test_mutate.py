@@ -817,9 +817,9 @@ def case_failing_unmutated_command_refused(tmp: Path) -> None:
                             "--out", str(report))
     check("a command that fails on the unmutated tree is refused: exit 3, "
           "`cannot run:` on stderr, no MUTATION: line, no --out report, a clean tree",
-          code == 3 and err.startswith("cannot run:")
-          and "exits 1 on the unmutated tree" in err and "MUTATION:" not in out
+          code == 3 and err.startswith("cannot run:") and "MUTATION:" not in out
           and not report.exists() and repo.status() == ""
+          and "exits 1 on the unmutated tree" in err
           and (repo.root / "lib.py").read_text() == original, f"{code} {out}{err}")
     check("the refusal applies no mutant: the only run saw the unmutated file",
           snapshots(log) == [original], repr(snapshots(log)))
@@ -843,10 +843,9 @@ def case_unmutated_command_timeout_refused(tmp: Path) -> None:
                             "--max-generic", "1000", "--time-box", "1.0")
     took = time.monotonic() - start
     check("an unmutated command that outlives the time box is refused, not PASS",
-          code == 3 and err.startswith("cannot run:")
+          code == 3 and err.startswith("cannot run:") and "MUTATION:" not in out
           and "did not finish on the unmutated tree" in err
-          and "MUTATION:" not in out and took < 4 and repo.status() == "",
-          f"{code} {took:.1f}s {out}{err}")
+          and took < 4 and repo.status() == "", f"{code} {took:.1f}s {out}{err}")
 
 
 def case_passing_unmutated_command_runs_mutants(tmp: Path) -> None:

@@ -477,6 +477,19 @@ def case_background_descendant_killed_after_normal_exit(tmp: Path) -> None:
           f"pid={pid} took={took:.2f} gone={gone} status={status!r}\n{out}")
 
 
+def case_descendant_is_dead_before_the_restore(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    repo.commit("more")
+    spin = f"while :; do echo {LATE_WRITE} > src/limit.py; done"
+    run(repo, red, cmd=f"({spin}) >/dev/null 2>&1 & sleep 0.3")
+    time.sleep(0.3)
+    status = repo.git("status", "--porcelain")
+    check("a descendant rewriting a tracked file nonstop is dead before the restore",
+          status == "", status)
+
+
 LONG = ("for i in range(1, 301):\n    print(f'line {i}')\n"
         "raise SystemExit(1)\n")
 
@@ -519,6 +532,7 @@ CASES = [
     case_run_restores_on_sigterm,
     case_sigterm_kills_compound_command_descendants,
     case_background_descendant_killed_after_normal_exit,
+    case_descendant_is_dead_before_the_restore,
     case_run_restores_a_detached_head,
 ]
 

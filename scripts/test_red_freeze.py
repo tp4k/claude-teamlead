@@ -523,9 +523,13 @@ def fire(name):
 real_kill = red_freeze._kill_group
 real_run = subprocess.run
 
+waited = []
+
+
 def kill(proc):
     fire(at_kill)
     real_kill(proc)
+    waited.append(proc.returncode is not None)
 
 def run(args, *a, **kw):
     if "-f" in args:
@@ -551,6 +555,7 @@ try:
     print("CHILD-NOT-REAPED")
 except ChildProcessError:
     print("REAPED")
+print("GROUP-WAITED" if waited and all(waited) else "GROUP-NOT-WAITED")
 if mode == "again":
     red_freeze._kill_group = real_kill
     try:
@@ -583,6 +588,18 @@ def alive_cmd(pidfile: Path) -> str:
             f"while [ ! -s {shlex.quote(str(pidfile))} ]; do sleep 0.05; done")
 
 
+RUNNING_DELAY = 2.0
+RUNNING_HOLD = 1.0
+
+
+def running_cmd(pidfile: Path) -> str:
+    """SIGTERMs its parent once a late-writer descendant is alive, then keeps running:
+    cleanup starts with the shell itself still alive, not already reaped."""
+    return (f"{late_writer(RUNNING_DELAY, str(pidfile))} >/dev/null 2>&1 & "
+            f"while [ ! -s {shlex.quote(str(pidfile))} ]; do sleep 0.05; done; "
+            f"kill -TERM $PPID; sleep {RUNNING_HOLD}")
+
+
 def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
                 mode: str = "plain", hook: bool = False) -> tuple[str, str, bool]:
     """Run run_red in a harness that fires signals inside its cleanup.
@@ -604,6 +621,7 @@ def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
     cmd = DECODE_CMD if mode == "decode" else cmd
     pidfile = tmp.parent / f"{tmp.name}.pid"
     cmd = alive_cmd(pidfile) if mode == "alive" else cmd
+    cmd = running_cmd(pidfile) if mode == "running" else cmd
     proc = subprocess.run(
         [sys.executable, "-c", CLEANUP_HARNESS, str(SCRIPT.parent), str(repo.root),
          red, cmd, at_kill, at_restore, mode],
@@ -627,6 +645,16 @@ def case_sigterm_at_group_kill_start_still_cleans_up(tmp: Path) -> None:
           "restores the checkout and exits 143",
           started and out.split()[:2] == ["EXIT", "143"]
           and "REAPED" in out.splitlines() and restored, detail)
+    # Here the shell is still running when cleanup starts (the command SIGTERMed
+    # run_red and went on), so only the group kill ends it and only waiting reaps it.
+    out, detail, restored = cleanup_run(tmp / "b", "TERM", "-", mode="running")
+    pidfile = tmp / "b.pid"
+    started = pidfile.exists() and pidfile.read_text().isdigit()
+    check("a SIGTERM at the group kill start of a still-running command kills the "
+          "group, reaps the shell, restores the checkout and exits 143",
+          started and out.split()[:2] == ["EXIT", "143"]
+          and "REAPED" in out.splitlines() and "GROUP-WAITED" in out.splitlines()
+          and restored, detail)
 
 
 def case_sigterm_during_restore_checkout_does_not_abort_it(tmp: Path) -> None:

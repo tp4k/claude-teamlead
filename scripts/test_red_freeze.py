@@ -565,7 +565,8 @@ DELAY_SLOW = 1.0
 
 
 def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
-                mode: str = "plain", hook: bool = False) -> tuple[str, str, bool]:
+                mode: str = "plain", hook: bool = False,
+                cmd: str | None = None) -> tuple[str, str, bool]:
     """Run run_red in a harness that fires signals inside its cleanup.
 
     Returns (harness output, detail, True when the repo is back on `main` at the
@@ -580,7 +581,7 @@ def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
         path = repo.root / ".git/hooks/reference-transaction"
         path.write_text(GROUP_SIGINT_HOOK)
         path.chmod(0o755)
-    cmd = "exit 1" if normal else f"{late_writer(DELAY_SLOW)}; :"
+    cmd = cmd or ("exit 1" if normal else f"{late_writer(DELAY_SLOW)}; :")
     proc = subprocess.run(
         [sys.executable, "-c", CLEANUP_HARNESS, str(SCRIPT.parent), str(repo.root),
          red, cmd, at_kill, at_restore, mode],
@@ -631,6 +632,21 @@ def case_handlers_are_the_callers_after_run_red(tmp: Path) -> None:
     out, detail, _ = cleanup_run(tmp / "b", "TERM", "INT", normal=True)
     check("SIGINT and SIGTERM carry the caller's handlers again after run_red raises",
           out.split()[:2] == ["EXIT", "143"] and "HANDLERS True True" in out, detail)
+
+
+def case_signal_in_cleanup_does_not_replace_an_exit_already_raised(tmp: Path) -> None:
+    # The command SIGTERMs run_red mid-run (exit 143 already propagating); a SIGINT
+    # then lands in cleanup. The first exit's code stands.
+    out, detail, restored = cleanup_run(tmp / "a", "INT", "-",
+                                        cmd="kill -TERM $PPID; sleep 30")
+    check("a SIGINT in cleanup after a mid-run SIGTERM keeps exit 143, not 130",
+          out.split()[:2] == ["EXIT", "143"] and restored, detail)
+
+
+def case_a_signal_in_one_run_does_not_leak_into_the_next(tmp: Path) -> None:
+    out, detail, _ = cleanup_run(tmp / "a", "TERM", "-", normal=True, mode="again")
+    check("a signal recorded in one run_red call does not abort the next call",
+          out.split()[:2] == ["EXIT", "143"] and "SECOND RETURNED 0" in out, detail)
 
 
 def case_group_sigint_during_restore_does_not_break_it(tmp: Path) -> None:
@@ -732,6 +748,8 @@ CASES = [
     case_second_signal_in_cleanup_keeps_the_first_exit_code,
     case_signal_in_cleanup_after_a_normal_exit_is_not_swallowed,
     case_handlers_are_the_callers_after_run_red,
+    case_signal_in_cleanup_does_not_replace_an_exit_already_raised,
+    case_a_signal_in_one_run_does_not_leak_into_the_next,
     case_group_sigint_during_restore_does_not_break_it,
     case_background_descendant_killed_after_normal_exit,
     case_descendant_is_dead_before_the_restore,

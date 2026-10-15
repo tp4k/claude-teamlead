@@ -562,11 +562,13 @@ kill -INT -- "-$RF_PGID"
 sleep 0.3
 """
 DELAY_SLOW = 1.0
+# SIGTERMs the harness (the shell's parent) mid-run, so an exit is already raised
+# when cleanup starts.
+MIDRUN_CMD = "kill -TERM $PPID; sleep 30"
 
 
 def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
-                mode: str = "plain", hook: bool = False,
-                cmd: str | None = None) -> tuple[str, str, bool]:
+                mode: str = "plain", hook: bool = False) -> tuple[str, str, bool]:
     """Run run_red in a harness that fires signals inside its cleanup.
 
     Returns (harness output, detail, True when the repo is back on `main` at the
@@ -581,7 +583,8 @@ def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
         path = repo.root / ".git/hooks/reference-transaction"
         path.write_text(GROUP_SIGINT_HOOK)
         path.chmod(0o755)
-    cmd = cmd or ("exit 1" if normal else f"{late_writer(DELAY_SLOW)}; :")
+    cmd = "exit 1" if normal else f"{late_writer(DELAY_SLOW)}; :"
+    cmd = MIDRUN_CMD if mode == "midrun" else cmd
     proc = subprocess.run(
         [sys.executable, "-c", CLEANUP_HARNESS, str(SCRIPT.parent), str(repo.root),
          red, cmd, at_kill, at_restore, mode],
@@ -637,8 +640,7 @@ def case_handlers_are_the_callers_after_run_red(tmp: Path) -> None:
 def case_signal_in_cleanup_does_not_replace_an_exit_already_raised(tmp: Path) -> None:
     # The command SIGTERMs run_red mid-run (exit 143 already propagating); a SIGINT
     # then lands in cleanup. The first exit's code stands.
-    out, detail, restored = cleanup_run(tmp / "a", "INT", "-",
-                                        cmd="kill -TERM $PPID; sleep 30")
+    out, detail, restored = cleanup_run(tmp / "a", "INT", "-", mode="midrun")
     check("a SIGINT in cleanup after a mid-run SIGTERM keeps exit 143, not 130",
           out.split()[:2] == ["EXIT", "143"] and restored, detail)
 

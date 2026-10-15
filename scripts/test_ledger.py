@@ -113,18 +113,21 @@ def case_existing_lines_byte_identical(root: Path) -> None:
 
 
 def case_unterminated_ledger_inner_gap_adds_nothing(root: Path) -> None:
-    name = run_name_for(0, 0)
     text = HEAD + "\n".join(OLD)
-    _, ledger = apply(root, name, NEW, text)
-    got = ledger.read_text()
-    stripped = "".join(
-        ln for ln in got.splitlines(keepends=True) if ln.rstrip("\n") not in NEW
-    )
-    record(
-        "unterminated ledger, rows in inner gaps: no separator newline added",
-        stripped == text and all(r in got for r in NEW),
-        f"got={got!r}",
-    )
+    for first, second in ((0, 0), (3, 3)):
+        sub = root / f"g{first}{second}"
+        sub.mkdir()
+        _, ledger = apply(sub, run_name_for(first, second), NEW, text)
+        got = ledger.read_text()
+        stripped = "".join(
+            ln for ln in got.splitlines(keepends=True) if ln.rstrip("\n") not in NEW
+        )
+        record(
+            "unterminated ledger, rows in inner gaps: no separator newline added"
+            f" (gaps {first},{second})",
+            stripped == text and all(r in got for r in NEW),
+            f"got={got!r}",
+        )
 
 
 def case_existing_lines_byte_identical_crlf(root: Path) -> None:

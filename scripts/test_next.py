@@ -908,7 +908,7 @@ def case_bad_cwd_halts(tmp: Path) -> None:
     outside = tmp / "outside"
     outside.mkdir(parents=True)
     for label, text in (("missing", "{repo}/nope"), ("outside", f"{outside}"),
-                        ("escape", "escape")):
+                        ("escape", "escape"), ("file", "pkg/check.py")):
         w = World(tmp / label)
         add_files(w, {"pkg/check.py": IN_PKG})
         (w.repo / "escape").symlink_to(outside)
@@ -981,6 +981,11 @@ def case_coordinator_fix_carries_cwd(tmp: Path) -> None:
           r.kinds() == ["teamlead:verifier"] and bool(mut_cmd)
           and sh_code(mut_cmd, w.repo) == 0
           and sh_code("python3 check.py", w.repo) != 0, r.detail())
+    prompt = (r.prompts("teamlead:verifier") or [""])[0]
+    check("…and its verifier prompt carries the cd-quoted row label",
+          f"\n- (cd {shlex.quote(str(w.repo / 'pkg'))} && python3 check.py)\n"
+          in prompt, prompt)
+
     w2 = World(tmp / "bad")
     w2.put("briefs/impl-ws1-r1.md", VERIFICATION + f"cwd: {w2.repo}/nope\n"
            "- `python3 check.py`\n")

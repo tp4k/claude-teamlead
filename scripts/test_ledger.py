@@ -103,14 +103,28 @@ def case_existing_lines_byte_identical(root: Path) -> None:
         stripped = "".join(
             ln for ln in got.splitlines(keepends=True) if ln.rstrip("\n") not in NEW
         )
-        if not tail:
-            # the new last row sits after a newline the original lacked
-            stripped = stripped.rstrip("\n")
+        # a row landing after an unterminated last line adds one separator newline
+        want = text if tail else text + "\n"
         record(
             f"existing bytes unchanged ({label})",
-            stripped == text and all(r in got for r in NEW),
+            stripped == want and all(r in got for r in NEW),
             f"got={got!r}",
         )
+
+
+def case_unterminated_ledger_inner_gap_adds_nothing(root: Path) -> None:
+    name = run_name_for(0, 0)
+    text = HEAD + "\n".join(OLD)
+    _, ledger = apply(root, name, NEW, text)
+    got = ledger.read_text()
+    stripped = "".join(
+        ln for ln in got.splitlines(keepends=True) if ln.rstrip("\n") not in NEW
+    )
+    record(
+        "unterminated ledger, rows in inner gaps: no separator newline added",
+        stripped == text and all(r in got for r in NEW),
+        f"got={got!r}",
+    )
 
 
 def case_existing_lines_byte_identical_crlf(root: Path) -> None:
@@ -278,6 +292,7 @@ def case_no_rows_no_write(root: Path) -> None:
 CASES = [
     case_gap_index_from_hash,
     case_existing_lines_byte_identical,
+    case_unterminated_ledger_inner_gap_adds_nothing,
     case_existing_lines_byte_identical_crlf,
     case_mixed_line_endings_row_takes_table_ending,
     case_crlf_without_trailing_newline,

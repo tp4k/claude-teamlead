@@ -52,6 +52,7 @@ OPS_LINES = [
     "await aw_f()", "gt_a > gt_b", "ge_a >= ge_b", "plain = 1",
 ]
 # Every line can be deleted (None); these are the only other mutants of each.
+OPS_ORIGINAL = "\n".join(OPS_LINES) + "\n"
 OPS_EXPECTED = {
     "eq_a == eq_b": {"eq_a != eq_b"}, "ne_a != ne_b": {"ne_a == ne_b"},
     "lt_a < lt_b": {"lt_a <= lt_b"}, "le_a <= le_b": {"le_a < le_b"},
@@ -158,6 +159,13 @@ def mutant_snapshots(log: Path, original: str) -> list[str]:
     return snaps[1:]
 
 
+def same_as_saved(repo: Repo, tmp: Path, rel: str = "lib.py") -> str:
+    """A test command that passes on the current `rel` and fails on any mutant of it."""
+    saved = tmp / f"saved-{rel.replace('/', '_')}"
+    saved.write_bytes((repo.root / rel).read_bytes())
+    return f"cmp -s {shlex.quote(rel)} {shlex.quote(str(saved))}"
+
+
 def changed_line(original: list[str], snap: str) -> tuple[int, str | None]:
     """The one line `snap` differs from `original` in: (index, new text or None)."""
     lines = snap.splitlines()
@@ -221,7 +229,7 @@ def case_probe_patch_applied_exactly(tmp: Path) -> None:
                             "--max-generic", "0")
     want = "\n".join(OPS_LINES).replace("return ret_x", new_ret) + "\n"
     check("a probe's old text is replaced by its new text verbatim, under its clause",
-          snapshots(log) == [want] and "the ret clause" in out
+          mutant_snapshots(log, OPS_ORIGINAL) == [want] and "the ret clause" in out
           and (repo.root / "ops.txt").read_text() == "\n".join(OPS_LINES) + "\n",
           out + err + repr(snapshots(log)))
 
@@ -315,7 +323,8 @@ def case_each_op_flips_both_ways(tmp: Path) -> None:
     repo, log, code, out = run_ops(tmp, "--max-generic", "1000")
     got: dict[str, set[str | None]] = {ln: set() for ln in OPS_LINES}
     stacked = ""
-    for snap in snapshots(log):
+    mutants = mutant_snapshots(log, OPS_ORIGINAL)
+    for snap in mutants:
         try:
             idx, new = changed_line(OPS_LINES, snap)
         except AssertionError as exc:
@@ -324,12 +333,12 @@ def case_each_op_flips_both_ways(tmp: Path) -> None:
         got[OPS_LINES[idx]].add(new)
     want = {ln: ({None} | exp) for ln, exp in OPS_EXPECTED.items()}
     check("each mutant changes one line of a clean file, never stacking on the last",
-          stacked == "" and len(snapshots(log)) > 0, stacked + out)
+          stacked == "" and len(mutants) > 0, stacked + out)
     bad = {ln: (got[ln], want[ln]) for ln in OPS_LINES if got[ln] != want[ln]}
     check("== != < <= && || true false, return and await flip both ways, "
           "and nothing else is generated", not bad, f"{bad}\n{out}")
     check("the working tree is clean once all mutants ran",
-          len(snapshots(log)) > 0 and repo.status() == "", out)
+          len(mutants) > 0 and repo.status() == "", out)
 
 
 def case_sampling_deterministic_and_capped(tmp: Path) -> None:
@@ -340,11 +349,12 @@ def case_sampling_deterministic_and_capped(tmp: Path) -> None:
     code2, out2, err2 = mutate(
         repo, "--cmd", snapshot_cmd(log2, "ops.txt"), "--commits", commit,
         "--max-generic", "5", env={**ENV, "PYTHONHASHSEED": "1"})
+    mutants1 = mutant_snapshots(log1, OPS_ORIGINAL)
+    mutants2 = mutant_snapshots(log2, OPS_ORIGINAL)
     check("two runs, even under different hash seeds, pick the same mutants in order",
-          snapshots(log1) == snapshots(log2) and len(snapshots(log1)) > 0,
-          out1 + out2 + err2)
+          mutants1 == mutants2 and len(mutants1) > 0, out1 + out2 + err2)
     check("generic mutants never exceed --max-generic when more are available",
-          len(snapshots(log1)) == 5, str(len(snapshots(log1))))
+          len(mutants1) == 5, str(len(mutants1)))
     log3 = tmp / "log3"
     patch = write_probes(repo, [
         {"probe": "p1", "file": "ops.txt", "old": "plain = 1", "new": "plain = 2"},
@@ -352,18 +362,20 @@ def case_sampling_deterministic_and_capped(tmp: Path) -> None:
     code3, out3, err3 = mutate(
         repo, "--cmd", snapshot_cmd(log3, "ops.txt"), "--commits", commit,
         "--max-generic", "5", "--probes", patch)
+    mutants3 = mutant_snapshots(log3, OPS_ORIGINAL)
     check("brief probes run first and do not count against --max-generic",
-          len(snapshots(log3)) == 7 and "plain = 2" in snapshots(log3)[0]
-          and "t_a = 3" in snapshots(log3)[1], out3 + err3)
+          len(mutants3) == 7 and "plain = 2" in mutants3[0]
+          and "t_a = 3" in mutants3[1], out3 + err3)
 
 
 def case_time_box_reports_not_run(tmp: Path) -> None:
     repo = Repo(tmp / "repo")
     repo.append("lib.py", "\n" + LIB_ADDED + "def above(n):\n    return n > 1\n")
     commit = repo.commit("stream")
+    cmd = f"sleep 0.6; {same_as_saved(repo, tmp)}"
     start = time.monotonic()
-    code, out, err = mutate(repo, "--cmd", "sleep 0.6; false", "--commits", commit,
-                            "--max-generic", "1000", "--time-box", "1.0")
+    code, out, err = mutate(repo, "--cmd", cmd, "--commits", commit,
+                            "--max-generic", "1000", "--time-box", "1.5")
     took = time.monotonic() - start
     verdict, n = summary(out)
     check("mutants left when the time box expires are NOT RUN, never killed",
@@ -377,8 +389,8 @@ def case_time_box_reports_not_run(tmp: Path) -> None:
 def case_invalid_mutant(tmp: Path) -> None:
     repo = Repo(tmp / "repo")
     commit = repo.stream(STRONG_TEST)
-    code, out, err = mutate(repo, "--cmd", "false", "--commits", commit,
-                            "--max-generic", "1000")
+    code, out, err = mutate(repo, "--cmd", same_as_saved(repo, tmp), "--commits",
+                            commit, "--max-generic", "1000")
     verdict, n = summary(out)
     check("a .py mutant that does not compile is INVALID, not killed or survived",
           n.get("invalid") == 2 and n.get("killed") == 2 and n.get("survived") == 0
@@ -387,13 +399,14 @@ def case_invalid_mutant(tmp: Path) -> None:
     repo = Repo(tmp / "repo2")
     repo.write("m.txt", "a == b\n")
     commit = repo.commit("stream")
-    code, out, err = mutate(repo, "--cmd", "false", "--commits", commit)
+    fails = same_as_saved(repo, tmp, "m.txt")
+    code, out, err = mutate(repo, "--cmd", fails, "--commits", commit)
     verdict, n = summary(out)
     check("a failing non-.py mutant with no --check-cmd is UNCLASSIFIED, never killed, "
           "and does not fail the gate",
           n.get("unclassified") == 2 and n.get("killed") == 0 and code == 0
           and verdict == "PASS" and "UNCLASSIFIED" in out, out + err)
-    code, out, err = mutate(repo, "--cmd", "false", "--commits", commit,
+    code, out, err = mutate(repo, "--cmd", fails, "--commits", commit,
                             "--check-cmd", "test -s {file}")
     verdict, n = summary(out)
     check("--check-cmd exiting non-zero is INVALID; a passing one lets the test "
@@ -412,7 +425,8 @@ def case_restore_on_signal(tmp: Path) -> None:
         commit = repo.stream()
         original = (repo.root / "lib.py").read_text()
         marker = tmp / f"started{int(sig)}"
-        cmd = f"touch {shlex.quote(str(marker))}; sleep 30"
+        cmd = (f"{same_as_saved(repo, tmp)} && exit 0; "
+               f"touch {shlex.quote(str(marker))}; sleep 30")
         proc = subprocess.Popen(
             [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,
              "--cmd", cmd, "--commits", commit], env=ENV,
@@ -436,9 +450,11 @@ def case_restore_on_signal(tmp: Path) -> None:
     commit = repo.stream()
     original = (repo.root / "lib.py").read_text()
     marker = tmp / "started-twice"
+    cmd = (f"{same_as_saved(repo, tmp)} && exit 0; "
+           f"touch {shlex.quote(str(marker))}; sleep 30")
     proc = subprocess.Popen(
         [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,
-         "--cmd", f"touch {shlex.quote(str(marker))}; sleep 30", "--commits", commit],
+         "--cmd", cmd, "--commits", commit],
         env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + 10
     while not marker.exists() and time.monotonic() < deadline:
@@ -503,14 +519,13 @@ def case_time_box_zero_runs_nothing(tmp: Path) -> None:
     repo = Repo(tmp / "repo")
     commit = repo.stream(STRONG_TEST)
     log = tmp / "log"
-    code, out, err = mutate(repo, "--cmd", snapshot_cmd(log, "lib.py", "false"),
-                            "--commits", commit, "--max-generic", "1000",
-                            "--time-box", "0")
-    verdict, n = summary(out)
-    check("with no time left every mutant, even an unparsable one, is NOT RUN "
-          "and none is applied",
-          n.get("not_run") == 4 and sum(n.values()) == 4 and snapshots(log) == []
-          and code == 0 and repo.status() == "", out + err)
+    cmd = snapshot_cmd(log, "lib.py", same_as_saved(repo, tmp))
+    code, out, err = mutate(repo, "--cmd", cmd, "--commits", commit,
+                            "--max-generic", "1000", "--time-box", "0")
+    check("with no time left the unmutated pre-run is refused (exit 3) and nothing "
+          "runs or is applied",
+          code == 3 and err.startswith("cannot run:") and "MUTATION:" not in out
+          and snapshots(log) == [] and repo.status() == "", f"{code} {out}{err}")
 
 
 def case_one_survivor_among_kills_fails(tmp: Path) -> None:
@@ -528,11 +543,12 @@ def case_one_survivor_among_kills_fails(tmp: Path) -> None:
 
 def case_sampling_is_not_file_order(tmp: Path) -> None:
     repo, log, code, out = run_ops(tmp, "--max-generic", "5")
-    picked = {changed_line(OPS_LINES, s)[0] for s in snapshots(log)}
+    mutants = mutant_snapshots(log, OPS_ORIGINAL)
+    picked = {changed_line(OPS_LINES, s)[0] for s in mutants}
     per_line = [i for i in range(len(OPS_LINES))
                 for _ in range(1 + len(OPS_EXPECTED[OPS_LINES[i]]))]
     check("the sample is neither the first nor the last mutants in file order",
-          len(snapshots(log)) == 5 and picked != set(per_line[:5])
+          len(mutants) == 5 and picked != set(per_line[:5])
           and picked != set(per_line[-5:]), f"{picked}\n{out}")
 
 
@@ -542,7 +558,8 @@ def case_interrupt_exit_code(tmp: Path) -> None:
         commit = repo.stream()
         marker = tmp / f"started{int(sig)}"
         pidfile = tmp / f"pid{int(sig)}"
-        cmd = (f"echo $$ > {shlex.quote(str(pidfile))}; "
+        cmd = (f"{same_as_saved(repo, tmp)} && exit 0; "
+               f"echo $$ > {shlex.quote(str(pidfile))}; "
                f"touch {shlex.quote(str(marker))}; sleep 30")
         proc = subprocess.Popen(
             [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,
@@ -635,7 +652,8 @@ def case_deleted_file_in_stream(tmp: Path) -> None:
     os.remove(repo.root / "gone.py")
     repo.append("lib.py", "Y = 1 < 2\n")
     commit = repo.commit("stream: delete gone.py, extend lib.py")
-    code, out, err = mutate(repo, "--cmd", "false", "--commits", commit)
+    code, out, err = mutate(repo, "--cmd", same_as_saved(repo, tmp), "--commits",
+                            commit)
     verdict, n = summary(out)
     check("a stream that deletes a file still runs; the surviving files are mutated",
           code == 0 and verdict == "PASS" and re.search(r"lib\.py:2", out)
@@ -645,7 +663,9 @@ def case_deleted_file_in_stream(tmp: Path) -> None:
 def case_test_command_output_not_on_stdout(tmp: Path) -> None:
     repo = Repo(tmp / "repo")
     commit = repo.stream()
-    code, out, err = mutate(repo, "--cmd", "echo NOISE; false", "--commits", commit)
+    code, out, err = mutate(repo, "--cmd",
+                            f"echo NOISE; {same_as_saved(repo, tmp)}", "--commits",
+                            commit)
     check("the test command's own output never reaches the gate's stdout",
           "NOISE" not in out and summary(out)[0] == "PASS", out + err)
 
@@ -661,7 +681,8 @@ def case_probe_old_replaced_once(tmp: Path) -> None:
                             "--commits", commit, "--probes", patch,
                             "--max-generic", "0")
     check("a probe's old text is replaced at its first occurrence only",
-          snapshots(log) == ["x = 2\nx = 1\n"], out + err + repr(snapshots(log)))
+          mutant_snapshots(log, "x = 1\nx = 1\n") == ["x = 2\nx = 1\n"],
+          out + err + repr(snapshots(log)))
 
 
 def case_no_bytecode_in_the_tree(tmp: Path) -> None:
@@ -708,7 +729,8 @@ def case_interrupt_reports_leftover(tmp: Path) -> None:
     commit = repo.stream()
     marker = tmp / "started"
     errlog = tmp / "stderr"
-    cmd = f"touch stray.txt; touch {shlex.quote(str(marker))}; sleep 30"
+    cmd = (f"{same_as_saved(repo, tmp)} && exit 0; touch stray.txt; "
+           f"touch {shlex.quote(str(marker))}; sleep 30")
     with errlog.open("w") as fh:
         proc = subprocess.Popen(
             [sys.executable, str(SCRIPT), "--repo", str(repo.root), "--base", repo.base,

@@ -7,7 +7,10 @@ Usage: python3 mutate.py --repo <worktree> --base <sha> --cmd "<test command>"
            [--max-generic 20] [--time-box 600] [--out <report.md>]
 
 The verifier runs this after every brief command passes and while every
-repository writer is idle. It works in the given worktree, one mutant at a
+repository writer is idle. Before any mutant the test command runs once on the
+unmodified tree, inside the time box; a failure or timeout there is a refusal,
+because a command that fails for any reason would otherwise kill every mutant.
+It works in the given worktree, one mutant at a
 time: patch one file, run the test command, restore the file with
 `git checkout -- <file>`. A survivor (the command still passes on broken code)
 means the tests do not pin that line.
@@ -44,8 +47,9 @@ The last stdout line is
 not_run=<n> not_applied=<n>` on one line.
 Exit 0 PASS, 1 FAIL (any survivor or unapplied probe), 2 usage error (including
 neither or both of `--commits` / `--files`, or a probe file that is not a
-tracked regular file), 3 cannot run (dirty tree at start,
-restore failed, interrupted, or a dirty tree at the end). SIGTERM and SIGINT
+tracked regular file), 3 cannot run (dirty tree at start, the test command
+failing or not finishing on the unmutated tree, restore failed, interrupted, or
+a dirty tree at the end). SIGTERM and SIGINT
 restore the file being mutated before exiting.
 
 No dependencies beyond git, for the same reason as the rest of `scripts/`.
@@ -507,11 +511,30 @@ def report_leftover(repo: str) -> str:
     return leftover
 
 
+def unmutated_failure(repo: str, args: argparse.Namespace,
+                      deadline: float) -> Optional[str]:
+    """Why `--cmd` cannot be trusted on the unmodified tree, or None when it passes."""
+    remaining = deadline - time.monotonic()
+    code = run_shell(args.cmd, repo, remaining) if remaining > 0 else None
+    if code is None:
+        return "the test command did not finish on the unmutated tree in the time box"
+    if code != 0:
+        return f"the test command exits {code} on the unmutated tree"
+    return None
+
+
 def run_queue(repo: str, queue: list[Mutant], args: argparse.Namespace) -> int:
     deadline = time.monotonic() + args.time_box
     rows: list[Row] = []
     try:
         try:
+            refusal = unmutated_failure(repo, args, deadline)
+            if refusal:
+                print(f"cannot run: {refusal}", file=sys.stderr)
+                report_leftover(repo)
+                return EXIT_CANNOT_RUN
+            if report_leftover(repo):
+                return EXIT_CANNOT_RUN
             for m in queue:
                 if time.monotonic() >= deadline:
                     rows.append(Row(m, NOT_RUN))

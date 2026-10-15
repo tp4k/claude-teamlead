@@ -817,7 +817,8 @@ def case_failing_unmutated_command_refused(tmp: Path) -> None:
                             "--out", str(report))
     check("a command that fails on the unmutated tree is refused: exit 3, "
           "`cannot run:` on stderr, no MUTATION: line, no --out report, a clean tree",
-          code == 3 and err.startswith("cannot run:") and "MUTATION:" not in out
+          code == 3 and err.startswith("cannot run:")
+          and "exits 1 on the unmutated tree" in err and "MUTATION:" not in out
           and not report.exists() and repo.status() == ""
           and (repo.root / "lib.py").read_text() == original, f"{code} {out}{err}")
     check("the refusal applies no mutant: the only run saw the unmutated file",
@@ -825,6 +826,13 @@ def case_failing_unmutated_command_refused(tmp: Path) -> None:
     code, out, err = mutate(repo, "--cmd", "false", "--commits", commit)
     check("a plain failing command is refused too, not counted as every mutant killed",
           code == 3 and "MUTATION:" not in out, f"{code} {out}{err}")
+    repo2 = Repo(tmp / "repo2")
+    commit2 = repo2.stream(STRONG_TEST)
+    code, out, err = mutate(repo2, "--cmd", "touch stray.txt; false",
+                            "--commits", commit2)
+    check("a refusal after a pre-run that dirtied the tree names the leftover file",
+          code == 3 and "exits 1 on the unmutated tree" in err
+          and "stray.txt" in err and "MUTATION:" not in out, f"{code} {out}{err}")
 
 
 def case_unmutated_command_timeout_refused(tmp: Path) -> None:
@@ -835,8 +843,10 @@ def case_unmutated_command_timeout_refused(tmp: Path) -> None:
                             "--max-generic", "1000", "--time-box", "1.0")
     took = time.monotonic() - start
     check("an unmutated command that outlives the time box is refused, not PASS",
-          code == 3 and err.startswith("cannot run:") and "MUTATION:" not in out
-          and took < 4 and repo.status() == "", f"{code} {took:.1f}s {out}{err}")
+          code == 3 and err.startswith("cannot run:")
+          and "did not finish on the unmutated tree" in err
+          and "MUTATION:" not in out and took < 4 and repo.status() == "",
+          f"{code} {took:.1f}s {out}{err}")
 
 
 def case_passing_unmutated_command_runs_mutants(tmp: Path) -> None:

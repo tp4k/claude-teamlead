@@ -331,7 +331,7 @@ def case_run_restores_branch_and_head(tmp: Path) -> None:
           repo.git("symbolic-ref", "--short", "HEAD") == "main"
           and repo.git("rev-parse", "HEAD") == green, repo.git("status", "-sb"))
     code, out = run(repo, red, cmd="echo ERR-LINE >&2; echo OUT-LINE; exit 3")
-    check("a failing command's exit code and its stderr+stdout tail are reported as before",
+    check("a failing command keeps its exit code and its stderr+stdout tail",
           f"RED run {red[:9]}: exit 3" in out and "ERR-LINE\nOUT-LINE" in out, out)
 
 

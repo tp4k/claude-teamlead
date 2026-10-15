@@ -126,7 +126,16 @@ def check(repo: str, head: str, reds: list[str]) -> tuple[list[str], list[str], 
 TAIL = 200
 
 
+_starting = False
+_deferred: list[int] = []
+
+
 def _raise_exit(signum: int, _frame: object) -> None:
+    # While Popen starts, `proc` is not bound yet, so an exit raised there would
+    # skip the group kill. Record the signal; run_red raises once `proc` is bound.
+    if _starting:
+        _deferred.append(signum)
+        return
     raise SystemExit(128 + signum)
 
 
@@ -153,14 +162,23 @@ def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
     sha = git(repo, "rev-parse", "--verify", f"{red}^{{commit}}").strip()
     branch = git(repo, "branch", "--show-current").strip()
     origin = branch or git(repo, "rev-parse", "HEAD").strip()
+    global _starting
     old = {s: signal.signal(s, _raise_exit)
            for s in (signal.SIGINT, signal.SIGTERM)}
     proc: subprocess.Popen[str] | None = None
     try:
         git(repo, "checkout", "-q", "--no-overwrite-ignore", "--detach", sha)
-        proc = subprocess.Popen(cmd, shell=True, cwd=repo, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                start_new_session=True)
+        _deferred.clear()
+        _starting = True
+        try:
+            proc = subprocess.Popen(cmd, shell=True, cwd=repo, text=True,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT,
+                                    start_new_session=True)
+        finally:
+            _starting = False
+        if _deferred:
+            raise SystemExit(128 + _deferred[0])
         output, _ = proc.communicate()
     finally:
         if proc is not None:

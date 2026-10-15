@@ -901,6 +901,25 @@ def case_signal_during_pre_run(tmp: Path) -> None:
           f"rc={proc.returncode} alive={alive} {outlog.read_text()}")
 
 
+def case_refusal_runs_no_mutant(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream(STRONG_TEST)
+    code, out, err = mutate(repo, "--cmd", "false", "--commits", commit,
+                            "--max-generic", "1000")
+    check("a refused run evaluates no mutant at all: stdout has no result row, "
+          "not even an INVALID one",
+          code == 3 and out == "" and repo.status() == "", f"{code} {out!r}{err}")
+
+
+def case_dirty_pre_run_refused_before_mutants(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    code, out, err = mutate(repo, "--cmd", "touch stray.txt", "--commits", commit,
+                            "--max-generic", "1000")
+    check("a pre-run that leaves the tree dirty is refused before any mutant runs",
+          code == 3 and out == "" and "stray.txt" in err, f"{code} {out!r}{err}")
+
+
 CASES = [
     case_survivor_fails_gate,
     case_all_killed_passes,
@@ -934,6 +953,8 @@ CASES = [
     case_unmutated_command_timeout_refused,
     case_passing_unmutated_command_runs_mutants,
     case_signal_during_pre_run,
+    case_refusal_runs_no_mutant,
+    case_dirty_pre_run_refused_before_mutants,
 ]
 
 

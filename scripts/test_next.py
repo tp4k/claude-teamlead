@@ -893,6 +893,16 @@ def case_cwd_applies_until_the_next_cwd_line(tmp: Path) -> None:
           and bool(mut_cmd) and sh_code(mut_cmd, w.repo) == 0
           and run_cmd.count("pkg") == 1, f"{run_cmd!r} {mut_cmd!r}")
 
+    w = World(tmp / "noted")
+    add_files(w, {"pkg/check.py": IN_PKG})
+    w.put("briefs/impl-ws1-r1.md", VERIFICATION
+          + f"cwd: `{w.repo}/pkg` (run from here)\n- `python3 check.py`\n")
+    run_cmd, mut_cmd = red_and_cmd(reported(w))
+    check("a backticked cwd followed by a note runs both commands from pkg/",
+          bool(run_cmd) and sh_code(run_cmd, w.repo) == 0
+          and bool(mut_cmd) and sh_code(mut_cmd, w.repo) == 0,
+          f"{run_cmd!r} {mut_cmd!r}")
+
 
 def case_bad_cwd_halts(tmp: Path) -> None:
     outside = tmp / "outside"
@@ -971,7 +981,6 @@ def case_coordinator_fix_carries_cwd(tmp: Path) -> None:
           r.kinds() == ["teamlead:verifier"] and bool(mut_cmd)
           and sh_code(mut_cmd, w.repo) == 0
           and sh_code("python3 check.py", w.repo) != 0, r.detail())
-
     w2 = World(tmp / "bad")
     w2.put("briefs/impl-ws1-r1.md", VERIFICATION + f"cwd: {w2.repo}/nope\n"
            "- `python3 check.py`\n")

@@ -16,6 +16,8 @@ that needs an install is a suite nobody runs.
 """
 from __future__ import annotations
 
+import ast
+import json
 import os
 import shlex
 import subprocess
@@ -442,14 +444,15 @@ def case_sigterm_kills_compound_command_descendants(tmp: Path) -> None:
                           stderr=subprocess.STDOUT) as proc:
         deadline = time.monotonic() + 20
         while (not (ready.exists() and ready.read_text().isdigit())
-               and time.monotonic() < deadline):
+               and proc.poll() is None and time.monotonic() < deadline):
             time.sleep(0.05)
+        started = ready.exists() and ready.read_text().isdigit()
         proc.terminate()
         proc.wait(timeout=20)
     time.sleep(delay + 1.0)
     status = repo.git("status", "--porcelain")
     check("SIGTERM during `child; :` kills the child, so the restored tree stays clean",
-          status == "" and repo.git("branch", "--show-current") == "main"
+          started and status == "" and repo.git("branch", "--show-current") == "main"
           and repo.git("rev-parse", "HEAD") == green
           and LATE_WRITE not in (repo.root / "src/limit.py").read_text(), status)
 
@@ -569,9 +572,15 @@ DELAY_SLOW = 1.0
 # SIGTERMs the harness (the shell's parent) mid-run, so an exit is already raised
 # when cleanup starts.
 MIDRUN_CMD = "kill -TERM $PPID; sleep 30"
-# Output that is not UTF-8 makes communicate() raise, so cleanup is entered with the
-# deferral flag still unset.
+# Output that is not UTF-8 makes communicate() raise, so cleanup is entered through
+# an exception, not through the end of the command.
 DECODE_CMD = f"printf '\\377'; {late_writer(DELAY_SLOW)} >/dev/null 2>&1 &"
+
+
+def alive_cmd(pidfile: Path) -> str:
+    """Exits once a backgrounded late-writer wrote its pid: it is alive at cleanup."""
+    return (f"{late_writer(DELAY_SLOW, str(pidfile))} >/dev/null 2>&1 & "
+            f"while [ ! -s {shlex.quote(str(pidfile))} ]; do sleep 0.05; done")
 
 
 def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
@@ -593,6 +602,8 @@ def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
     cmd = "exit 1" if normal else f"{late_writer(DELAY_SLOW)}; :"
     cmd = MIDRUN_CMD if mode == "midrun" else cmd
     cmd = DECODE_CMD if mode == "decode" else cmd
+    pidfile = tmp.parent / f"{tmp.name}.pid"
+    cmd = alive_cmd(pidfile) if mode == "alive" else cmd
     proc = subprocess.run(
         [sys.executable, "-c", CLEANUP_HARNESS, str(SCRIPT.parent), str(repo.root),
          red, cmd, at_kill, at_restore, mode],
@@ -607,10 +618,15 @@ def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
 
 
 def case_sigterm_at_group_kill_start_still_cleans_up(tmp: Path) -> None:
-    out, detail, restored = cleanup_run(tmp / "a", "TERM", "-")
+    # The command exits with its descendant alive and its pid written, so the
+    # signal lands while there is something for the group kill to kill.
+    out, detail, restored = cleanup_run(tmp / "a", "TERM", "-", mode="alive")
+    pidfile = tmp / "a.pid"
+    started = pidfile.exists() and pidfile.read_text().isdigit()
     check("a SIGTERM landing as the group kill starts still kills the group, "
           "restores the checkout and exits 143",
-          out.split()[:2] == ["EXIT", "143"] and "REAPED" in out and restored, detail)
+          started and out.split()[:2] == ["EXIT", "143"]
+          and "REAPED" in out.splitlines() and restored, detail)
 
 
 def case_sigterm_during_restore_checkout_does_not_abort_it(tmp: Path) -> None:
@@ -725,6 +741,194 @@ def case_descendant_is_dead_before_the_restore(tmp: Path) -> None:
           status == "", status)
 
 
+SWEEP_HARNESS = """\
+import json, os, signal, subprocess, sys, time
+sys.path.insert(0, sys.argv[1])
+import red_freeze
+repo, red, green, cmd, pidfile, settle = sys.argv[2:8]
+
+
+class CallerSignal(Exception):
+    pass
+
+
+def mine(*_):
+    raise CallerSignal
+
+
+def git(*args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL).stdout.strip()
+
+
+def attempt(at, seen):
+    git("checkout", "-q", "-f", "main")
+    if os.path.exists(pidfile):
+        os.remove(pidfile)
+    signal.signal(signal.SIGINT, mine)
+    signal.signal(signal.SIGTERM, mine)
+    code = red_freeze.run_red.__code__
+    info = {"line": at, "fired": False, "window": None, "exc": None}
+
+    def trace(frame, event, arg):
+        if frame.f_code is not code:
+            return None
+        if event == "line":
+            if at is None:
+                if frame.f_lineno not in seen:
+                    seen.append(frame.f_lineno)
+            elif frame.f_lineno == at and not info["fired"]:
+                info["fired"] = True
+                info["at_s"] = time.monotonic() - start
+                info["window"] = signal.getsignal(signal.SIGTERM) is not mine
+                info["exc"] = getattr(sys.exc_info()[0], "__name__", None)
+                sys.settrace(None)
+                os.kill(os.getpid(), signal.SIGTERM)
+        return trace
+
+    start = time.monotonic()
+    sys.settrace(trace)
+    try:
+        info["outcome"] = f"RETURNED {red_freeze.run_red(repo, red, cmd)[0]}"
+    except SystemExit as e:
+        info["outcome"] = f"EXIT {e.code}"
+    except CallerSignal:
+        info["outcome"] = "CALLER"
+    except Exception as e:
+        info["outcome"] = type(e).__name__
+    finally:
+        sys.settrace(None)
+    info["elapsed"] = time.monotonic() - start
+    info["handlers"] = [signal.getsignal(signal.SIGINT) is mine,
+                        signal.getsignal(signal.SIGTERM) is mine]
+    info["restored"] = (git("branch", "--show-current") == "main"
+                        and git("rev-parse", "HEAD") == green
+                        and git("status", "--porcelain") == "")
+    pid = int(open(pidfile).read() or 0) if os.path.exists(pidfile) else 0
+    stop = time.monotonic() + 1.0
+    info["gone"] = True
+    while pid:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        if time.monotonic() > stop:
+            info["gone"] = False
+            break
+        time.sleep(0.05)
+    return info
+
+
+lines = []
+baseline = attempt(None, lines)["outcome"]
+runs = [attempt(at, lines) for at in list(lines)]
+time.sleep(float(settle) + 0.5)
+late = "AFTER RESTORE" in open(os.path.join(repo, "src/limit.py")).read()
+print("RESULT", json.dumps({"baseline": baseline, "runs": runs, "late": late}))
+"""
+SWEEP_LONG = 4.0
+SWEEP_BG = 2.0
+
+
+def sweep_cmds(pid: str) -> dict[str, tuple[str, float]]:
+    """Command per shape and the delay of its late-writer: a long-running command
+    with a live descendant, a command that exits leaving one, and one that also
+    prints bytes that are not UTF-8."""
+    wait = f"while [ ! -s {shlex.quote(pid)} ]; do sleep 0.05; done"
+    bg = f"{late_writer(SWEEP_BG, pid)} >/dev/null 2>&1 & {wait}"
+    return {"long": (f"{late_writer(SWEEP_LONG, pid)}; :", SWEEP_LONG),
+            "normal": (bg, SWEEP_BG),
+            "decode": (f"printf '\\377'; {bg}", SWEEP_BG)}
+
+
+def run_red_spans() -> tuple[range, range]:
+    """Lines of run_red read from the live source: the outer `finally` up to the
+    group kill, and the stretch from Popen's return to the first wait."""
+    tree = ast.parse(SCRIPT.read_text())
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "run_red")
+    outer = next(n for n in fn.body if isinstance(n, ast.Try) and n.finalbody)
+    kill = min(c.lineno for st in outer.finalbody for c in ast.walk(st)
+               if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+               and c.func.id == "_kill_group")
+    popen = next(n.end_lineno or 0 for n in ast.walk(fn)
+                 if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
+                 and getattr(n.value.func, "attr", "") == "Popen")
+    wait = min(c.lineno for c in ast.walk(fn) if isinstance(c, ast.Call)
+               and getattr(c.func, "attr", "") == "communicate")
+    return range(outer.finalbody[0].lineno, kill + 1), range(popen + 1, wait + 1)
+
+
+def sweep_problems(shape: str, data: dict, spans: tuple[range, range]) -> list[str]:
+    fired = [r for r in data["runs"] if r["fired"]]
+    problems = []
+    if not fired:
+        problems.append("no line was injected")
+    if shape == "decode" and not any(r["line"] in spans[0] and r["window"]
+                                     for r in fired):
+        problems.append("no signal landed in the outer finally before the group kill")
+    if shape == "long" and not any(r["line"] in spans[1] and r["window"]
+                                   for r in fired):
+        problems.append("no signal landed between Popen's return and the wait")
+    for r in fired:
+        want = {"EXIT 143"}
+        if not r["window"]:
+            want = {"CALLER"}
+        elif r["exc"]:
+            want = {r["exc"]}
+        elif data["baseline"] == "UnicodeDecodeError":
+            want.add(data["baseline"])
+        why = []
+        if r["outcome"] not in want:
+            why.append(f"outcome {r['outcome']!r}, want one of {sorted(want)}")
+        if r["handlers"] != [True, True]:
+            why.append("caller's handlers not back")
+        if not r["restored"]:
+            why.append("branch, HEAD or tree not restored")
+        if not r["gone"]:
+            why.append("descendant still alive")
+        # A signal that lands while the command is certainly still running must end
+        # the run soon, not when the command does.
+        running = r["at_s"] < SWEEP_LONG - 1.5
+        if shape == "long" and running and r["elapsed"] - r["at_s"] > 1.0:
+            why.append(f"held {r['elapsed'] - r['at_s']:.1f}s after landing")
+        if why:
+            problems.append(f"line {r['line']} (exc {r['exc']}): " + "; ".join(why))
+    if data["late"]:
+        problems.append("a descendant wrote after the restore")
+    return problems
+
+
+def case_a_sigterm_at_any_run_red_line_is_survived(tmp: Path) -> None:
+    spans = run_red_spans()
+    running = {}
+    for shape, (cmd, delay) in sweep_cmds(str(tmp / "PIDFILE")).items():
+        root = tmp / shape
+        root.mkdir()
+        repo = Repo(root)
+        repo.write("tests/check.py", CHECK)
+        red = repo.red()
+        green = repo.commit("more")
+        pidfile = tmp / f"{shape}.pid"
+        cmd = cmd.replace(str(tmp / "PIDFILE"), str(pidfile))
+        running[shape] = subprocess.Popen(
+            [sys.executable, "-c", SWEEP_HARNESS, str(SCRIPT.parent), str(root), red,
+             green, cmd, str(pidfile), str(delay)],
+            env=ENV, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            start_new_session=True)
+    for shape, proc in running.items():
+        out, err = proc.communicate(timeout=240)
+        final = [ln for ln in out.splitlines() if ln.startswith("RESULT ")]
+        name = f"a SIGTERM at any line of run_red ({shape} command)"
+        if not final:
+            check(name, False, f"exit {proc.returncode}\n{out}\n{err}")
+            continue
+        problems = sweep_problems(shape, json.loads(final[-1][len("RESULT "):]), spans)
+        check(f"{name} kills the group, restores the checkout and the caller's "
+              "handlers, and exits 143 (or reaches the caller's handler)",
+              not problems, "\n      ".join(problems[:12]))
+
+
 LONG = ("for i in range(1, 301):\n    print(f'line {i}')\n"
         "raise SystemExit(1)\n")
 
@@ -779,6 +983,7 @@ CASES = [
     case_failed_restore_leaves_the_callers_handlers,
     case_background_descendant_killed_after_normal_exit,
     case_descendant_is_dead_before_the_restore,
+    case_a_sigterm_at_any_run_red_line_is_survived,
     case_run_restores_a_detached_head,
 ]
 

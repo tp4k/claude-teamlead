@@ -19,7 +19,7 @@ A plan can cite nonexistent paths, incorrect signatures, renamed modules, or uns
 
 ## Inputs
 
-Read project and user-global CLAUDE.md before starting. Read all of `$RUN/plan.md`, including every workstream's spec, acceptance, scope, and verification commands. Read `$RUN/repo.txt` for the absolute repository path. Resolve relative paths against it.
+Read project and user-global CLAUDE.md before starting. Read all of `$RUN/plan.md`, including every workstream's spec, acceptance, scope, and verification commands. Read `$RUN/repo.txt` for the absolute repository path. Read every `$RUN/briefs/impl-ws*-r1.md` too, for its `## Verification commands`. Resolve relative paths against it.
 
 In pass 2, read the plan's `## Fix log` first. Check only the claims it corrected and the paths, symbols and components it introduced. Do not re-grade claims pass 1 already settled.
 
@@ -32,7 +32,7 @@ Check every concrete claim through reading or searching:
 1. **Existence:** locate each named path, directory, symbol, module, endpoint, table, queue, and config key. Use Read, Grep, and Glob. Flag claims you cannot establish. A path explicitly marked NEW need not exist yet.
 2. **Shape:** compare stated signatures, types, fields, and contracts with existing code. Flag differences such as `foo(a, b)` versus `foo(a, b, c)`.
 3. **Current behavior:** check each claim about present behavior. Flag unsupported claims, unmarked inferences, and contradictions.
-4. **Acceptance feasibility:** check that the test harness exists and can exercise the criterion. Check each verification binary, working directory, and package selector. Commands must run as written.
+4. **Acceptance feasibility:** check that the test harness exists and can exercise the criterion. Check each verification binary, working directory, and package selector. Commands must run as written. File a BLOCKER for each `cwd:` line of a brief's `## Verification commands` whose directory (absolute, or relative to the repo root) neither exists at HEAD nor is created by a path in that brief's `scope` fence or the workstream's files/scopes: at runtime the router halts on it.
 5. **Scope reachability:** check that the listed scope contains the code requiring changes.
 6. **Reuse claims:** check `reuse:` and `do not reuse:` under `### Reuse and scope`. Read the named symbol and callers. Verify its actual meaning. Incorrect rejection can cause duplication. Incorrect reuse can break existing callers. Judge factual meaning, without deciding whether the design distinction is worthwhile.
 7. **Review axes:** check each `no` in the three review tags and their routing copies. Trace whether inputs originate outside the process. Check whether the spec, benchmarks, or performance tests identify a hot path. Check whether outside callers rely on the changed surface.

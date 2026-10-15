@@ -31,9 +31,12 @@ and the head each Codex gate saw):
     `MUTATION: FAIL` writes the rework brief and spawns an implementer, never
     reviewers. The RED run appears nowhere else.
   * Reviewer spawns come from review_briefs.py. Triage verdicts route:
-    NEEDS_DECISION is logged to decisions-log.md and goes on, a docs-only
-    NEEDS_REWORK goes to a writer (its commit must say `docs-fix:`), STOP and an
+    the `recommended:` rows of NEEDS_DECISION and NEEDS_REWORK are logged to
+    decisions-log.md, NEEDS_DECISION goes on, a docs brief goes to a writer (its
+    commit must say `docs-fix:`) and then to a fresh Codex gate, STOP and an
     unreadable verdict halt.
+  * A `cwd:` line in a brief's `## Verification commands` is carried into the
+    RED and mutation commands as `(cd <dir> && <cmd>)`; a bad one halts.
   * `reworkCap` counts reworks, ordinary and gate-driven alike (see
     run_state.cap_reached); a rework past it halts.
   * `coordinator-fix:` commits are verified (verifier-fix-<k>.md) before the
@@ -81,6 +84,7 @@ import wait_for
 from run_state import Run, cap_reached, verdict
 
 APPROVED_LIKE = ("APPROVED", "APPROVED_WITH_NOTES")
+LOGGED = ("NEEDS_DECISION", "NEEDS_REWORK")
 STAGES = {"baseline": 0, "implement": 1, "verify": 2, "review": 3,
           "triage": 4, "triage-redo": 4, "writer": 5, "wait": 99}
 STAGE_LABEL = {"baseline": "baseline verification", "implement": "implementer",
@@ -92,6 +96,7 @@ SECTION = re.compile(r"^##\s+Verification commands\s*$(.*?)(?=^##\s|\Z)",
                      re.M | re.S)
 BULLET = re.compile(r"^\s*[-*]\s+`([^`]+)`\s*$", re.M)
 CHECK = re.compile(r"^\s*check:\s*(\S.*?)\s*$", re.M)
+CWD = re.compile(r"^[ \t]*cwd:[ \t]*(\S.*?)[ \t]*$")
 COMMITS = re.compile(r"^##\s+Commits\s*$(.*?)(?=^##\s|^```|\Z)", re.M | re.S)
 HEX = re.compile(r"\b[0-9a-f]{7,40}\b")
 TOUCHED = re.compile(r"touched by these commits:\s*[*`]*\s*(yes|no|unclear)", re.I)
@@ -112,6 +117,15 @@ class Spawn:
     prompt: str
     expect: Path
     model: str = ""
+
+
+@dataclass
+class BriefCmd:
+    """One verification bullet: its text, the `cwd:` in force and where it sits."""
+    text: str
+    cwd: str
+    cwd_line: int
+    brief: Path
 
 
 @dataclass
@@ -273,7 +287,20 @@ class Router:
                       self.r.text("questions.md"), re.M | re.S)
         return m.group(1).strip() if m else ""
 
-    def brief_commands(self, ws: int, rnd: int) -> tuple[list[str], str, str]:
+    @staticmethod
+    def section_commands(brief: Path, text: str, sec: re.Match[str]) -> list[BriefCmd]:
+        """The bullets of a section, each with the `cwd:` line above it."""
+        first = text.count("\n", 0, sec.start(1)) + 1
+        found: list[BriefCmd] = []
+        cwd, cwd_line = "", 0
+        for i, ln in enumerate(sec.group(1).split("\n")):
+            if m := CWD.match(ln):
+                cwd, cwd_line = m.group(1).strip("`").strip(), first + i
+            elif m := BULLET.match(ln):
+                found.append(BriefCmd(m.group(1), cwd, cwd_line, brief))
+        return found
+
+    def brief_commands(self, ws: int, rnd: int) -> tuple[list[BriefCmd], str, str]:
         """(commands, check command, the whole section) of one impl brief.
 
         A rework brief may omit the section: the nearest earlier one has it."""
@@ -284,13 +311,43 @@ class Router:
             except OSError:
                 continue
             sec = SECTION.search(text)
-            cmds = BULLET.findall(sec.group(1)) if sec else []
+            cmds = self.section_commands(brief, text, sec) if sec else []
             if sec and cmds:
                 chk = CHECK.search(sec.group(1))
                 return cmds, chk.group(1) if chk else "", sec.group(0).strip()
         raise Halt(f"impl-ws{ws}-r{rnd}.md and the rounds before it have no "
                    "`## Verification commands` bullets (- `<command>`): the "
                    "verifier would have nothing to run")
+
+    def cwd_dir(self, cmd: BriefCmd) -> Path:
+        """The directory a bullet runs in, symlinks resolved; the repo for none."""
+        repo = self.repo.resolve()
+        return (repo / cmd.cwd).resolve() if cmd.cwd else repo
+
+    def effective(self, cmd: BriefCmd, strict: bool) -> str:
+        """The command as it runs: raw at the repo root, `(cd <dir> && <cmd>)`
+        elsewhere. `strict` halts on a directory that is not inside the repo."""
+        repo, where = self.repo.resolve(), self.cwd_dir(cmd)
+        if strict and (not where.is_dir() or (where != repo
+                                              and repo not in where.parents)):
+            raise Halt(
+                f"{cmd.brief.name} line {cmd.cwd_line}: `cwd: {cmd.cwd}` is not an "
+                f"existing directory inside {self.repo}. Dispatch a planner Fix for "
+                f"line {cmd.cwd_line} of {cmd.brief} (point it at a directory that "
+                "exists, or that the brief's scope creates) and call next.py "
+                "again; no user question is needed")
+        return cmd.text if where == repo else \
+            f"(cd {shlex.quote(str(where))} && {cmd.text})"
+
+    def effective_commands(self, ws: int, rnd: int, strict: bool
+                           ) -> tuple[list[str], str, list[str]]:
+        """(effective commands, check command, row labels) of one impl brief.
+
+        The labels are the effective commands, and only when one has a cwd."""
+        cmds, check, _ = self.brief_commands(ws, rnd)
+        effs = [self.effective(c, strict) for c in cmds]
+        cwd = any(c.text != e for c, e in zip(cmds, effs))
+        return effs, check, effs if cwd else []
 
     def mutation(self, ws: int, rnd: int) -> str:
         return self.mutation_file(self.run / f"mutation-{self.r.tag(ws, rnd)}.md")
@@ -352,7 +409,12 @@ class Router:
     def log_earlier_decisions(self, ws: int, rnd: int) -> None:
         for k in range(1, rnd):
             tri = self.r.phase_file("triage", ws, k)
-            if tri is not None and verdict(tri) == "NEEDS_DECISION":
+            if tri is not None and verdict(tri) in LOGGED:
+                self.log_decisions(tri)
+
+    def log_gate_decisions(self) -> None:
+        for tri in sorted(self.run.glob("triage-gate-r*.md")):
+            if verdict(tri) in LOGGED:
                 self.log_decisions(tri)
 
     # --- commits -------------------------------------------------------------
@@ -484,8 +546,9 @@ class Router:
         if tv == "STOP":
             raise Halt(f"{tri.name} says STOP: read it and take it to the user")
         docs = self.run / "briefs" / f"docs-ws{ws}-r{rnd}.md"
-        if tv == "NEEDS_DECISION":
+        if tv in LOGGED:
             self.log_decisions(tri)
+        if tv == "NEEDS_DECISION":
             tv = "NEEDS_REWORK" if docs.exists() else "APPROVED_WITH_NOTES"
         if tv != "NEEDS_REWORK":
             return None
@@ -582,9 +645,21 @@ class Router:
                          "files outside your scope.")
         return Spawn("teamlead:implementer", "\n".join(lines), out)
 
+    @staticmethod
+    def label_lines(labels: list[str]) -> list[str]:
+        if not labels:
+            return []
+        return ["Some commands run from another directory. Write each command's "
+                "exact string below as the row's `<command>` under `## Commands`:",
+                *[f"- {c}" for c in labels]]
+
     def baseline(self, ws: int) -> Spawn:
         base, head = self.base(), self.head()
         out = self.run / f"baseline-ws{ws}.md"
+        try:
+            labels = self.effective_commands(ws, 1, False)[2]
+        except Halt:
+            labels = []
         prompt = "\n".join([
             self.head_line(),
             f"Workstream: WS-{ws}. Baseline check before any implementer has "
@@ -596,6 +671,7 @@ class Router:
             "Run no RED run and no mutation gate: nothing is implemented yet. A "
             "failure here is pre-existing; it is the baseline later rounds are "
             "compared against.",
+            *self.label_lines(labels),
             f"Output: write {out} in the verifier report shape (OUTCOME: PASS | "
             "FAIL | CANNOT_RUN), return the OUTCOME block + file line.",
         ])
@@ -621,7 +697,8 @@ class Router:
 
     def verifier_prompt(self, ws: int, rnd: int, commands: str, check: str,
                         commits: list[str], reds: list[str], out: Path,
-                        mutation_out: Path, inputs: str, label: str) -> str:
+                        mutation_out: Path, inputs: str, label: str,
+                        labels: list[str]) -> str:
         base = self.base()
         steps = self.verifier_commands(commands, check, base, commits,
                                        mutation_out, reds)
@@ -643,6 +720,7 @@ class Router:
             inputs,
             f"Baseline at the base: {baseline} — a failure it already shows is "
             "pre-existing.",
+            *self.label_lines(labels),
             "After the brief's commands, run these in order, from the repo, while "
             "no writer is active (they move HEAD and restore it):",
             *extra,
@@ -654,7 +732,7 @@ class Router:
     def verifier(self, ws: int, rnd: int) -> Spawn:
         rep = self.r.report(ws, rnd)
         assert rep is not None
-        cmds, check, _ = self.brief_commands(ws, rnd)
+        cmds, check, labels = self.effective_commands(ws, rnd, True)
         commits = self.check_commits(rep)
         tag = self.r.tag(ws, rnd)
         out = self.run / f"verifier-{tag}.md"
@@ -664,7 +742,7 @@ class Router:
             out, self.run / f"mutation-{tag}.md",
             f"Inputs: {self.r.brief(ws, rnd)} (## Verification commands), "
             f"{rep} (commits:), {self.run}/repo.txt.",
-            f"Workstream: WS-{ws}. Round: {rnd}. {self.infix_line()}")
+            f"Workstream: WS-{ws}. Round: {rnd}. {self.infix_line()}", labels)
         return Spawn("teamlead:verifier", prompt, out)
 
     def reviewers(self, ws: int, rnd: int) -> list[Spawn]:
@@ -768,14 +846,16 @@ class Router:
 
     # --- coordinator edits ---------------------------------------------------
 
-    def all_commands(self) -> tuple[list[str], str]:
+    def all_commands(self) -> tuple[list[str], str, list[str]]:
         cmds: list[str] = []
+        labels: list[str] = []
         check = ""
         for ws in self.r.roster:
-            c, ck, _ = self.brief_commands(ws, self.r.round_of(ws))
+            c, ck, lab = self.effective_commands(ws, self.r.round_of(ws), True)
             cmds += [x for x in self.gate_commands(ws, c) if x not in cmds]
+            labels += [x for x in lab if x not in labels]
             check = check or ck
-        return cmds, check
+        return cmds, check, labels
 
     def fix_plan(self) -> Plan | None:
         """Verify commits the coordinator made itself, before the gate (D17)."""
@@ -807,7 +887,7 @@ class Router:
                                "tests), commit, and call again")
             else:
                 k = lk
-        cmds, check = self.all_commands()
+        cmds, check, labels = self.all_commands()
         out = self.run / f"verifier-fix-{k}.md"
         prompt = self.verifier_prompt(
             0, 0, " && ".join(cmds), check, todo, [], out,
@@ -816,7 +896,7 @@ class Router:
             f"{self.run}/briefs/ (latest round), {self.run}/repo.txt. The commits "
             "under test were made by the coordinator after the streams were "
             "approved.",
-            f"Coordinator fix verification {k}. {self.infix_line()}")
+            f"Coordinator fix verification {k}. {self.infix_line()}", labels)
         plan = Plan(step=f"verifier gate — coordinator-fix commits (verification {k})")
         plan.spawns.append(Spawn("teamlead:verifier", prompt, out))
         plan.state["fixes"] = [*[dict(x) for x in recs[:k - 1]],
@@ -855,9 +935,6 @@ class Router:
                            "yourself and append it, then call again")
             if tv == "STOP":
                 raise Halt(f"{tri.name} says STOP: read it and take it to the user")
-            if tv == "NEEDS_DECISION":
-                self.log_decisions(tri)
-                tv = "APPROVED_WITH_NOTES"
             rec = self.gate_record(k)
             gate_head = str(rec.get("head") or self.head())
             past = self.between(gate_head, self.head())
@@ -868,12 +945,14 @@ class Router:
                 plan = self.gate_docs(k, rec)
                 if plan is not None:
                     return plan
+                if tv == "NEEDS_DECISION":
+                    return self.close()
                 if tv == "NEEDS_REWORK":
                     return self.gate_triage_redo(k)
         return self.gate_run(k + 1)
 
     def gate_docs(self, k: int, rec: dict[str, object]) -> Plan | None:
-        """The writer a gate triage asked for; the close once it has run."""
+        """The writer a gate triage asked for; the next gate once it has run."""
         started = as_int(rec.get("started_ns"))
         pending: list[Spawn] = []
         done = False
@@ -892,7 +971,7 @@ class Router:
             plan = Plan(step=f"docs-fix writer — gate {k}")
             plan.spawns = pending
             return plan
-        return self.close() if done else None
+        return self.gate_run(k + 1) if done else None
 
     def gate_prompt(self, g: int, review: str, redo: bool) -> Spawn:
         out = self.run / f"triage-gate-r{g}.md"
@@ -1024,6 +1103,7 @@ class Router:
             return Plan(step=f"{step} — {label}", notes=[action],
                         code=1 if needs_user else 0)
         self.base()
+        self.log_gate_decisions()
         plan = self.stream_plan()
         if plan is None:
             plan = self.fix_plan() or self.gate_plan()

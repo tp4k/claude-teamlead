@@ -810,6 +810,10 @@ def attempt(at, seen):
                 info["at_s"] = time.monotonic() - start
                 info["window"] = signal.getsignal(signal.SIGTERM) is not mine
                 info["exc"] = getattr(sys.exc_info()[0], "__name__", None)
+                # run_red's poll loop always suppresses TimeoutExpired; 3.9 reports the
+                # `with suppress` cleanup as a line event while it is still in exc_info
+                if info["exc"] == "TimeoutExpired":
+                    info["exc"] = None
                 sys.settrace(None)
                 os.kill(os.getpid(), signal.SIGTERM)
         return trace

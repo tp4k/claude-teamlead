@@ -908,7 +908,8 @@ def case_bad_cwd_halts(tmp: Path) -> None:
     outside = tmp / "outside"
     outside.mkdir(parents=True)
     for label, text in (("missing", "{repo}/nope"), ("outside", f"{outside}"),
-                        ("escape", "escape"), ("file", "pkg/check.py")):
+                        ("escape", "escape"), ("file", "pkg/check.py"),
+                        ("prose", "the `pkg` dir")):
         w = World(tmp / label)
         add_files(w, {"pkg/check.py": IN_PKG})
         (w.repo / "escape").symlink_to(outside)

@@ -96,6 +96,7 @@ SECTION = re.compile(r"^##\s+Verification commands\s*$(.*?)(?=^##\s|\Z)",
                      re.M | re.S)
 BULLET = re.compile(r"^\s*[-*]\s+`([^`]+)`\s*$", re.M)
 CHECK = re.compile(r"^\s*check:\s*(\S.*?)\s*$", re.M)
+BACKTICKED = re.compile(r"`([^`]+)`")
 CWD = re.compile(r"^[ \t]*cwd:[ \t]*(\S.*?)[ \t]*$")
 COMMITS = re.compile(r"^##\s+Commits\s*$(.*?)(?=^##\s|^```|\Z)", re.M | re.S)
 HEX = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -295,7 +296,10 @@ class Router:
         cwd, cwd_line = "", 0
         for i, ln in enumerate(sec.group(1).split("\n")):
             if m := CWD.match(ln):
-                cwd, cwd_line = m.group(1).strip("`").strip(), first + i
+                value = m.group(1)
+                span = BACKTICKED.match(value)
+                cwd = span.group(1).strip() if span else value.strip("`").strip()
+                cwd_line = first + i
             elif m := BULLET.match(ln):
                 found.append(BriefCmd(m.group(1), cwd, cwd_line, brief))
         return found

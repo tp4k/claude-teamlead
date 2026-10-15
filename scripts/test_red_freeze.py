@@ -455,8 +455,10 @@ import os, signal, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import red_freeze
 real_init = subprocess.Popen.__init__
+kept = []
 def init(self, *args, **kwargs):
     real_init(self, *args, **kwargs)
+    kept.append(self)
     if kwargs.get("shell"):
         os.kill(os.getpid(), signal.SIGTERM)
 subprocess.Popen.__init__ = init

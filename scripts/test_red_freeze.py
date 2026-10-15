@@ -529,6 +529,8 @@ def run(args, *a, **kw):
         fire(at_restore)
         if mode == "group":
             open(os.environ["RF_MARK"], "w").close()
+        if mode == "restorefail":
+            return subprocess.CompletedProcess(args, 1, "", "forced")
     return real_run(args, *a, **kw)
 
 red_freeze._kill_group = kill
@@ -537,6 +539,8 @@ try:
     print("RETURNED", red_freeze.run_red(repo, red, cmd)[0])
 except SystemExit as e:
     print("EXIT", e.code)
+except red_freeze.GitError:
+    print("GITERROR")
 print("HANDLERS", signal.getsignal(signal.SIGINT) is mine,
       signal.getsignal(signal.SIGTERM) is mine)
 try:
@@ -565,6 +569,9 @@ DELAY_SLOW = 1.0
 # SIGTERMs the harness (the shell's parent) mid-run, so an exit is already raised
 # when cleanup starts.
 MIDRUN_CMD = "kill -TERM $PPID; sleep 30"
+# Output that is not UTF-8 makes communicate() raise, so cleanup is entered with the
+# deferral flag still unset.
+DECODE_CMD = f"printf '\\377'; {late_writer(DELAY_SLOW)} >/dev/null 2>&1 &"
 
 
 def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
@@ -585,6 +592,7 @@ def cleanup_run(tmp: Path, at_kill: str, at_restore: str, normal: bool = False,
         path.chmod(0o755)
     cmd = "exit 1" if normal else f"{late_writer(DELAY_SLOW)}; :"
     cmd = MIDRUN_CMD if mode == "midrun" else cmd
+    cmd = DECODE_CMD if mode == "decode" else cmd
     proc = subprocess.run(
         [sys.executable, "-c", CLEANUP_HARNESS, str(SCRIPT.parent), str(repo.root),
          red, cmd, at_kill, at_restore, mode],
@@ -657,6 +665,20 @@ def case_group_sigint_during_restore_does_not_break_it(tmp: Path) -> None:
     check("a SIGINT to red_freeze's whole process group during the restore "
           "checkout leaves branch, HEAD and tree restored; exit 130",
           out.split()[:2] == ["EXIT", "130"] and restored, detail)
+
+
+def case_signal_in_cleanup_entered_with_the_flag_unset_still_cleans_up(
+        tmp: Path) -> None:
+    out, detail, restored = cleanup_run(tmp / "a", "TERM", "-", mode="decode")
+    check("a SIGTERM in cleanup entered through a decode error still kills the "
+          "group and restores the checkout",
+          restored and "UnicodeDecodeError" in detail, detail)
+
+
+def case_failed_restore_leaves_the_callers_handlers(tmp: Path) -> None:
+    out, detail, _ = cleanup_run(tmp / "a", "-", "-", normal=True, mode="restorefail")
+    check("a restore that raises GitError still puts the caller's handlers back",
+          "GITERROR" in out and "HANDLERS True True" in out, detail)
 
 
 def case_background_descendant_killed_after_normal_exit(tmp: Path) -> None:
@@ -753,6 +775,8 @@ CASES = [
     case_signal_in_cleanup_does_not_replace_an_exit_already_raised,
     case_a_signal_in_one_run_does_not_leak_into_the_next,
     case_group_sigint_during_restore_does_not_break_it,
+    case_signal_in_cleanup_entered_with_the_flag_unset_still_cleans_up,
+    case_failed_restore_leaves_the_callers_handlers,
     case_background_descendant_killed_after_normal_exit,
     case_descendant_is_dead_before_the_restore,
     case_run_restores_a_detached_head,

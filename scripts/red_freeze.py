@@ -35,7 +35,8 @@ above the tail and the reviewer reruns the command to see it. Every RED
 given gets the same command, so on a rework round pass `--run` this round's RED
 alone — an earlier RED predates this round's tests. `--run` needs a tree with no
 tracked changes (exit 2 otherwise, nothing checked out) and puts the branch and
-HEAD back afterwards, also on SIGINT/SIGTERM. It moves HEAD, so only the
+HEAD back afterwards, also on SIGINT/SIGTERM, after killing every process the
+command left in its session (a backgrounded child included). It moves HEAD, so only the
 verifier runs it, while every repository writer is idle; the implementer and
 the reviewers run the freeze check without `--run`.
 
@@ -44,6 +45,7 @@ No dependencies beyond git, for the same reason as the rest of `scripts/`.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import signal
 import subprocess
@@ -128,11 +130,22 @@ def _raise_exit(signum: int, _frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
+def _kill_group(proc: subprocess.Popen[str]) -> None:
+    """SIGKILL `proc`'s session and reap it, so nothing outlives the restore."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    proc.wait()
+
+
 def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
     """Run `cmd` on `red` checked out in place; return (exit code, output tail).
 
-    The tree must have no tracked changes. HEAD goes back to the branch (or the
-    detached commit) it was on, also on SIGINT/SIGTERM and when `cmd` fails.
+    The tree must have no tracked changes. `cmd` runs in its own session; on every
+    exit path that whole group is killed and reaped before HEAD goes back to the
+    branch (or the detached commit) it was on, also on SIGINT/SIGTERM and when
+    `cmd` fails. A descendant that calls setsid itself is out of reach.
     """
     if git(repo, "status", "--porcelain", "--untracked-files=no").strip():
         raise GitError("the working tree must be clean for --run "
@@ -142,17 +155,22 @@ def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
     origin = branch or git(repo, "rev-parse", "HEAD").strip()
     old = {s: signal.signal(s, _raise_exit)
            for s in (signal.SIGINT, signal.SIGTERM)}
+    proc: subprocess.Popen[str] | None = None
     try:
         git(repo, "checkout", "-q", "--no-overwrite-ignore", "--detach", sha)
-        proc = subprocess.run(cmd, shell=True, cwd=repo, text=True,
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(cmd, shell=True, cwd=repo, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+        output, _ = proc.communicate()
     finally:
+        if proc is not None:
+            _kill_group(proc)
         # -f drops edits the command made to tracked files; the tree was clean.
         back = ["checkout", "-q", "-f", *([] if branch else ["--detach"]), origin]
         git(repo, *back)
         for s, handler in old.items():
             signal.signal(s, handler)
-    lines = proc.stdout.rstrip("\n").splitlines()
+    lines = output.rstrip("\n").splitlines()
     if len(lines) > TAIL:
         cut = len(lines) - TAIL
         lines = [f"(... {cut} earlier lines omitted)", *lines[-TAIL:]]

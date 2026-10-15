@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -152,7 +153,7 @@ class World:
     @staticmethod
     def brief_text(ws: int, check_cmd: bool = False) -> str:
         return (f"# Implementer brief — WS-{ws} — round 1\n\n## Verification "
-                "commands\n\ncwd: the repo\n- `python3 -m unittest discover`\n"
+                "commands\n\n- `python3 -m unittest discover`\n"
                 "- `ruff check .`\n"
                 + ("check: python3 -m py_compile {file}\n" if check_cmd else ""))
 
@@ -270,6 +271,64 @@ class World:
         """Stream `ws` finished round 1 and was approved by its triage."""
         self.pin_base()
         self.finished_round(ws, 1, "APPROVED")
+
+
+IN_PKG = ("import os, sys\n"
+          "sys.exit(0 if os.path.basename(os.getcwd()) == 'pkg' else 1)\n")
+IN_SPACE = ("import os, sys\n"
+            "sys.exit(0 if os.path.basename(os.getcwd()) == 'sp ace' else 1)\n")
+AT_ROOT = "import os, sys\nsys.exit(0 if os.path.exists('app.py') else 1)\n"
+VERIFICATION = "# Implementer brief — WS-1 — round 1\n\n## Verification commands\n\n"
+
+
+def add_files(w: World, files: dict[str, str]) -> None:
+    """Fixture files committed into the base the run pins."""
+    for name, text in files.items():
+        path = w.repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        git(w.repo, "add", name)
+    git(w.repo, "commit", "-q", "-m", "fixture files")
+    w.base = w.head()
+
+
+def flag_value(line: str, flag: str) -> str:
+    words = shlex.split(line) if line else []
+    return words[words.index(flag) + 1] if flag in words else ""
+
+
+def sh_code(cmd: str, cwd: Path) -> int:
+    proc = subprocess.run(["sh", "-c", cmd], cwd=cwd, capture_output=True,
+                          check=False)
+    return proc.returncode
+
+
+def red_and_cmd(r: Result) -> tuple[str, str]:
+    """The `--run` value of the RED line and the `--cmd` value of the mutation line."""
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    red = next((ln for ln in p.splitlines() if "red_freeze.py" in ln), "")
+    mut = next((ln for ln in p.splitlines() if "mutate.py" in ln), "")
+    return flag_value(red, "--run"), flag_value(mut, "--cmd")
+
+
+def reported(w: World) -> Result:
+    """The stream reported a RED and a green commit: the verifier spawn."""
+    w.pin_base()
+    red, green = w.commit("tests: red"), w.commit("green")
+    w.report(1, 1, [red, green], reds=[red])
+    return w.step()
+
+
+def halted_on(r: Result, brief_line: int, cwd_text: str) -> bool:
+    return (r.code == 1 and "halt:" in r.out and not r.kinds()
+            and "impl-ws1-r1.md" in r.out and f"line {brief_line}" in r.out
+            and cwd_text in r.out and "planner Fix" in r.out
+            and "call next.py again" in r.out and "no user question" in r.out)
+
+
+def cwd_line(w: World) -> int:
+    lines = w.read("briefs/impl-ws1-r1.md").splitlines()
+    return next(i for i, ln in enumerate(lines, 1) if ln.startswith("cwd:"))
 
 
 def all_approved(w: World) -> None:
@@ -795,6 +854,249 @@ def case_barrier_orders_stages(tmp: Path) -> None:
           and "briefs/impl-ws2-r2.md" in r.spawns()[0][1], r.detail())
 
 
+# ------------------------------------------------------------- the brief's cwd
+
+def case_brief_cwd_reaches_red_and_mutation_commands(tmp: Path) -> None:
+    w = World(tmp / "pkg")
+    add_files(w, {"pkg/check.py": IN_PKG})
+    w.put("briefs/impl-ws1-r1.md", VERIFICATION + f"cwd: {w.repo}/pkg\n"
+          "- `python3 check.py`\n")
+    run_cmd, mut_cmd = red_and_cmd(reported(w))
+    check("a brief cwd reaches the red_freeze --run command: it passes from the "
+          "repo root only because it runs in pkg/",
+          bool(run_cmd) and sh_code(run_cmd, w.repo) == 0
+          and sh_code("python3 check.py", w.repo) != 0, run_cmd)
+    check("…and the mutate.py --cmd command",
+          bool(mut_cmd) and sh_code(mut_cmd, w.repo) == 0, mut_cmd)
+
+    w = World(tmp / "space")
+    add_files(w, {"sp ace/check.py": IN_SPACE})
+    w.put("briefs/impl-ws1-r1.md", VERIFICATION + f"cwd: {w.repo}/sp ace\n"
+          "- `python3 check.py`\n")
+    run_cmd, mut_cmd = red_and_cmd(reported(w))
+    check("a cwd with a space is quoted for the shell in both commands",
+          bool(run_cmd) and sh_code(run_cmd, w.repo) == 0
+          and bool(mut_cmd) and sh_code(mut_cmd, w.repo) == 0,
+          f"{run_cmd!r} {mut_cmd!r}")
+
+
+def case_cwd_applies_until_the_next_cwd_line(tmp: Path) -> None:
+    w = World(tmp)
+    add_files(w, {"where.py": AT_ROOT, "pkg/where.py": IN_PKG})
+    w.put("briefs/impl-ws1-r1.md", VERIFICATION + "- `python3 where.py`\n"
+          "cwd: pkg\n- `python3 where.py`\n"
+          f"cwd: `{w.repo}`\n- `python3 where.py`\n")
+    run_cmd, mut_cmd = red_and_cmd(reported(w))
+    check("bullets before any cwd run at the root, each later bullet in its own "
+          "cwd, a root cwd line after pkg returns to the root (both commands)",
+          bool(run_cmd) and sh_code(run_cmd, w.repo) == 0
+          and bool(mut_cmd) and sh_code(mut_cmd, w.repo) == 0
+          and run_cmd.count("pkg") == 1, f"{run_cmd!r} {mut_cmd!r}")
+
+
+def case_bad_cwd_halts(tmp: Path) -> None:
+    outside = tmp / "outside"
+    outside.mkdir(parents=True)
+    for label, text in (("missing", "{repo}/nope"), ("outside", f"{outside}"),
+                        ("escape", "escape")):
+        w = World(tmp / label)
+        add_files(w, {"pkg/check.py": IN_PKG})
+        (w.repo / "escape").symlink_to(outside)
+        text = text.format(repo=w.repo)
+        w.put("briefs/impl-ws1-r1.md", VERIFICATION + f"cwd: {text}\n"
+              "- `python3 check.py`\n")
+        r = reported(w)
+        check(f"a {label} cwd halts, naming the brief, the line and the cwd, and "
+              "the planner Fix; no verifier spawn", halted_on(r, cwd_line(w), text),
+              r.detail())
+        check(f"…and the {label} halt writes no verifier file",
+              not (w.run / "verifier-r1.md").exists(), r.detail())
+
+    w = World(tmp / "linked")
+    add_files(w, {"pkg/check.py": IN_PKG})
+    link = tmp / "repolink"
+    link.symlink_to(w.repo)
+    w.put("briefs/impl-ws1-r1.md", VERIFICATION + f"cwd: {link}/pkg\n"
+          "- `python3 check.py`\n")
+    r = reported(w)
+    run_cmd, _ = red_and_cmd(r)
+    check("a cwd reached through a symlink to the repo is inside it",
+          r.code == 0 and r.kinds() == ["teamlead:verifier"]
+          and sh_code(run_cmd, w.repo) == 0, r.detail())
+
+
+def case_cwd_created_by_the_stream(tmp: Path) -> None:
+    w = World(tmp)
+    w.put("briefs/impl-ws1-r1.md", VERIFICATION + "cwd: pkg\n"
+          "- `python3 check.py`\n")
+    r = w.step()
+    prompt = (r.prompts("teamlead:verifier") or [""])[0]
+    check("a cwd the stream will create does not halt the baseline spawn",
+          r.code == 0 and "baseline-ws1.md" in prompt
+          and f"(cd {shlex.quote(str(w.repo / 'pkg'))} && python3 check.py)"
+          in prompt, r.detail())
+    w.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: PASS\n")
+    r = w.step()
+    check("…and the implementer follows", r.kinds() == ["teamlead:implementer"],
+          r.detail())
+    first = w.commit("work without pkg")
+    w.report(1, 1, [first], reds=[first])
+    r = w.step()
+    check("the round's verifier does halt while pkg/ is still missing",
+          halted_on(r, cwd_line(w), "pkg"), r.detail())
+    (w.repo / "pkg").mkdir()
+    (w.repo / "pkg" / "check.py").write_text(IN_PKG)
+    git(w.repo, "add", "pkg/check.py")
+    git(w.repo, "commit", "-q", "-m", "create pkg")
+    second = w.head()
+    w.report(1, 1, [first, second], reds=[first])
+    r = w.step()
+    run_cmd, mut_cmd = red_and_cmd(r)
+    check("once the implementer's commit created pkg/, the verifier spawn runs "
+          "both commands from it", r.code == 0 and bool(run_cmd)
+          and sh_code(run_cmd, w.repo) == 0 and bool(mut_cmd)
+          and sh_code(mut_cmd, w.repo) == 0, r.detail())
+
+
+def case_coordinator_fix_carries_cwd(tmp: Path) -> None:
+    w = World(tmp / "ok")
+    add_files(w, {"pkg/check.py": IN_PKG})
+    w.put("briefs/impl-ws1-r1.md", VERIFICATION + f"cwd: {w.repo}/pkg\n"
+          "- `python3 check.py`\n")
+    all_approved(w)
+    w.commit("coordinator-fix: rename")
+    r = w.step()
+    _, mut_cmd = red_and_cmd(r)
+    check("a coordinator-fix verification runs the brief's command from its cwd",
+          r.kinds() == ["teamlead:verifier"] and bool(mut_cmd)
+          and sh_code(mut_cmd, w.repo) == 0
+          and sh_code("python3 check.py", w.repo) != 0, r.detail())
+
+    w2 = World(tmp / "bad")
+    w2.put("briefs/impl-ws1-r1.md", VERIFICATION + f"cwd: {w2.repo}/nope\n"
+           "- `python3 check.py`\n")
+    all_approved(w2)
+    w2.commit("coordinator-fix: rename")
+    r = w2.step()
+    check("a bad cwd halts a coordinator-fix verification too",
+          halted_on(r, cwd_line(w2), "nope"), r.detail())
+
+
+def case_baseline_filter_keys_on_cwd(tmp: Path) -> None:
+    def world(label: str, rows: str) -> tuple[World, str, str]:
+        w = World(tmp / label)
+        add_files(w, {"t.py": "pass\n", "pkg/t.py": "pass\n"})
+        w.put("briefs/impl-ws1-r1.md", VERIFICATION + "- `python3 t.py`\n"
+              f"cwd: {w.repo}/pkg\n- `python3 t.py`\n")
+        pkg = f"(cd {shlex.quote(str(w.repo / 'pkg'))} && python3 t.py)"
+        w.pin_base()
+        w.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: FAIL\n\n"
+              "## Commands\n\n" + rows.replace("PKG", pkg))
+        w.report(1, 1, [w.commit("work")])
+        return w, "python3 t.py", pkg
+
+    w, root, pkg = world("root-fails", "python3 t.py → exit 1\nPKG → exit 0\n")
+    _, cmd = red_and_cmd(w.step())
+    check("root fails, pkg passes → only the pkg command stays", cmd == pkg, cmd)
+    w, root, pkg = world("pkg-fails", "python3 t.py → exit 0\nPKG → exit 1\n")
+    _, cmd = red_and_cmd(w.step())
+    check("root passes, pkg fails → only the root command stays", cmd == root, cmd)
+    w, root, pkg = world("raw-only", "python3 t.py → exit 1\n")
+    _, cmd = red_and_cmd(w.step())
+    check("a failing raw-text row alone does not drop the pkg command",
+          cmd == pkg, cmd)
+
+    w = World(tmp / "labels")
+    add_files(w, {"pkg/t.py": "pass\n"})
+    w.put("briefs/impl-ws1-r1.md", VERIFICATION + "- `python3 t.py`\n"
+          f"cwd: {w.repo}/pkg\n- `python3 t.py`\n")
+    r = w.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    pkg = f"(cd {shlex.quote(str(w.repo / 'pkg'))} && python3 t.py)"
+    check("the baseline prompt lists both effective commands as the row labels",
+          "\n- python3 t.py\n" in p and f"\n- {pkg}\n" in p and "## Commands" in p,
+          p)
+    w.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: PASS\n")
+    w.report(1, 1, [w.commit("work")])
+    r = w.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    check("the stream verifier prompt lists them too",
+          "\n- python3 t.py\n" in p and f"\n- {pkg}\n" in p, p)
+
+    w = World(tmp / "plain")
+    r = w.step()
+    expected = "\n".join([
+        f"$RUN = {w.run}. Repo: {w.repo}.",
+        "Workstream: WS-1. Baseline check before any implementer has started: "
+        f"the base SHA is {w.base}.",
+        f"Expected HEAD: {w.base}.",
+        f"Inputs: {w.run}/briefs/impl-ws1-r1.md (## Verification commands), "
+        f"{w.run}/repo.txt.",
+        "Run the brief's verification commands exactly as your role file says. "
+        "Run no RED run and no mutation gate: nothing is implemented yet. A "
+        "failure here is pre-existing; it is the baseline later rounds are "
+        "compared against.",
+        f"Output: write {w.run}/baseline-ws1.md in the verifier report shape "
+        "(OUTCOME: PASS | FAIL | CANNOT_RUN), return the OUTCOME block + file "
+        "line."])
+    check("a brief with no cwd line gets today's baseline prompt, byte for byte",
+          (r.prompts("teamlead:verifier") or [""])[0] == expected, r.detail())
+
+
+def case_rework_recommendations_logged(tmp: Path) -> None:
+    w = World(tmp / "stream")
+    w.pin_base()
+    w.finished_round(1, 1, "NEEDS_REWORK")
+    w.put("triage-r1.md", "# Triage\n\nrecommended: use half-even\n\n"
+          "VERDICT: NEEDS_REWORK decisions=1\n")
+    r = w.step()
+    check("a NEEDS_REWORK triage's recommended row is logged and the implementer "
+          "runs", r.kinds() == ["teamlead:implementer"]
+          and "use half-even" in w.read("decisions-log.md"),
+          r.detail() + w.read("decisions-log.md"))
+    w.step("--redo")
+    w.step("--redo")
+    check("…once however often next.py runs",
+          w.read("decisions-log.md").count("use half-even") == 1,
+          w.read("decisions-log.md"))
+
+    w2 = World(tmp / "docs")
+    w2.pin_base()
+    w2.finished_round(1, 1, "NEEDS_REWORK")
+    (w2.run / "briefs" / "impl-ws1-r2.md").unlink()
+    w2.put("triage-r1.md", "# Triage\n\nrecommended: reword the README row\n\n"
+           "VERDICT: NEEDS_REWORK docs_only=yes decisions=1\n")
+    w2.put("briefs/docs-ws1-r1.md", "# Docs fix\n")
+    r = w2.step()
+    check("a docs-only NEEDS_REWORK at the current round is logged before the "
+          "writer", r.kinds() == ["teamlead:writer"]
+          and "reword the README row" in w2.read("decisions-log.md"),
+          r.detail() + w2.read("decisions-log.md"))
+
+    w3 = World(tmp / "gate")
+    all_approved(w3)
+    w3.step()
+    w3.codex_review(1)
+    w3.step()
+    w3.gate_triage(1, "NEEDS_REWORK", "recommended: tighten the cap")
+    w3.rework_brief(1, 2)
+    r = w3.step()
+    w3.step("--redo")
+    check("a gate NEEDS_REWORK triage's recommended row is logged once",
+          r.kinds() == ["teamlead:implementer"]
+          and w3.read("decisions-log.md").count("tighten the cap") == 1,
+          r.detail() + w3.read("decisions-log.md"))
+
+    w4 = World(tmp / "approved")
+    w4.pin_base()
+    w4.finished_round(1, 1, "APPROVED")
+    w4.put("triage-r1.md", "# Triage\n\nrecommended: ignore me\n\n"
+           "VERDICT: APPROVED\n")
+    w4.step()
+    check("an APPROVED triage is not scanned", not w4.read("decisions-log.md"),
+          w4.read("decisions-log.md"))
+
+
 # ------------------------------------------------------------------- triage
 
 def case_halts_only_where_the_user_is_needed(tmp: Path) -> None:
@@ -1183,7 +1485,7 @@ def case_gate_triage_unreadable_or_stop_halts(tmp: Path) -> None:
           r.kinds() == ["teamlead:triage"], r.detail())
 
 
-def case_gate_docs_only_closes_after_the_writer(tmp: Path) -> None:
+def case_gate_docs_fix_reruns_the_gate(tmp: Path) -> None:
     w = World(tmp)
     all_approved(w)
     w.step()
@@ -1197,9 +1499,65 @@ def case_gate_docs_only_closes_after_the_writer(tmp: Path) -> None:
     fix = w.commit("docs-fix: gate rows", "README.md")
     w.put("docs-fix-ws1-r1.md", f"DOCS_FIXED rows=1 commit={fix}\n")
     r = w.step()
-    check("the docs-fix commit does not need a fresh gate → close",
+    gates = json.loads(w.read("next-state.json")).get("gates", {})
+    check("the docs-fix commit is checked at a fresh gate 2, not closed over",
+          r.code == 0 and any("review_package.py" in c for c in r.commands())
+          and any("run_codex_review.py" in c for c in r.commands())
+          and "final-report.md" not in r.out
+          and gates.get("2", {}).get("head") == fix, r.detail())
+    w.codex_review(2)
+    r = w.step()
+    check("gate 2's review in → its triage", r.kinds() == ["teamlead:triage"]
+          and f"{w.run}/triage-gate-r2.md" in r.spawns()[0][1], r.detail())
+    w.gate_triage(2, "APPROVED")
+    r = w.step()
+    check("a clean gate 2 triage at that HEAD closes the run",
           r.code == 0 and "final-report.md" in r.out
           and not any("review_package.py" in c for c in r.commands()), r.detail())
+
+
+def case_gate_decision_with_docs_brief_runs_the_writer(tmp: Path) -> None:
+    w = World(tmp / "docs")
+    all_approved(w)
+    w.step()
+    w.codex_review(1)
+    w.step()
+    w.gate_triage(1, "NEEDS_DECISION", "recommended: keep half-up")
+    w.put("briefs/docs-ws1-r1.md", "# Docs fix\n")
+    r = w.step()
+    check("a gate NEEDS_DECISION with a docs brief → the writer, no close",
+          r.kinds() == ["teamlead:writer"] and "final-report.md" not in r.out,
+          r.detail())
+    check("…and its recommended row is logged",
+          "keep half-up" in w.read("decisions-log.md"), w.read("decisions-log.md"))
+    fix = w.commit("docs-fix: gate decision rows", "README.md")
+    w.put("docs-fix-ws1-r1.md", f"DOCS_FIXED rows=1 commit={fix}\n")
+    r = w.step()
+    gates = json.loads(w.read("next-state.json")).get("gates", {})
+    check("the writer's docs-fix commit → gate 2 at the new HEAD, no close",
+          any("review_package.py" in c for c in r.commands())
+          and "final-report.md" not in r.out
+          and gates.get("2", {}).get("head") == fix, r.detail())
+    w.codex_review(2)
+    w.step()
+    w.gate_triage(2, "APPROVED")
+    r = w.step()
+    check("an approved gate 2 closes", r.code == 0 and "final-report.md" in r.out
+          and not any("review_package.py" in c for c in r.commands()), r.detail())
+    check("the decision row is still logged once",
+          w.read("decisions-log.md").count("keep half-up") == 1,
+          w.read("decisions-log.md"))
+
+    w2 = World(tmp / "nodocs")
+    all_approved(w2)
+    w2.step()
+    w2.codex_review(1)
+    w2.step()
+    w2.gate_triage(1, "NEEDS_DECISION", "recommended: keep half-up")
+    r = w2.step()
+    check("a gate NEEDS_DECISION with no docs brief still closes as approved",
+          r.code == 0 and "final-report.md" in r.out and not r.kinds()
+          and "keep half-up" in w2.read("decisions-log.md"), r.detail())
 
 
 def case_gate_docs_brief_must_postdate_the_gate(tmp: Path) -> None:
@@ -1343,6 +1701,13 @@ CASES = [
     case_mutation_fail_routes_to_rework,
     case_pass_routes_to_reviewers,
     case_barrier_orders_stages,
+    case_brief_cwd_reaches_red_and_mutation_commands,
+    case_cwd_applies_until_the_next_cwd_line,
+    case_bad_cwd_halts,
+    case_cwd_created_by_the_stream,
+    case_coordinator_fix_carries_cwd,
+    case_baseline_filter_keys_on_cwd,
+    case_rework_recommendations_logged,
     case_halts_only_where_the_user_is_needed,
     case_needs_decision_logged,
     case_docs_only_routes_to_writer,
@@ -1351,7 +1716,8 @@ CASES = [
     case_gate_triage_is_stale_after_new_commits,
     case_gate_rework_shares_cap,
     case_gate_triage_unreadable_or_stop_halts,
-    case_gate_docs_only_closes_after_the_writer,
+    case_gate_docs_fix_reruns_the_gate,
+    case_gate_decision_with_docs_brief_runs_the_writer,
     case_gate_docs_brief_must_postdate_the_gate,
     case_gate_is_fresh_only_at_a_new_head,
     case_coordinator_fix_reverified,

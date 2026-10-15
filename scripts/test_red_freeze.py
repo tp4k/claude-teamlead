@@ -412,6 +412,70 @@ def case_run_restores_a_detached_head(tmp: Path) -> None:
           and repo.git("rev-parse", "HEAD") == green
           and repo.git("status", "--porcelain") == "", repo.git("status", "-sb"))
 
+LATE_WRITE = "AFTER RESTORE"
+
+
+def late_writer(delay: float, pidfile: str | None = None) -> str:
+    """Shell words for a python child that sleeps, then overwrites a tracked file."""
+    pid = f"open({pidfile!r}, 'w').write(str(os.getpid())); " if pidfile else ""
+    code = (f"import os, time; {pid}time.sleep({delay}); "
+            f"open('src/limit.py', 'w').write({LATE_WRITE!r})")
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
+
+
+def case_sigterm_kills_compound_command_descendants(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    green = repo.commit("more")
+    delay = 1.5
+    args = [sys.executable, str(SCRIPT), "--repo", str(repo.root),
+            "--run", f"{late_writer(delay)}; :", red]
+    with subprocess.Popen(args, env=ENV, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT) as proc:
+        deadline = time.monotonic() + 20
+        while (repo.git("branch", "--show-current") != ""
+               and time.monotonic() < deadline):
+            time.sleep(0.05)
+        proc.terminate()
+        proc.wait(timeout=20)
+    time.sleep(delay + 1.0)
+    status = repo.git("status", "--porcelain")
+    check("SIGTERM during `child; :` kills the child, so the restored tree stays clean",
+          status == "" and repo.git("branch", "--show-current") == "main"
+          and repo.git("rev-parse", "HEAD") == green
+          and LATE_WRITE not in (repo.root / "src/limit.py").read_text(), status)
+
+
+def case_background_descendant_killed_after_normal_exit(tmp: Path) -> None:
+    repo = Repo(tmp)
+    repo.write("tests/check.py", CHECK)
+    red = repo.red()
+    repo.commit("more")
+    delay = 3.0
+    pidfile = tmp.parent / f"{tmp.name}.pid"
+    cmd = (f"{late_writer(delay, str(pidfile))} >/dev/null 2>&1 & "
+           f"while [ ! -s {shlex.quote(str(pidfile))} ]; do sleep 0.05; done")
+    start = time.monotonic()
+    code, out = run(repo, red, cmd=cmd)
+    took = time.monotonic() - start
+    pid = int(pidfile.read_text()) if pidfile.exists() and pidfile.read_text() else 0
+    gone = False
+    stop = time.monotonic() + 1.0
+    while pid and time.monotonic() < stop:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            gone = True
+            break
+        time.sleep(0.05)
+    time.sleep(max(0.0, start + delay + 1.0 - time.monotonic()))
+    status = repo.git("status", "--porcelain")
+    check("a backgrounded descendant is killed once the command returns",
+          pid > 0 and took < delay - 1.0 and gone and status == ""
+          and LATE_WRITE not in (repo.root / "src/limit.py").read_text(),
+          f"pid={pid} took={took:.2f} gone={gone} status={status!r}\n{out}")
+
 
 LONG = ("for i in range(1, 301):\n    print(f'line {i}')\n"
         "raise SystemExit(1)\n")
@@ -453,6 +517,8 @@ CASES = [
     case_run_refuses_staged_change,
     case_run_keeps_ignored_files,
     case_run_restores_on_sigterm,
+    case_sigterm_kills_compound_command_descendants,
+    case_background_descendant_killed_after_normal_exit,
     case_run_restores_a_detached_head,
 ]
 

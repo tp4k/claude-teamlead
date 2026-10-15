@@ -45,6 +45,7 @@ No dependencies beyond git, for the same reason as the rest of `scripts/`.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import re
 import signal
@@ -131,21 +132,20 @@ def check(repo: str, head: str, reds: list[str]) -> tuple[list[str], list[str], 
 TAIL = 200
 
 
-_deferring = False
-_deferred: list[int] = []
+# How often the wait on the command looks at a recorded signal.
+POLL_SECONDS = 0.1
+_recorded: list[int] = []
 
 
-def _raise_exit(signum: int, _frame: object) -> None:
-    # While Popen starts, `proc` is not bound yet, so an exit raised there would
-    # skip the group kill; in cleanup, one raised there would skip the kill or the
-    # restore. Record the signal there; run_red exits once it is safe. Raising
-    # also starts deferring, so a signal landing before `finally` runs is recorded.
-    global _deferring
-    if _deferring:
-        _deferred.append(signum)
-        return
-    _deferring = True
-    raise SystemExit(128 + signum)
+def _record(signum: int, _frame: object) -> None:
+    # Never raises: an exit raised at an arbitrary statement could skip the group
+    # kill, the restore or the handler restore. run_red exits at fixed points.
+    _recorded.append(signum)
+
+
+def _exit_if_signalled() -> None:
+    if _recorded:
+        raise SystemExit(128 + _recorded[0])
 
 
 def _kill_group(proc: subprocess.Popen[str]) -> None:
@@ -171,30 +171,26 @@ def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
     sha = git(repo, "rev-parse", "--verify", f"{red}^{{commit}}").strip()
     branch = git(repo, "branch", "--show-current").strip()
     origin = branch or git(repo, "rev-parse", "HEAD").strip()
-    global _deferring
-    _deferring = False
-    old = {s: signal.signal(s, _raise_exit)
+    _recorded.clear()
+    old = {s: signal.signal(s, _record)
            for s in (signal.SIGINT, signal.SIGTERM)}
     proc: subprocess.Popen[str] | None = None
     exiting = False
     try:
         git(repo, "checkout", "-q", "--no-overwrite-ignore", "--detach", sha)
-        _deferred.clear()
-        _deferring = True
         proc = subprocess.Popen(cmd, shell=True, cwd=repo, text=True,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT,
                                 start_new_session=True)
-        if _deferred:
-            raise SystemExit(128 + _deferred[0])
-        _deferring = False
-        output, _ = proc.communicate()
-        _deferring = True
+        while True:
+            _exit_if_signalled()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                output, _ = proc.communicate(timeout=POLL_SECONDS)
+                break
     except BaseException:
         exiting = True
         raise
     finally:
-        _deferring = True
         try:
             if proc is not None:
                 _kill_group(proc)
@@ -205,9 +201,8 @@ def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
         finally:
             for s, handler in old.items():
                 signal.signal(s, handler)
-            _deferring = False
-        if _deferred and not exiting:
-            raise SystemExit(128 + _deferred[0])
+        if not exiting:
+            _exit_if_signalled()
     lines = output.rstrip("\n").splitlines()
     if len(lines) > TAIL:
         cut = len(lines) - TAIL

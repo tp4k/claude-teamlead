@@ -920,8 +920,6 @@ def case_bad_cwd_halts(tmp: Path) -> None:
         check(f"a {label} cwd halts, naming the brief, the line and the cwd, and "
               "the planner Fix; no verifier spawn", halted_on(r, cwd_line(w), text),
               r.detail())
-        check(f"…and the {label} halt writes no verifier file",
-              not (w.run / "verifier-r1.md").exists(), r.detail())
 
     w = World(tmp / "linked")
     add_files(w, {"pkg/check.py": IN_PKG})

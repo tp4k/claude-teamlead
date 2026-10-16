@@ -17,7 +17,8 @@ and the head each Codex gate saw):
 
   * Before dispatch it prints run_state.plan_next's step. It never invents one.
   * A baseline verifier per workstream at the base SHA, then the implementers.
-    A baseline that fails is the pre-existing state; one that CANNOT_RUN halts.
+    A baseline that fails is the pre-existing state; one that CANNOT_RUN halts,
+    unless each CANNOT_RUN row is `absent at base: <path>` and git confirms it.
     The base SHA is pinned to `base-sha.txt` on the first call (or `--base`).
   * Stages are a barrier: baseline, implementer, verifier, reviewers, triage,
     writer. The lowest stage any workstream is at is dispatched as one batch,
@@ -27,7 +28,9 @@ and the head each Codex gate saw):
   * The commits a report lists are looked up before a verifier is paid for:
     they must exist, descend from the base and be on HEAD's history.
   * The verifier's prompt carries the RED run (`red_freeze.py --run`, this
-    round's RED only) and the mutation gate (`mutate.py`). A verifier FAIL or a
+    round's RED only) and the mutation gate (`mutate.py`). A PASS whose `head:`
+    another stream's rework has since moved past is archived and verified
+    again before any reviewer reads it. A verifier FAIL or a
     `MUTATION: FAIL` writes the rework brief and spawns an implementer, never
     reviewers. The RED run appears nowhere else.
   * Reviewer spawns come from review_briefs.py. Triage verdicts route:
@@ -77,6 +80,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import archive_reports
 import paths
 import review_briefs
 import run_state
@@ -105,6 +109,9 @@ MUTATION = re.compile(r"^MUTATION:\s*(PASS|FAIL)\b", re.M)
 DOCS_FIXED = re.compile(r"DOCS_FIXED\s+rows=\d+\s+commit=([0-9a-fA-F]{7,40})")
 TERMINAL = re.compile(r"^\S+\s+(done|failed):\s*(.*?)\s*$")
 RECOMMENDED = re.compile(r"recommended:\s*(.+)")
+SNAPSHOT_HEAD = re.compile(r"^head:\s*`?([0-9a-f]{7,40})\b", re.M)
+CANNOT_ROW = re.compile(r"→\s*CANNOT_RUN\(([^)\n]*)\)")
+ABSENT = re.compile(r"^absent at base:\s*`?([^`]+?)`?\s*$")
 BASELINE_ROW = re.compile(r"^(.*?)\s*→\s*(?:exit\s+(\d+)|TIMEOUT)\b")
 
 
@@ -170,6 +177,11 @@ def terminals(log: Path) -> list[tuple[str, str]]:
     except OSError:
         return []
     return [(m.group(1), m.group(2)) for ln in lines if (m := TERMINAL.match(ln))]
+
+
+def q(path: Path) -> str:
+    """A path as one shell word."""
+    return shlex.quote(str(path))
 
 
 def clean(row: str) -> str:
@@ -265,7 +277,8 @@ class Router:
     def tags(self, ws: int) -> dict[str, str]:
         """input/hot/public for one stream; unknown means yes (more review)."""
         line = self.routing(ws)
-        validation = self.r.text("plan-validation.md")
+        validation = (self.r.text("plan-validation.md") + "\n"
+                      + self.r.text(run_state.TAG_UPGRADES))
         out = {}
         for tag in ("input", "hot", "public"):
             m = re.search(rf"\b{tag}:\s*(yes|no)\b", line)
@@ -322,6 +335,26 @@ class Router:
         raise Halt(f"impl-ws{ws}-r{rnd}.md and the rounds before it have no "
                    "`## Verification commands` bullets (- `<command>`): the "
                    "verifier would have nothing to run")
+
+    def absent_at_base(self, baseline: Path) -> bool:
+        """Whether every CANNOT_RUN row of a clean baseline is a path git
+        confirms is missing at the base: a directory or file the run creates."""
+        text = baseline.read_text(errors="replace")
+        reasons = CANNOT_ROW.findall(text)
+        if not reasons or not re.search(r"^tree:\s*CLEAN\b", text, re.M):
+            return False
+        repo, base = self.repo.resolve(), self.base()
+        for reason in reasons:
+            m = ABSENT.match(reason.strip())
+            if not m:
+                return False
+            path = (repo / m.group(1).strip()).resolve()
+            if path != repo and repo not in path.parents:
+                return False
+            rel = path.relative_to(repo).as_posix()
+            if rel == "." or self.git("cat-file", "-e", f"{base}:{rel}")[0] == 0:
+                return False
+        return True
 
     def cwd_dir(self, cmd: BriefCmd) -> Path:
         """The directory a bullet runs in, symlinks resolved; the repo for none."""
@@ -519,10 +552,13 @@ class Router:
                 baseline = self.run / f"baseline-ws{ws}.md"
                 if not baseline.exists():
                     return Need("baseline", ws, 1)
-                if verdict(baseline) == "CANNOT_RUN":
+                if (verdict(baseline) == "CANNOT_RUN"
+                        and not self.absent_at_base(baseline)):
                     raise Halt(f"{baseline.name} is CANNOT_RUN: the verification "
                                "commands cannot run at the base, which is an "
-                               "environment problem, not a code failure")
+                               "environment problem, not a code failure (a row "
+                               "`CANNOT_RUN(absent at base: <path>)` for a path "
+                               "the run creates does not stop it)")
                 for dep in self.deps(ws):
                     if dep in r.roster and dep != ws and (
                             dep in seen
@@ -583,7 +619,24 @@ class Router:
                        "did not run, and a pass without it measures nothing")
         if self.gate_driven(ws, rnd):
             return None
+        if self.stale(ws, rnd, ver):
+            # Another stream's rework moved HEAD after this report: reviewers
+            # would stop on its `head:`, so verify the new HEAD first.
+            try:
+                archive_reports.archive_reports(self.run, [ver])
+            except (OSError, ValueError) as exc:
+                raise Halt(f"{ver.name} names an earlier HEAD and could not be "
+                           f"archived: {exc}") from exc
+            return Need("verify", ws, rnd)
         return self.review_need(ws, rnd)
+
+    def stale(self, ws: int, rnd: int, ver: Path) -> bool:
+        """The report's `head:` is not HEAD, and no reviewer was sent yet."""
+        tag = self.r.tag(ws, rnd)
+        if (self.run / "briefs" / f"review-{tag}-code.md").exists():
+            return False
+        m = SNAPSHOT_HEAD.search(ver.read_text(errors="replace"))
+        return bool(m) and self.resolve(m.group(1)) != self.head()
 
     def rework(self, ws: int, rnd: int, rep: Path, ver: Path) -> Need | None:
         """A failed gate is a rework: write the brief, then the round after."""
@@ -674,29 +727,34 @@ class Router:
             "Run the brief's verification commands exactly as your role file says. "
             "Run no RED run and no mutation gate: nothing is implemented yet. A "
             "failure here is pre-existing; it is the baseline later rounds are "
-            "compared against.",
+            "compared against. A command that cannot run only because a "
+            "directory or file the run's workstreams will create is absent at "
+            "the base gets the row `<command> → CANNOT_RUN(absent at base: "
+            "<repo-relative path>)`; next.py checks that path against the base.",
             *self.label_lines(labels),
             f"Output: write {out} in the verifier report shape (OUTCOME: PASS | "
             "FAIL | CANNOT_RUN), return the OUTCOME block + file line.",
         ])
         return Spawn("teamlead:verifier", prompt, out)
 
+    def script(self, name: str) -> str:
+        """`python3 <plugin>/scripts/<name>`, the path one shell word."""
+        return f"python3 {q(self.plugin / 'scripts' / name)}"
+
     def verifier_commands(self, cmd: str, check: str, base: str, commits: list[str],
                           out: Path, reds: list[str]) -> list[str]:
         lines: list[str] = []
         if reds:
-            lines.append(f"python3 {self.plugin}/scripts/red_freeze.py --repo "
-                         f"{shlex.quote(str(self.repo))} --run {shlex.quote(cmd)} "
-                         + " ".join(reds))
+            lines.append(f"{self.script('red_freeze.py')} --repo {q(self.repo)} "
+                         f"--run {shlex.quote(cmd)} " + " ".join(reds))
         probes = out.with_name(out.name.replace("mutation-", "probes-")
                                .replace(".md", ".json"))
         lines.append(
-            f"python3 {self.plugin}/scripts/mutate.py --repo "
-            f"{shlex.quote(str(self.repo))} --base {base} --cmd {shlex.quote(cmd)} "
-            f"--commits {' '.join(commits)}"
+            f"{self.script('mutate.py')} --repo {q(self.repo)} --base {base} "
+            f"--cmd {shlex.quote(cmd)} --commits {' '.join(commits)}"
             + (f" --check-cmd {shlex.quote(check)}" if check else "")
-            + (f" --probes {probes}" if probes.exists() else "")
-            + f" --out {out}")
+            + (f" --probes {q(probes)}" if probes.exists() else "")
+            + f" --out {q(out)}")
         return lines
 
     def verifier_prompt(self, ws: int, rnd: int, commands: str, check: str,
@@ -1045,11 +1103,13 @@ class Router:
     def gate_start(self, g: int, pkg: Path, log: Path, seen: int,
                    fresh: bool) -> Plan:
         plan = Plan(step=f"Codex gate {g} — the whole diff, every stream approved")
-        plan.cmds.append(("run", f"python3 {self.plugin}/scripts/review_package.py "
-                          f"{self.run} --out {pkg}"))
+        # The pinned base, not review_package.py's merge base with origin/main:
+        # the gate reviews exactly the range the verifiers did.
+        plan.cmds.append(("run", f"{self.script('review_package.py')} "
+                          f"{q(self.run)} --base {self.base()} --out {q(pkg)}"))
         plan.cmds.append(("run-background",
-                          f"python3 {self.plugin}/scripts/run_codex_review.py "
-                          f"{pkg}/PROMPT.md --artifact-stem codex-gate"))
+                          f"{self.script('run_codex_review.py')} "
+                          f"{q(pkg / 'PROMPT.md')} --artifact-stem codex-gate"))
         plan.notes.append(f"wait for {log} to gain a done: or failed: line; "
                           "next.py does that on the next call")
         plan.gate_log, plan.gate_seen = str(log), seen
@@ -1081,9 +1141,9 @@ class Router:
     def close(self) -> Plan:
         plan = Plan(step="11 — every workstream approved, nothing left to review")
         if (self.run / "deferred-rows.md").exists():
-            plan.cmds.append(("run", f"python3 {self.plugin}/scripts/ledger.py "
-                              f"apply {self.run} --ledger "
-                              f"{self.repo}/docs/deferred-work.md"))
+            plan.cmds.append(("run", f"{self.script('ledger.py')} apply "
+                              f"{q(self.run)} --ledger "
+                              f"{q(self.repo / 'docs' / 'deferred-work.md')}"))
         plan.notes.append(
             f"write {self.run}/final-report.md (references/roles/scribe.md), "
             "include the entries of decisions-log.md and the deferred rows, then "

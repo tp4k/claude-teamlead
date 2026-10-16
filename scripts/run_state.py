@@ -646,6 +646,25 @@ def log_cut(r: Run, cut: str) -> None:
         log.write_text(head.rstrip("\n") + "\n" + row + "\n")
 
 
+TAG_UPGRADES = "tag-upgrades.md"
+UPGRADE = re.compile(r"^.*\brequires\s+(?:input|hot|public):\s*yes\b.*$", re.M)
+
+
+def keep_tag_upgrades(r: Run) -> None:
+    """Copy the validator's tag upgrades to tag-upgrades.md, once each.
+
+    Pass 2 replaces plan-validation.md, so an upgrade only pass 1 named would
+    vanish with it, and under `when-needed` its specialist would be skipped.
+    """
+    found = UPGRADE.findall(r.text("plan-validation.md"))
+    path = r.run / TAG_UPGRADES
+    existing = r.text(TAG_UPGRADES)
+    new = [ln for ln in found if ln not in existing.splitlines()]
+    if new:
+        head = existing if existing else "# Tag upgrades\n\n"
+        path.write_text(head.rstrip("\n") + "\n" + "\n".join(new) + "\n")
+
+
 def pass_two_owed(r: Run) -> bool:
     """Whether the validator's second pass is due: the Fix round added paths.
 
@@ -673,6 +692,7 @@ def plan_next(r: Run) -> tuple[int | str, str, str, bool] | None:
     only when that round added paths, asks nothing, and logs any `Smaller:` cut
     it names to `$RUN/decisions-log.md`.
     """
+    keep_tag_upgrades(r)
     gap = plan_written_gap(r)
     if gap:
         return gap
@@ -750,6 +770,8 @@ def spawn_gap(r: Run, role: str) -> tuple[int | str, str, str, bool] | None:
     """
     if role not in GATED_ROLES:
         return None
+    # A validator spawned now may be pass 2, about to replace pass 1's report.
+    keep_tag_upgrades(r)
     if not (r.run / "config.json").exists():
         return plan_next(r)  # step 3 or 3a, whichever is missing
     gap = cycle_gap(r)

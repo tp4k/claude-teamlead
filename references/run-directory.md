@@ -51,6 +51,7 @@ The writer owns one assigned file per invocation: living plan sections, a human 
 | `triage-r<M>.md` | triage agent (opus) | later reviewers, Codex gate, final report | Worst verdict (including NEEDS_DECISION), merged defects, demotions and reasons (never dropped), user Notes, `docs_only=`, and next review set with each specialist's basis. The gate's triage is `triage-gate-r<K>.md`. |
 | `briefs/docs-ws<N>-r<M>.md`, `docs-fix-ws<N>-r<M>.md` | triage; writer | writer; router | A docs-only round: the claims to fix, then `DOCS_FIXED rows=<n> commit=<sha>`. |
 | `decisions-log.md` | `next.py` | scribe, final report | Each `recommended:` spec call and each `Smaller:` cut taken without stopping, for the human to veto. |
+| `tag-upgrades.md` | `run_state.py` (and the spawn gate) | `next.py` | Every `requires <tag>: yes` line a validator pass wrote, copied before pass 2 replaces `plan-validation.md`, so an upgrade still selects its reviewer. |
 | `deferred-rows.md` | writer | `ledger.py apply` | Deferred-work rows, no header. Applied to `docs/deferred-work.md` at close; never staged. |
 | `refactor-decisions.md` | coordinator | ledger writer, final report | Append `<reject\|defer\|approve> — <what> — <reason> (<files/symbols>)`. Omit the file when no request exists. |
 | `final-report.md` | coordinator | user | Delivered behavior, commits, roles, manual checks, Notes, and deferred items in 5–12 lines. |

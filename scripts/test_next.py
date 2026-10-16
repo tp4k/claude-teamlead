@@ -1048,7 +1048,10 @@ def case_baseline_filter_keys_on_cwd(tmp: Path) -> None:
         "Run the brief's verification commands exactly as your role file says. "
         "Run no RED run and no mutation gate: nothing is implemented yet. A "
         "failure here is pre-existing; it is the baseline later rounds are "
-        "compared against.",
+        "compared against. A command that cannot run only because a directory "
+        "or file the run's workstreams will create is absent at the base gets "
+        "the row `<command> → CANNOT_RUN(absent at base: <repo-relative path>)`; "
+        "next.py checks that path against the base.",
         f"Output: write {w.run}/baseline-ws1.md in the verifier report shape "
         "(OUTCOME: PASS | FAIL | CANNOT_RUN), return the OUTCOME block + file "
         "line."])
@@ -1236,7 +1239,8 @@ def case_approved_routes_to_codex_gate(tmp: Path) -> None:
     all_approved(w)
     r = w.step()
     cmds = r.commands()
-    pkg = f"python3 {PLUGIN}/scripts/review_package.py {w.run} --out {w.pkg}"
+    pkg = (f"python3 {PLUGIN}/scripts/review_package.py {w.run} --base {w.base} "
+           f"--out {w.pkg}")
     runner = (f"python3 {PLUGIN}/scripts/run_codex_review.py {w.pkg}/PROMPT.md "
               "--artifact-stem codex-gate")
     ok = (r.code == 0 and pkg in cmds and runner in cmds
@@ -1701,6 +1705,131 @@ def case_base_flag_and_baseline_expectation(tmp: Path) -> None:
           and not (w2.run / "base-sha.txt").exists(), r.detail())
 
 
+def case_spaced_paths_stay_whole(tmp: Path) -> None:
+    w = World(tmp / "sp ace")
+    w.pin_base()
+    w.report(1, 1, [w.commit("work")])
+    w.put("probes-r1.json", "[]\n")
+    r = w.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    mut = next((ln.strip() for ln in p.splitlines() if "mutate.py" in ln), "")
+    words = shlex.split(mut) if mut else []
+    check("a run path with a space → mutate.py's script, --probes and --out are "
+          "one word each",
+          words[1:2] == [f"{PLUGIN}/scripts/mutate.py"]
+          and flag_value(mut, "--probes") == f"{w.run}/probes-r1.json"
+          and flag_value(mut, "--out") == f"{w.run}/mutation-r1.md", r.detail())
+
+    w2 = World(tmp / "gate sp", streams=2)
+    all_approved(w2)
+    cmds = [shlex.split(c) for c in w2.step().commands()]
+    pkg = next((c for c in cmds if "review_package.py" in c[1]), [])
+    runner = next((c for c in cmds if "run_codex_review.py" in c[1]), [])
+    check("…the gate's package and runner commands keep the run path whole",
+          pkg[2:3] == [str(w2.run)] and flag_value(shlex.join(pkg), "--out")
+          == str(w2.pkg) and runner[2:3] == [f"{w2.pkg}/PROMPT.md"],
+          repr(cmds))
+
+    w3 = World(tmp / "close sp", codexCodeReview="off")
+    all_approved(w3)
+    w3.put("deferred-rows.md", "| 2026-10-14 | run | item | why | src |\n")
+    cmds = [shlex.split(c) for c in w3.step().commands()]
+    led = next((c for c in cmds if "ledger.py" in c[1]), [])
+    check("…and so does the ledger command",
+          led[2:4] == ["apply", str(w3.run)]
+          and flag_value(shlex.join(led), "--ledger")
+          == f"{w3.repo}/docs/deferred-work.md", repr(cmds))
+
+
+def case_tag_upgrades_outlive_the_validation_report(tmp: Path) -> None:
+    w = World(tmp, securityReview="when-needed", perfReview="when-needed")
+    w.put("plan-validation.md", "# Plan validation\n\nVerdict: PLAN_VALID\n\n"
+          "WS-1 stream 1 input: no — the CLI reads a file; requires input: yes\n\n"
+          "Smaller: none\n")
+    w.step()
+    w.put("baseline-ws1.md", "# b\n\nOUTCOME: PASS\n")
+    w.put("plan-validation.md", "# Plan validation — pass 2\n\n"
+          "Verdict: PLAN_VALID\n\nSmaller: none\n")
+    w.pin_base()
+    w.report(1, 1, [w.commit("work")])
+    w.verifier(1, 1)
+    w.mutation(1, 1)
+    r = w.step()
+    check("an upgrade pass 1 made survives pass 2 replacing the report → the "
+          "security axis still runs", "security-review" in r.kinds(), r.detail())
+
+
+def verified_at(w: World, ws: int, rnd: int, head: str) -> None:
+    w.put(f"verifier-{w.tag(ws, rnd)}.md",
+          f"# Verifier — round {rnd}\n\nOUTCOME: PASS\n\n## Snapshot\n\n"
+          f"head: {head}\ntree: CLEAN\n\nOUTCOME: PASS\n")
+
+
+def case_sibling_rework_reverifies_a_passed_stream(tmp: Path) -> None:
+    w = World(tmp, streams=2)
+    w.pin_base()
+    for ws in (1, 2):
+        w.put(f"baseline-ws{ws}.md", "# b\n\nOUTCOME: PASS\n")
+    a, b = w.commit("one"), w.commit("two")
+    w.report(1, 1, [a])
+    w.report(2, 1, [b])
+    verified_at(w, 1, 1, w.head())
+    w.mutation(1, 1)
+    w.verifier(2, 1, "FAIL", touched="yes")
+    w.mutation(2, 1)
+    r = w.step()
+    check("WS-2 failed its gate → its rework implementer goes first",
+          r.kinds() == ["teamlead:implementer"], r.detail())
+    w.report(2, 2, [w.commit("rework")])
+    verified_at(w, 2, 2, w.head())
+    w.mutation(2, 2)
+    r = w.step()
+    p = (r.prompts("teamlead:verifier") or [""])[0]
+    check("the rework moved HEAD past WS-1's verified head → WS-1 is verified "
+          "again, no reviewer reads the stale report",
+          r.kinds() == ["teamlead:verifier"] and "verifier-ws1-r1.md" in p
+          and f"Expected HEAD: {w.head()}" in p
+          and not (w.run / "verifier-ws1-r1.md").exists(), r.detail())
+    verified_at(w, 1, 1, w.head())
+    r = w.step()
+    check("…and once it names the current HEAD, both streams go to review",
+          r.kinds().count("code-review") == 2, r.detail())
+
+
+def case_baseline_absent_at_base_does_not_halt(tmp: Path) -> None:
+    def baseline(w: World, row: str) -> Result:
+        w.put("briefs/impl-ws1-r1.md", VERIFICATION + "cwd: pkg\n"
+              "- `python3 check.py`\n")
+        r = w.step()
+        w.put("baseline-ws1.md", "# Verifier — baseline\n\nOUTCOME: CANNOT_RUN\n\n"
+              f"## Snapshot\n\nhead: {w.base}\ntree: CLEAN\n\n## Commands\n\n"
+              f"(cd {shlex.quote(str(w.repo / 'pkg'))} && python3 check.py) → "
+              f"{row}\n\nOUTCOME: CANNOT_RUN\n")
+        return r
+
+    w = World(tmp / "new")
+    first = baseline(w, "CANNOT_RUN(absent at base: pkg)")
+    p = (first.prompts("teamlead:verifier") or [""])[0]
+    check("the baseline prompt names the absent-at-base row form",
+          "absent at base:" in p, first.detail())
+    r = w.step()
+    check("a CANNOT_RUN baseline only for a directory the stream creates → the "
+          "implementer, no halt", r.code == 0
+          and r.kinds() == ["teamlead:implementer"], r.detail())
+
+    w2 = World(tmp / "exists")
+    baseline(w2, "CANNOT_RUN(absent at base: app.py)")
+    r = w2.step()
+    check("…but a path that is there at the base is an environment problem → halt",
+          r.code == 1 and "halt:" in r.out and not r.kinds(), r.detail())
+
+    w3 = World(tmp / "other")
+    baseline(w3, "CANNOT_RUN(command not found)")
+    r = w3.step()
+    check("…and so is any other CANNOT_RUN row → halt",
+          r.code == 1 and "halt:" in r.out and not r.kinds(), r.detail())
+
+
 CASES = [
     case_exit_codes,
     case_kickoff_prints_baseline_verifier,
@@ -1736,6 +1865,10 @@ CASES = [
     case_coordinator_fix_reverified,
     case_close_applies_ledger,
     case_base_flag_and_baseline_expectation,
+    case_spaced_paths_stay_whole,
+    case_tag_upgrades_outlive_the_validation_report,
+    case_sibling_rework_reverifies_a_passed_stream,
+    case_baseline_absent_at_base_does_not_halt,
 ]
 
 

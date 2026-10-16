@@ -222,6 +222,17 @@ def case_validator_after_relay_allowed(tmp: Path) -> None:
                   spawn("teamlead:plan-validator", run))
 
 
+def case_pass_two_keeps_pass_one_upgrades(tmp: Path) -> None:
+    upgrade = "WS-1 lexer input: no — reads stdin; requires input: yes"
+    run = mkrun(tmp, dict(REVIEWED, **{
+        "plan-validation.md": VALID.replace("Smaller", f"{upgrade}\n\nSmaller")}))
+    run_hook(spawn("teamlead:plan-validator", run))
+    kept = run / "tag-upgrades.md"
+    text = kept.read_text() if kept.exists() else ""
+    check("a validator spawn copies pass 1's tag upgrade out before pass 2 "
+          "replaces the report", upgrade in text.splitlines(), repr(text))
+
+
 def case_autopilot_validator_skips_relay(tmp: Path) -> None:
     run = mkrun(tmp, UNVALIDATED | {"questions.md": QUESTIONS,
                                     "config.json": config(autopilot=True)})

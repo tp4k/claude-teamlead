@@ -1,0 +1,16 @@
+{
+  "round": 2,
+  "workstream": "ws1",
+  "source": "teamlead-retro/2026-10-15-1541-red-freeze-cleanup-followup",
+  "verdict": [
+    "NEEDS_REWORK"
+  ],
+  "in_rows": [
+    "[Uu][Tt][Ff]-?8|[Dd]ecod"
+  ],
+  "not_in_rows": [
+    "SIGHUP"
+  ],
+  "recorded": "miss",
+  "note": "OVERTURNED. Recorded triage said APPROVED_WITH_NOTES; the run's Codex review then raised a HIGH at scripts/red_freeze.py:197 (SIGTERM after a non-signal exception, the decode path, skips group termination), fixed in 8e8bb3b."
+}

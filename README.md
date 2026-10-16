@@ -339,6 +339,8 @@ ruff check .
 
 CI runs the same two things on Python 3.9 through 3.13.
 
+Triage decisions have their own regression cases under `evals/triage/`. They call a model, so CI does not run them. See [evals/triage/README.md](evals/triage/README.md) for how to add a case after Codex overturns a demotion, and how to gate a `triage.md` edit.
+
 ## License
 
 [MIT](LICENSE).

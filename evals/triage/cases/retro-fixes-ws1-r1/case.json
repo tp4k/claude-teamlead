@@ -1,0 +1,17 @@
+{
+  "round": 1,
+  "workstream": "ws1",
+  "source": "teamlead-retro/2026-10-14-1103-retro-fixes",
+  "verdict": [
+    "NEEDS_REWORK"
+  ],
+  "in_rows": [
+    "\\|\\s*\\**HIGH\\**\\s*\\|"
+  ],
+  "not_in_rows": [
+    "SIGHUP",
+    "`===`"
+  ],
+  "recorded": "pass",
+  "note": "Demoted SIGHUP trap and `===`/`!==` flip went to the ledger; nothing later raised them."
+}

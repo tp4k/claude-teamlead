@@ -1,0 +1,16 @@
+{
+  "round": 2,
+  "workstream": null,
+  "source": "teamlead-retro/2026-10-15-1722-red-freeze-signal-windows",
+  "verdict": [
+    "APPROVED",
+    "APPROVED_WITH_NOTES"
+  ],
+  "in_rows": [],
+  "not_in_rows": [
+    "\\|\\s*\\**HIGH\\**\\s*\\|",
+    "_exit_if_signalled"
+  ],
+  "recorded": "pass",
+  "note": "Approval upheld."
+}

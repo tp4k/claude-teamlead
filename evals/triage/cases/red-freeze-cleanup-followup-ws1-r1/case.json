@@ -1,0 +1,16 @@
+{
+  "round": 1,
+  "workstream": "ws1",
+  "source": "teamlead-retro/2026-10-15-1541-red-freeze-cleanup-followup",
+  "verdict": [
+    "NEEDS_REWORK"
+  ],
+  "in_rows": [
+    "[Uu][Tt][Ff]-?8|[Dd]ecod"
+  ],
+  "not_in_rows": [
+    "SIGHUP"
+  ],
+  "recorded": "pass",
+  "note": "Recorded triage promoted the non-UTF-8 cleanup path as a MEDIUM test gap."
+}

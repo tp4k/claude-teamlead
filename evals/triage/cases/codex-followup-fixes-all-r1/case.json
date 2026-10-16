@@ -1,0 +1,17 @@
+{
+  "round": 1,
+  "workstream": null,
+  "source": "teamlead-snapshot-granularity/2026-09-15-1107-codex-followup-fixes",
+  "verdict": [
+    "NEEDS_REWORK"
+  ],
+  "in_rows": [
+    "\\|\\s*\\**HIGH\\**\\s*\\|"
+  ],
+  "not_in_rows": [
+    "sha256_of",
+    "build_parser"
+  ],
+  "recorded": "pass",
+  "note": "Ledgered items stayed ledgered."
+}

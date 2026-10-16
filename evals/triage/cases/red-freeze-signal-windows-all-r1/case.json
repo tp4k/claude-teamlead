@@ -1,0 +1,16 @@
+{
+  "round": 1,
+  "workstream": null,
+  "source": "teamlead-retro/2026-10-15-1722-red-freeze-signal-windows",
+  "verdict": [
+    "NEEDS_REWORK"
+  ],
+  "in_rows": [
+    "\\|\\s*\\**HIGH\\**\\s*\\|"
+  ],
+  "not_in_rows": [
+    "_exit_if_signalled"
+  ],
+  "recorded": "pass",
+  "note": "HIGH on SWEEP_HARNESS; `_exit_if_signalled()` before Popen demotion upheld."
+}

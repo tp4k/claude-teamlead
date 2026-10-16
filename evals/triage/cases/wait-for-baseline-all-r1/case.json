@@ -1,0 +1,15 @@
+{
+  "round": 1,
+  "workstream": null,
+  "source": "teamlead/2026-10-05-1300-wait-for-baseline",
+  "verdict": [
+    "NEEDS_REWORK"
+  ],
+  "in_rows": [],
+  "not_in_rows": [
+    "\\|\\s*\\**HIGH\\**\\s*\\|",
+    "[Nn]egative"
+  ],
+  "recorded": "pass",
+  "note": "Two LOW rows; 'reject negative --baseline' demotion upheld."
+}

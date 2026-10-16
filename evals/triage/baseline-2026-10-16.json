@@ -1,0 +1,88 @@
+{
+  "role": "references/roles/triage.md @ f435407",
+  "model": "sonnet",
+  "samples": 3,
+  "cases": {
+    "codex-followup-fixes-all-r1": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['NEEDS_REWORK']": 3,
+        "in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
+        "not in Rows: sha256_of": 3,
+        "not in Rows: build_parser": 3
+      }
+    },
+    "red-freeze-cleanup-followup-ws1-r1": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['NEEDS_REWORK']": 3,
+        "in Rows: [Uu][Tt][Ff]-?8|[Dd]ecod": 3,
+        "not in Rows: SIGHUP": 3
+      }
+    },
+    "red-freeze-cleanup-followup-ws1-r2": {
+      "recorded": "miss",
+      "passes": {
+        "verdict in ['NEEDS_REWORK']": 0,
+        "in Rows: [Uu][Tt][Ff]-?8|[Dd]ecod": 0,
+        "not in Rows: SIGHUP": 3
+      }
+    },
+    "red-freeze-signal-windows-all-r1": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['NEEDS_REWORK']": 3,
+        "in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
+        "not in Rows: _exit_if_signalled": 3
+      }
+    },
+    "red-freeze-signal-windows-all-r2": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['APPROVED', 'APPROVED_WITH_NOTES']": 3,
+        "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
+        "not in Rows: _exit_if_signalled": 3
+      }
+    },
+    "retro-fixes-ws1-r1": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['NEEDS_REWORK']": 3,
+        "in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
+        "not in Rows: SIGHUP": 2,
+        "not in Rows: `===`": 3
+      }
+    },
+    "retro-fixes-ws1-r2": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['NEEDS_REWORK']": 3,
+        "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3
+      }
+    },
+    "retro-fixes-ws1-r3": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['NEEDS_REWORK']": 3,
+        "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
+        "not in Rows: PurePosixPath": 3
+      }
+    },
+    "retro-fixes-ws3-r2": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['APPROVED', 'APPROVED_WITH_NOTES']": 3,
+        "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3
+      }
+    },
+    "wait-for-baseline-all-r1": {
+      "recorded": "pass",
+      "passes": {
+        "verdict in ['NEEDS_REWORK']": 3,
+        "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
+        "not in Rows: [Nn]egative": 3
+      }
+    }
+  },
+  "date": "2026-10-16"
+}

@@ -1,0 +1,15 @@
+{
+  "round": 3,
+  "workstream": "ws1",
+  "source": "teamlead-retro/2026-10-14-1103-retro-fixes",
+  "verdict": [
+    "NEEDS_REWORK"
+  ],
+  "in_rows": [],
+  "not_in_rows": [
+    "\\|\\s*\\**HIGH\\**\\s*\\|",
+    "PurePosixPath"
+  ],
+  "recorded": "pass",
+  "note": "Two LOW rows only; PurePosixPath demotion upheld."
+}

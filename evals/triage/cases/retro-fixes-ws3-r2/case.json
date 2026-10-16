@@ -1,0 +1,15 @@
+{
+  "round": 2,
+  "workstream": "ws3",
+  "source": "teamlead-retro/2026-10-14-1103-retro-fixes",
+  "verdict": [
+    "APPROVED",
+    "APPROVED_WITH_NOTES"
+  ],
+  "in_rows": [],
+  "not_in_rows": [
+    "\\|\\s*\\**HIGH\\**\\s*\\|"
+  ],
+  "recorded": "pass",
+  "note": "Severity calibration: approve."
+}

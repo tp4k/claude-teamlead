@@ -292,7 +292,54 @@ def case_no_rows_no_write(root: Path) -> None:
         )
 
 
+def apply_again(run: Path, ledger: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "apply", str(run), "--ledger", str(ledger)],
+        capture_output=True, text=True, check=False)
+
+
+def case_reapply_is_a_no_op(root: Path) -> None:
+    name = run_name_for(1, 3)
+    _, ledger = apply(root, name, NEW, HEAD + "\n".join(OLD) + "\n")
+    once = ledger.read_bytes()
+    proc = apply_again(root / name, ledger)
+    record(
+        "a second apply of the same run (a resumed close) inserts nothing",
+        proc.returncode == 0 and ledger.read_bytes() == once
+        and proc.stdout.strip() == f"LEDGER rows=0 file={ledger}",
+        f"{proc.stdout!r} {ledger.read_text()!r}",
+    )
+
+
+def case_reapply_after_other_edits_is_a_no_op(root: Path) -> None:
+    name = run_name_for(0, 5)
+    _, ledger = apply(root, name, NEW, HEAD + "\n".join(OLD) + "\n")
+    other = "| 2026-10-15 | other | x | y | z |"
+    edited = ledger.read_text().replace(OLD[1], f"{OLD[1]}\n{other}")
+    ledger.write_text(edited)
+    apply_again(root / name, ledger)
+    record(
+        "a re-apply after another run added rows still inserts nothing",
+        ledger.read_text() == edited, ledger.read_text(),
+    )
+
+
+def case_identical_rows_in_one_run_both_land(root: Path) -> None:
+    name = run_name_for(2, 2)
+    _, ledger = apply(root, name, [NEW[0], NEW[0]], HEAD + "\n".join(OLD) + "\n")
+    first = ledger.read_bytes()
+    apply_again(root / name, ledger)
+    record(
+        "two identical rows in one run are both inserted once, and not again",
+        ledger.read_text().splitlines().count(NEW[0]) == 2
+        and ledger.read_bytes() == first, ledger.read_text(),
+    )
+
+
 CASES = [
+    case_reapply_is_a_no_op,
+    case_reapply_after_other_edits_is_a_no_op,
+    case_identical_rows_in_one_run_both_land,
     case_gap_index_from_hash,
     case_existing_lines_byte_identical,
     case_unterminated_ledger_inner_gap_adds_nothing,

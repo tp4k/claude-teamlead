@@ -10,6 +10,8 @@ repo tree stays clean until then. Each row's id is `<basename $RUN>-<n>` (n is
 first one, `rows` is below the last. Rows go in one at a time, each against the
 current row count. Existing lines are never rewritten, so there is no migration
 and parallel branches rarely touch the same line. Never stages or commits.
+Safe to repeat: a row whose exact text is already in the ledger is skipped, so a
+close resumed after the apply inserts nothing the second time.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import argparse
 import hashlib
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 ROWS_FILE = "deferred-rows.md"
@@ -86,11 +89,20 @@ def apply(run: Path, ledger: Path) -> int:
         return 0
     text = ledger.read_bytes().decode("utf-8") if ledger.is_file() else NEW_LEDGER
     lines = text.splitlines(keepends=True)
+    # A resumed close re-runs this command, so a row already in the ledger is
+    # not inserted again. Counting copies keeps two identical rows from one run.
+    present = Counter(ln.rstrip("\r\n") for ln in lines)
+    inserted = 0
     for n, row in enumerate(rows, start=1):
+        if present[row]:
+            present[row] -= 1
+            continue
         lines = insert_row(lines, row, f"{run.resolve().name}-{n}")
-    ledger.parent.mkdir(parents=True, exist_ok=True)
-    ledger.write_bytes("".join(lines).encode("utf-8"))
-    print(f"LEDGER rows={len(rows)} file={ledger}")
+        inserted += 1
+    if inserted:
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_bytes("".join(lines).encode("utf-8"))
+    print(f"LEDGER rows={inserted} file={ledger}")
     return 0
 
 

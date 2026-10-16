@@ -214,6 +214,19 @@ def case_compare_fails_on_a_drop_and_normalises_sample_counts(tmp: Path) -> None
     check("a 1/1 -> 2/3 drop exits 1", ok, out_d)
 
 
+def case_compare_catches_a_lost_rows_section(tmp: Path) -> None:
+    # No in_rows checks, so only the Rows-presence check can see the loss.
+    case = dict(CASE, in_rows=[])
+    sides = {}
+    outputs = (("b", triage("NEEDS_REWORK", "")), ("a", "Verdict: NEEDS_REWORK\n"))
+    for name, out in outputs:
+        passes = {k.split(" (got ")[0]: int(ok) for k, ok in tc.grade(case, out)}
+        sides[name] = results_file(tmp, name, 1, {"c": passes})
+    code, out = compare(sides["b"], sides["a"])
+    ok = code == 1 and "DROP  c  ## Rows section present" in out
+    check("compare fails when ## Rows disappears", ok, out)
+
+
 def case_compare_skips_a_case_present_on_one_side(tmp: Path) -> None:
     before = results_file(tmp, "b", 1, {"a": {"v": 1}, "old": {"v": 1}})
     after = results_file(tmp, "a", 1, {"a": {"v": 1}})
@@ -236,6 +249,7 @@ TMP_CASES = [
     case_replay_grades_samples_without_tools_or_sessions,
     case_a_failing_cli_raises_instead_of_grading_empty_output,
     case_compare_fails_on_a_drop_and_normalises_sample_counts,
+    case_compare_catches_a_lost_rows_section,
     case_compare_skips_a_case_present_on_one_side,
 ]
 

@@ -7,6 +7,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
+        "## Rows section present": 3,
         "in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: sha256_of": 3,
         "not in Rows: build_parser": 3
@@ -16,6 +17,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
+        "## Rows section present": 3,
         "in Rows: [Uu][Tt][Ff]-?8|[Dd]ecod": 3,
         "not in Rows: SIGHUP": 3
       }
@@ -24,6 +26,7 @@
       "recorded": "miss",
       "passes": {
         "verdict in ['NEEDS_REWORK']": 0,
+        "## Rows section present": 3,
         "in Rows: [Uu][Tt][Ff]-?8|[Dd]ecod": 0,
         "not in Rows: SIGHUP": 3
       }
@@ -32,6 +35,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
+        "## Rows section present": 3,
         "in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: _exit_if_signalled": 3
       }
@@ -40,6 +44,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['APPROVED', 'APPROVED_WITH_NOTES']": 3,
+        "## Rows section present": 3,
         "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: _exit_if_signalled": 3
       }
@@ -48,6 +53,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
+        "## Rows section present": 3,
         "in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: SIGHUP": 2,
         "not in Rows: `===`": 3
@@ -57,6 +63,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
+        "## Rows section present": 3,
         "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3
       }
     },
@@ -64,6 +71,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
+        "## Rows section present": 3,
         "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: PurePosixPath": 3
       }
@@ -72,6 +80,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['APPROVED', 'APPROVED_WITH_NOTES']": 3,
+        "## Rows section present": 3,
         "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3
       }
     },
@@ -79,6 +88,7 @@
       "recorded": "pass",
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
+        "## Rows section present": 3,
         "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: [Nn]egative": 3
       }

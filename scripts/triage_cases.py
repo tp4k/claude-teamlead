@@ -75,8 +75,9 @@ def grade(case: dict, output: str) -> list[tuple[str, bool]]:
     got = m.group(1) if m else None
     checks = [(f"verdict in {case['verdict']} (got {got})", got in case["verdict"])]
     rows_m = ROWS_RE.search(output)
-    if rows_m is None:
-        checks.append(("## Rows section present", False))
+    # Emitted on every sample, not only on failure: compare keys on check names,
+    # so a check that exists only when it fails can never register as a drop.
+    checks.append(("## Rows section present", rows_m is not None))
     rows = rows_m.group(1) if rows_m else ""
     for p in case["in_rows"]:
         checks.append((f"in Rows: {p}", re.search(p, rows) is not None))

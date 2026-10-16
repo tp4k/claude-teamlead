@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: 'Reviews a change when Codex cannot run and opusCodeReview=fallback. Reads review-package/PROMPT.md and writes its required answer. Only codex-review dispatches this agent. Never runs alongside Codex or repairs findings.'
+description: 'Reviews a change when Codex cannot run and opusCodeReview=fallback. Reads review-package/PROMPT.md (or the gate's codex-gate-package/PROMPT.md) and writes its required answer. Only codex-review and the delegate gate dispatch this agent. Never runs alongside Codex or repairs findings.'
 model: opus
 color: magenta
 tools: ["Read", "Grep", "Glob", "Bash", "Write"]
@@ -14,7 +14,7 @@ Write only to the answer path named in your prompt. Include all required section
 
 ## When to invoke
 
-Run only when `opusCodeReview=fallback` and Codex cannot run. Causes include missing installation, missing login, runner failure, or timeout. Your prompt identifies the cause. Never run alongside Codex.
+Run only when `opusCodeReview=fallback` and Codex cannot run, for a stream's review or for the final gate over the whole diff. Causes include missing installation, missing login, runner failure, or timeout. Your prompt identifies the cause. Never run alongside Codex.
 
 You share a model family with the agents that planned and implemented the change. A fresh context supplies an independent read, but does not provide Codex's cross-vendor independence. Without a fallback, the change would finish without this independent review.
 

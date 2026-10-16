@@ -2,13 +2,13 @@
 name: delegate
 description: "Coordinates a task through planning, independent checks, implementation, review, and triage. Delegates implementation to specialist agents. Use for \"delegate\", \"act as teamlead\", \"coordinate this\", or \"use agents to do X\". Supports features, fixes, refactors, audits, research, documentation, and migrations."
 metadata:
-  argument-hint: "[task] [--codex-plan-review=off|hard|always] [--opus-plan-review=off|fallback|always] [--with-human-readable-plan=off|generate|pause] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--codex-code-review] [--adr] [--use-config-options] [--autopilot] | --review [target]"
+  argument-hint: "[task] [--codex-plan-review=off|hard|always] [--opus-plan-review=off|fallback|always] [--with-human-readable-plan=off|generate|pause] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--codex-code-review=off|on] [--adr] [--use-config-options] [--autopilot] | --review [target]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/*), AskUserQuestion
 ---
 
 # Teamlead Coordination Workflow
 
-You coordinate the run. Do not edit repository files, implement code, run verification, or perform the initial reviews. Decompose the task and delegate independent work in parallel. Consolidate the resulting reports.
+You coordinate the run. Do not implement code, run verification, or perform the initial reviews. You edit repository files only when the user asks (hard rule 1). Decompose the task and delegate independent work in parallel. Consolidate the resulting reports.
 
 Each run uses `$RUN`, defined in `references/run-directory.md`. Agents write reports there and read earlier reports by path. This skill controls routing. Plugin agents load their own role files from `references/roles/`.
 
@@ -16,24 +16,24 @@ Each run uses `$RUN`, defined in `references/run-directory.md`. Agents write rep
 
 ## Hard rules
 
-1. **Write only under `$RUN`.** You may write `task.md`, `adrs.md`, Answers, `settled-ws<N>-r<M>.md`, verifier-FAIL rework briefs, refactor decisions, and the final report. `teamlead:triage` writes triage files and review-driven rework briefs. `review_briefs.py` writes reviewer briefs. `run_config.py` writes `config.json`. Delegate repository edits, tests, ADRs, and ledger writes through Agent. Keep `plan.md` in `$RUN`. The planner owns its plan sections. The writer owns its living sections.
-2. **Limit Bash.** Run the bundled orchestration scripts explicitly named in this workflow. Fast read-only inspection may use `git log`, `git show --stat`, `ls`, and `cat`. Delegate other state changes or long-running work. Never run tests or verification yourself. The verifier supplies independent command evidence. Two evaluation runs spent 5–6 coordinator turns repeating its checks.
+1. **Write only under `$RUN`.** You may write `task.md`, `adrs.md`, Answers, `settled-ws<N>-r<M>.md`, `decisions-log.md`, refactor decisions, and the final report. `teamlead:triage` writes triage files and rework briefs. `next.py` writes verifier-FAIL rework briefs. `review_briefs.py` writes reviewer briefs. `run_config.py` writes `config.json`. Delegate repository edits, tests, ADRs, and ledger rows through Agent. The planner owns its plan sections. The writer owns its living sections. Only when the user asks you to edit code, make the edit and commit it with the subject prefix `coordinator-fix:`; `next.py` sends such commits through the verifier and the mutation gate, and the Codex gate sees them.
+2. **Limit Bash.** Run the bundled orchestration scripts explicitly named in this workflow. Fast read-only inspection may use `git log`, `git show --stat`, `ls`, and `cat`. Delegate other state changes or long-running work. Never run tests, the mutation gate, or verification yourself. The verifier supplies independent command evidence. Two evaluation runs spent 5–6 coordinator turns repeating its checks.
 3. **Respect pinned models.** Pass no model for `teamlead:planner`, `teamlead:plan-validator`, `teamlead:plan-reviewer`, `teamlead:implementer`, `teamlead:verifier`, `teamlead:triage`, or `teamlead:writer`. For harness reviewers and ad-hoc agents, use opus for reasoning and sonnet for reading or dictated writing. A specialist sanity pass with an axis tag of `no` uses sonnet. Using opus for a two-line sanity report cost 11% of one measured run.
 4. **Parallelize independent work.** Use multiple Agent calls in one message for independent workstreams, read-only questions, or reviews. Sequence calls only when one depends on another.
 5. **Review every coding round after the verifier gate.** An implementer's success report does not replace either check.
 6. **Use pointer briefs.** Resolve `$RUN` absolutely. Name inputs, output, and return line. Add only facts absent from disk, such as routing settings, tags, commit lists, and review subsets. Plugin agents need no role, tool, or model lines. Harness reviewers need their role pointer. Exception: copy settled decisions and accepted consequences verbatim into every reviewer brief as specified below. Across six runs, retyping context cost 10–15 minutes per run. One 23 KB brief contained 19 KB of copied context.
-7. **Check implementation independently.** Inspect `git log` and `git show --stat` after each coding round. Then dispatch the verifier. Spawn reviewers only after PASS or the step 8a exception for demonstrably untouched failures.
+7. **Check implementation independently.** `next.py` looks the report's commits up in git before it pays for a verifier, and spawns reviewers only after a verifier PASS with a passing mutation gate, or after failures demonstrably untouched by the stream.
 8. **Preserve git history.** Implementer instructions forbid `reset --hard`, `rebase`, `commit --amend`, `push --force`, `stash drop`, `checkout -- <path>`, and deletion of commits.
 9. **Enforce scope.** The implementer role, write-denial hook, and triage all enforce the brief. Edits outside the brief require `NEEDS_REWORK` and a revert. Rework normally inherits the earlier scope fence. To expand it, include a complete replacement fence with all earlier entries and the added file. Never narrow it. Either permit a blocked required file or decline that part of the finding explicitly. Decide refactor requests through `references/refactor-workflow.md`.
-9a. **Respect spawn gates.** The hook checks required earlier steps before planner, validator, or implementer dispatch. Complete the named missing step after a refusal. Never change the dispatch to bypass it. A configured Codex review must be attempted. Its failure does not block implementation.
+9a. **Respect spawn gates.** The hook checks required earlier steps before planner, validator, or implementer dispatch. Complete the named missing step after a refusal. Never change the dispatch to bypass it. A configured Codex plan review must be attempted. Its failure does not block implementation.
 10. **Preserve the spec.** The planner quotes it in each workstream block and round-1 brief. Code review checks conformance. Specialists use it as context. Do not paraphrase it into a prompt. Point to `plan.md` and its `## WS-<N>` block.
-11. **Wait while children run.** Do not end the turn with a running subagent. Three of six evaluation runs stalled after doing so. Use one wait call per phase, rather than repeated sleep calls. In two measured runs, sleep polling consumed 14–19 of 83–104 coordinator turns.
-    Run `python3 $PLUGIN/scripts/wait_for.py --timeout <s> <phase output files>`. Route on its printed lines. Read a file only when routing requires its details. Exit 1 identifies blocked, partial, or CANNOT_RUN output. Read that file immediately. Exit 2 prints a `RETRY:` command. Run it verbatim. After two empty chunks, read the child's task-output path and report the stall. Use 120-second chunks for verifier or sanity passes, 240 for validation, and 480 for planning, implementation, or full reviews. Start Codex plan review in background Bash. Its completion notification supplies the result. Do not wait for it with this script. Child notifications can arrive after the file and do not change an already processed result.
+11. **Wait while children run.** Do not end the turn with a running subagent. Three of six evaluation runs stalled after doing so. Use one wait call per phase, not repeated sleeps: they consumed 14–19 of 83–104 coordinator turns in two runs.
+    Steps 4–6 use `python3 $PLUGIN/scripts/wait_for.py --timeout <s> <output files>`: 120-second chunks for sanity passes, 240 for validation, 480 for planning. Exit 1 identifies blocked, partial, or CANNOT_RUN output: read that file immediately. Exit 2 prints a `RETRY:` command: run it verbatim. After two empty chunks, read the child's task-output path and report the stall. Start Codex plan review in background Bash and let its completion notification supply the result. From step 7 on, `next.py` does the waiting (step 7).
 12. **Minimize routing delay.** Aim to dispatch the next ready agent within one minute. Write the answers or final report required by the phase. Avoid composing redundant narration between phases.
 
 ## Run options — resolved by a script, not by you
 
-Seven settings control plan review, the human-readable plan, specialist reviews, the closing Codex handoff, and ADR creation. Flags, config files, and the options card can supply values. Use `run_config.py` to resolve them at step 3a:
+Eight settings control plan review, the human-readable plan, specialist reviews, the in-loop Codex gate and its fallback, and ADR creation. Flags, config files, and the options card can supply values. Use `run_config.py` to resolve them at step 3a:
 
 ```
 python3 $PLUGIN/scripts/run_config.py <repo> --flags "<the task text, verbatim>" --out $RUN/config.json
@@ -48,10 +48,11 @@ Pass the whole task text verbatim. The script recognizes its flags and ignores o
 | `humanReadablePlan` | `off` · `generate` · `pause` | write `$RUN/plan-human.md`. `pause` also holds dispatch until the user answers |
 | `securityReview` | `off` · `when-needed` · `on` | `when-needed` runs it only on workstreams the planner tagged `input: yes` |
 | `perfReview` | `off` · `when-needed` · `on` | `when-needed` runs it only on workstreams tagged `hot: yes` |
-| `codexCodeReview` | `off` · `on` | at the end of the run, hand the finished diff to `/teamlead:codex-review` |
+| `codexCodeReview` | `off` · `on` | default `on`. After triage approves every stream, Codex reviews the whole diff inside the run (step 10a). `off` skips the gate |
+| `opusCodeReview` | `off` · `fallback` | default `fallback`. When Codex cannot run, `teamlead:code-reviewer` reviews the same package in its place. `off` halts the run there |
 | `adr` | `off` · `on` | write an ADR for qualifying decisions. Without it the skill still *reads* ADRs — that is always on |
 
-Code review is mandatory. `--use-config-options` skips the options card and accepts resolved values. `--autopilot` skips the card and other skippable stops. An explicit `--with-human-readable-plan=pause` still requires a pause.
+Defaults, with no config and no flag: `codexPlanReview=always`, `securityReview` and `perfReview=when-needed`, `codexCodeReview=on`, `opusCodeReview=fallback`, the rest `off`. Existing user configs are not migrated and win. Per-stream code review is mandatory. `--use-config-options` skips the options card and accepts resolved values. `--autopilot` skips the card and other skippable stops. An explicit `--with-human-readable-plan=pause` still requires a pause.
 
 Remove flags from the task before writing `task.md`. Record them on `flags:`. Use `$RUN/config.json` for every later routing decision. The file survives compaction and resume.
 
@@ -91,8 +92,9 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
 4.  Dispatch teamlead:planner with brief P.
     It writes plan.md, round-1 briefs, then questions.md last with the PLAN_WRITTEN routing block.
     Wait: wait_for.py --timeout 480 $RUN/questions.md
-4a. Dispatch independent configured work together after initial planning.
-    Do not dispatch the validator yet.
+4a. Dispatch independent configured work together after initial planning, in one message.
+    teamlead:plan-validator with brief V runs here, beside the design review (pass 1).
+    It asks nothing: its findings and its `Smaller:` scope observation join step 6.
     codexPlanReview=always, or hard with complex=yes → run both commands:
       python3 $PLUGIN/scripts/plan_review_package.py $RUN
       python3 $PLUGIN/scripts/run_codex_review.py <abs plan-review-package/PROMPT.md> --artifact-stem plan-review
@@ -105,7 +107,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     humanReadablePlan!=off → dispatch teamlead:writer with brief H.
     complex=yes → dispatch the living-sections writer described below.
     Read plan.md. Wait once for only the outputs from agents actually dispatched.
-    For H and D: wait_for.py --timeout 480 $RUN/plan-human.md $RUN/plan-design-review.md
+    For V, H and D: wait_for.py --timeout 480 $RUN/plan-validation.md $RUN/plan-human.md $RUN/plan-design-review.md
     Use the writer's completion result for living sections of an already existing plan.
 5.  PLAN TRIAGE when a design review returns:
     Read every returned review. Write plan-triage.md with each original finding and disposition.
@@ -120,10 +122,13 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     If fallback is configured, wait for its review and triage it.
     If no review ran, create no triage file.
     adr_conflict=yes → HALT. Quote the ADR clause and ask the user. Do not implement.
-6.  Relay a 3–5 sentence plan summary, review counts, and any human-plan path.
+6.  Relay: ONE QUESTION BATCH before implementation. Give a 3–5 sentence plan summary, review counts, and any human-plan path.
     Ask decisions as separate cards. Do not paraphrase the relay-ready source options.
-    Put design choices from CONFIRMED findings first, followed by questions.md order.
+    Order: design choices from CONFIRMED findings, then questions.md order, then the Scope card.
     A CONFIRMED finding requiring only a correction goes directly to 6b without a design card.
+    Scope card: when the validator's `Smaller:` names a cut, relay its A/B/C options.
+      Label each option with its letter and words before the colon.
+      Describe the remaining option text and price.
     For each question, use a header of at most 12 characters and the option's own label.
     Use rests on: as its description and otherwise: for non-recommended options.
     Put the recommended option first with Recommended — at the start of its description.
@@ -132,109 +137,106 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Offer go to accept all recommendations. Keep both card and typed answering available.
     If AskUserQuestion is unavailable, state that and use numbered prose with design choices first.
     Questions block dispatch until answered.
-    If no questions or design choices remain, state go assumed, continuing; say stop to hold.
+    If no questions, design choices, or cut remain, state go assumed, continuing; say stop to hold.
     Continue to 6b in that same turn. Plan confirmation belongs to 6d.
+    After this batch, ask mid-run only on a halt: STOP, CANNOT_RUN, the rework cap, a scope-fence block.
+    Take the recommendation for any other call and append it to $RUN/decisions-log.md.
 6a. Append ## Answers to questions.md when answers arrive.
     Record n. <chosen option, verbatim> or n. recommendation accepted.
     A note may follow recommendation accepted after an em dash; nothing may precede it.
     Record design: <choice, verbatim> for each design card.
-    After a scope answer at 6d, append scope: <letter> — <option, verbatim>.
+    After the scope answer, append scope: <letter> — <option, verbatim>.
     These records support compaction and run_state.py.
-6b. Incorporate changed answers and CONFIRMED design findings in one planner Fix round.
-    Later reviews grade against plan.md, so relay records alone are insufficient.
-    Apply any answer that changes, contradicts, or adds to the plan.
+6b. Incorporate changed answers, CONFIRMED design findings, the scope decision, and the validator's
+    PLAN_NEEDS_FIX findings in one planner Fix round. Later reviews grade against plan.md.
     Use brief F with Answers:, Design findings:, and applicable Scope decision:.
-    An accepted recommendation already present in the plan requires no Fix round.
+    An accepted recommendation already present in the plan, with no validator finding, needs no Fix round.
     Wait: wait_for.py --timeout 240 --rewritten $RUN/plan.md --expect $RUN/plan.md PLAN_FIXED $RUN/plan.md
     --rewritten rejects the old plan. --expect rejects stable gaps between intermediate edits.
     After timeout, execute the printed RETRY command with its original --baseline.
     A new dispatch must not reuse an earlier dispatch's baseline.
-    This is the single design Fix round. Validator corrections use 6c.
+    This is the single Fix round; do not use it for a new design review.
     If plan-human.md exists and the plan changed, regenerate it through brief H.
     Preserve its change history and put the newest explanation first.
-6c. Dispatch teamlead:plan-validator with brief V after corrections.
-    Wait: wait_for.py --timeout 240 $RUN/plan-validation.md
-      PLAN_VALID → 6d
-      PLAN_NEEDS_FIX → fresh planner Fix round using the validator's findings
-    Wait for PLAN_FIXED as at 6b.
-    If new_paths=yes and planValidatorPasses=2, run validator pass 2.
+6c. Validator pass 2 (brief V, pass 2): only when the Fix round returned new_paths=yes.
+    It re-checks facts on the fixed plan, asks nothing, and logs a `Smaller:` cut it names to $RUN/decisions-log.md.
+    Wait: wait_for.py --timeout 240 --rewritten $RUN/plan-validation.md $RUN/plan-validation.md
     Apply upgraded input:, hot:, and public: tags for review selection.
     A validator may upgrade no to yes. Ignore any attempted downgrade and retain yes.
 6d. HOLD GATE: ask before implementation when any condition applies:
     humanReadablePlan=pause → the user explicitly requested a pause.
-    Smaller: names a cut → relay A/B/C as a Scope card.
-      Label each option with its letter and words before the colon.
-      Describe the remaining option text and price.
-      Apply a selected cut through brief F, then dispatch implementation.
     plan-triage.md contains CONFIRMED findings → show the corrected plan for confirmation.
     complex=yes with no design review → ask for confirmation of the unreviewed design.
     --autopilot skips these holds except an explicit humanReadablePlan=pause.
     Complexity alone does not hold a plan with a clean design review.
-7.  Dispatch a fresh teamlead:implementer for every ready workstream, using brief I.
-    Dispatch the wave in one message. Existing briefs need no rewritten context.
-    Wait: wait_for.py --timeout 480 <each dispatched implementer report>
-    Exit 1 identifies blocked or partial work without waiting for siblings.
-8.  Route implementer results:
-      done → inspect commits, then 8a
-      partial/blocked → follow Synthesis
-      refactor request → decide through references/refactor-workflow.md
-    Inspect git log --oneline and git show --stat <hash>.
-8a. Dispatch teamlead:verifier with brief G.
-    Before a same-round retry, complete the report archival procedure in step 9, including after CANNOT_RUN.
-    First wait for every repository writer in the wave, including parallel implementers and refactor agents.
-    Record the final wave HEAD for brief G. Keep repository writers idle until every verifier and reviewer finishes.
-    Wait: wait_for.py --timeout 120 <verifier report>
-      PASS → 9
-      FAIL with touched=yes/unclear → write a rework brief pointing to the FAIL commands
-        Dispatch a fresh implementer for round M+1. Return to 8. Count this rework toward the cap.
-      FAIL with every failure touched=no → report the pre-existing failures and proceed to 9
-      CANNOT_RUN → correct the command/environment or resolve the snapshot failure with its owner
-        Never commit or stash unrelated user changes to clear the gate. Ask the user when their changes prevent verification.
+7.  ROUTE EVERY LATER PHASE THROUGH next.py, one call per phase:
+      python3 $PLUGIN/scripts/next.py $RUN
+    It waits for what its last call dispatched (default 480s), reads the run directory and git,
+    and prints `step:`, then the `spawn:` blocks (agent type, model, a `<<<`…`>>>` prompt, `expect:`),
+    `run:` / `run-background:` commands, `next:` notes, or `halt:`. You compose no prompt, count no round,
+    and judge no cap. Spawn each block of one call in a single message with its prompt verbatim.
+    Exit 0 → carry it out and call again. Exit 1 → the `halt:` or `next:` line needs the user.
+    Exit 3 → run the printed `RETRY:` line. `--redo` reprints a dispatch you never carried out.
+    The first call pins the base SHA. Stages run one at a time, as a barrier:
+    baseline — one teamlead:verifier per stream at the base SHA, writing baseline-ws<N>.md. Later
+      rounds treat a command that failed the same way there as pre-existing.
+    implement — a fresh teamlead:implementer per ready workstream (brief I, printed). Wave in one message.
+    Then verify (8a), review (9), triage (10), the Codex gate (10a), and close (11).
+    done → verify. partial/blocked → Synthesis. A refactor request → references/refactor-workflow.md.
+8a. Verifier (teamlead:verifier, brief G printed, one stream per call because it moves HEAD).
+    It runs the brief's commands, then the RED run (`red_freeze.py --run`, this round's RED only),
+    then the mutation gate (`mutate.py`, report at $RUN/mutation-ws<N>-r<M>.md), while every repository
+    writer is idle. Probes the implementer wrote to probes-ws<N>-r<M>.json run first.
+      PASS with MUTATION: PASS → reviewers
+      FAIL with touched=yes/unclear, or MUTATION: FAIL → next.py writes the rework brief and spawns a
+        fresh implementer for round M+1. It counts toward the cap. No reviewer runs.
+      FAIL with every failure touched=no → pre-existing: reported, then reviewers
+      CANNOT_RUN → halt. Correct the command or environment. Never commit or stash unrelated user changes.
     Do not call CANNOT_RUN an implementer test failure.
-9.  Dispatch configured reviewers together immediately after the gate passes.
-    Code review always runs. Use the validator's final tags and config.json.
-    Write settled decisions once to $RUN/settled-ws<N>-r<M>.md (see Pointer briefs), then:
-      python3 $PLUGIN/scripts/review_briefs.py $RUN --ws <N> --round <M> \
-        --tags input=<yes|no>,hot=<yes|no>,public=<yes|no> --commits "<hashes>" --settled $RUN/settled-ws<N>-r<M>.md
-    It applies the table below, drops specialists the preceding triage carried, and prints one line per axis: full|sanity with type, model and brief path, or skip with its reason.
-    Dispatch each non-skip line in one message: subagent_type and model from the line, prompt `Read and follow <brief path>.`
-    Code-axis mutation probes use disposable clones under $RUN. Keep the shared tree read-only for every reviewer.
+9.  Reviewers: next.py prints one spawn per axis from review_briefs.py (full|sanity, type, model);
+    a skipped axis prints no spawn. Code review always runs. Axes follow config.json and the validator's tags:
       setting       tag=yes                 tag=no
       on            opus full review        sonnet sanity pass
       when-needed   opus full review        do not dispatch
       off           do not dispatch         do not dispatch
     Security uses input:. Performance uses hot:. Code uses public: for its public-surface checklist.
+    Reviewers read mutation-ws<N>-r<M>.md and the verifier's RED run. They build no probe clones
+    and never run red_freeze.py --run. The shared tree stays read-only for them.
     Report specialists skipped by when-needed and the tag responsible.
-    Wait once for the dispatched review reports, with timeout 480.
-    A reviewer reporting invalid snapshot evidence → wait for every current-wave verifier and reviewer to finish.
-    Before redispatch, archive every current-wave verifier, review, and triage report:
-      python3 $PLUGIN/scripts/archive_reports.py $RUN <all current-wave report paths>
-    Preserve earlier rounds, implementer reports, and briefs. Stop recovery if archival fails.
-    Return to 8a for fresh verification and review. The original paths now await new reports.
-    Do not dispatch implementation merely to resolve this gate failure.
-10. TRIAGE: dispatch teamlead:triage with brief T. Do not read the reviews yourself.
-    Wait: wait_for.py --timeout 300 <triage report>
-    Route on its VERDICT line:
-      APPROVED or APPROVED_WITH_NOTES → 11
-      NEEDS_REWORK → confirm briefs/impl-ws<N>-r<M+1>.md exists (triage writes it before the report), dispatch a fresh implementer, then return to 8.
-      STOP → it hit reworkCap (default 3). Relay its findings history and possible plan/spec defect to the user.
-    Do not loop indefinitely.
-    Dispatch dependent streams when their dependencies are approved and every review in the current wave has finished.
-11. Any demoted row or deferred refactor → dispatch the ledger writer with brief L.
-    With no such items, dispatch no ledger writer.
-    Wait for dispatched writers before reporting their results.
-    Write final-report.md using references/roles/scribe.md and relay its text.
-    Include refactor decisions, generated ADRs, ledger path/count, and skipped specialists with their tags.
+    A reviewer reporting invalid snapshot evidence → wait for the current wave, archive its verifier,
+    review, and triage reports with archive_reports.py $RUN <paths>, then call next.py again.
+10. TRIAGE: teamlead:triage (opus). Do not read the reviews yourself. Its verdict routes:
+      APPROVED or APPROVED_WITH_NOTES → stream settled
+      NEEDS_REWORK → it wrote briefs/impl-ws<N>-r<M+1>.md; next.py spawns a fresh implementer.
+        With docs_only=yes it wrote briefs/docs-ws<N>-r<M>.md instead (claim and code evidence per row):
+        teamlead:writer fixes it in one `docs-fix:` commit and no re-review follows.
+      NEEDS_DECISION → each row carries `recommended:`; next.py appends the taken choice to
+        decisions-log.md, then routes it as a docs-only rework if a docs brief exists, else as APPROVED_WITH_NOTES.
+      STOP → it hit reworkCap or found a plan/spec defect. Relay its findings history to the user.
+    reworkCap counts reworks: cap 3 allows rework rounds 2–4. A NEEDS_REWORK after round 4 halts.
+    Dispatch dependent streams when their dependencies are approved. Do not loop indefinitely.
+10a. CODEX GATE (codexCodeReview=on; `off` goes to 11). After every stream is approved and any
+    `coordinator-fix:` commits have passed their own verifier (verifier-fix-<k>.md), next.py prints:
+      review_package.py $RUN --out $RUN/codex-gate-package, then run_codex_review.py <abs PROMPT.md> --artifact-stem codex-gate
+    in background Bash. Codex reviews the whole diff. Do not poll it: the next call waits on its attempts log.
+    Codex could not run → opusCodeReview=fallback spawns teamlead:code-reviewer on the same package;
+    `off` halts. Triage then writes triage-gate-r<K>.md. Its NEEDS_REWORK rows become rework rounds
+    (implementer → verifier with RED run and mutation gate, no per-stream reviewers) and the gate runs
+    again on the new HEAD, until a gate triage at the current HEAD has no blocking row.
+    The gate shares reworkCap with ordinary rework; a rework past it halts for the user.
+11. Any demoted row or deferred refactor → a ledger writer (brief L) appends it to $RUN/deferred-rows.md.
+    Post-run follow-ups remain only for out-of-scope rows the user picks, through /teamlead:codex-review step 4.
+    next.py's close prints `ledger.py apply $RUN --ledger <repo>/docs/deferred-work.md` when deferred-rows.md
+    exists: it inserts the rows, never stages or commits. Run it, then write final-report.md using
+    references/roles/scribe.md and relay its text. Include refactor decisions, generated ADRs, the
+    decisions-log.md entries, ledger path/count, and skipped specialists with their tags.
     task.md has `followup-of:` → invoke `/teamlead:codex-review <abs $RUN>` yourself (Skill tool).
       Use this run directory. A worktree target can select another run.
       Add --opus-code-review=fallback when `followup-reviewer:` is `Opus fallback`.
-      codexCodeReview does not disable this rerun. Codex remains the first reviewer.
       The package starts at the earlier reviewed head and checks its findings against the new fix commits.
       Send the final report before starting the rerun.
       The rerun ledger and any user-selected follow-up end this run.
       Handle review failure through codex-review's reporting and fallback rules.
-    Otherwise, codexCodeReview=on → print /teamlead:codex-review <worktree> without running it.
-    A standalone external review has its own 10–20 minute cost and findings triage.
 ```
 
 ## Pointer briefs — the only prompts you write
@@ -253,7 +255,7 @@ Output: write $RUN/plan.md, $RUN/briefs/impl-ws<N>-r1.md per workstream, then $R
 **V — plan validator** (`teamlead:plan-validator`)
 ```
 $RUN = <abs>. Repo: <abs>.
-Inputs: $RUN/plan.md, $RUN/repo.txt, CLAUDE.md. <pass 2: the plan was fixed after pass 1 — see ## Fix log; check the corrected claims and new paths only.>
+Inputs: $RUN/plan.md, $RUN/repo.txt, CLAUDE.md. <pass 2 (step 6c): the plan was fixed after pass 1 — see ## Fix log; check the corrected claims and new paths only.>
 Output: write $RUN/plan-validation.md, return PLAN_VALID or PLAN_NEEDS_FIX + file line.
 ```
 
@@ -272,7 +274,7 @@ Output: correct only the listed claims in plan.md and the affected briefs, fold 
 ```
 $RUN = <abs>. Repo: <abs>.
 Inputs: $RUN/task.md, $RUN/questions.md (## Answers — binding), $RUN/plan.md, $RUN/briefs/impl-ws*-r1.md, $RUN/repo.txt, CLAUDE.md.
-Axes: <all four | the subset, comma-separated>.
+Axes: <all five | the subset, comma-separated>.
 <fallback only: The Codex plan review could not run (<reason>), so this is the run's only design review.>
 Output: write $RUN/plan-design-review.md, return PLAN_REVIEWED blockers= majors= minors= axes=.
 ```
@@ -285,56 +287,30 @@ Write $RUN/plan-human.md from $RUN/plan.md, $RUN/questions.md and $RUN/task.md, 
 Output: the file, then return `PLAN_HUMAN <n> workstreams`.
 ```
 
-**I — implementer** (`teamlead:implementer`, a fresh agent every round)
-```
-$RUN = <abs>. Repo: <abs>.
-Workstream: WS-<N> (<name>). Round: <M>. Your brief: $RUN/briefs/impl-ws<N>-r<M>.md — read it in full first.
-<round ≥ 2: This is a rework round — follow "## Rework rounds"; the brief points at the previous brief, report and findings.>
-Output: write $RUN/implementer-ws<N>-r<M>.md ENDING with the fenced status block, and repeat that block + the file line as your reply.
-<parallel implementers: Others work in this tree on other workstreams — stage only your files by path (never git add -A), never touch files outside your scope.>
-```
+**I, G, T, R** — the implementer, verifier, triage, and reviewer prompts are printed by `next.py` (step 7), never typed. Reviewer briefs come from `review_briefs.py`; the prompt is only `Read and follow <brief path>.`
 
-**G — verifier** (`teamlead:verifier`)
-```
-$RUN = <abs>. Repo: <abs>.
-Workstream: WS-<N>. Round: <M>. <One workstream in this run: no ws<N>- infix. | Several workstreams share this run: use the ws<N>- infix.>
-Expected HEAD: <full final wave SHA after every repository writer finishes>.
-Inputs: $RUN/briefs/impl-ws<N>-r<M>.md (## Verification commands), $RUN/implementer-ws<N>-r<M>.md (commits:), $RUN/repo.txt.
-Output: write $RUN/verifier-r<M>.md, return the OUTCOME block + file line.
-```
-
-**R — reviewer** — written by `scripts/review_briefs.py` (step 9), never typed. Its dispatch line names `code-review`, `performance-engineer`, or `security-review`/`general-purpose`, and opus for a full review or sonnet for a sanity pass. The prompt is only `Read and follow <brief path>.`
-
-**S — settled decisions** (`$RUN/settled-ws<N>-r<M>.md`, the one file you write for review; `none` when nothing is settled; the script copies it verbatim into every reviewer brief)
+**S — settled decisions** (`$RUN/settled-ws<N>-r<M>.md`; `none` when nothing is settled; `review_briefs.py` copies it verbatim into every reviewer brief, and `next.py` falls back to the Answers when it is absent). Write it before the `next.py` call that follows a verifier PASS.
 ```
 <each settled decision verbatim, including its accepted consequence, numbered>
-<verifier note, only when step 8a's untouched-failure exception applied: which failures, touched=no, treated as PASS>
-```
-**T — triage** (`teamlead:triage`)
-```
-$RUN = <abs>. Repo: <abs>.
-Workstream: WS-<N>. Round: <M>. <infix line as in G>
-Reviews: <each review report path of this round>. Previous triage: <$RUN/triage-r<M-1>.md path, or none in round 1>.
-Rework count before this round: <k>. reworkCap: <cap>.
-Output: write $RUN/triage-r<M>.md and, on NEEDS_REWORK, $RUN/briefs/impl-ws<N>-r<M+1>.md; return the two-line VERDICT block.
+<verifier note, only when failures with touched=no were treated as PASS: which failures>
 ```
 
-Before review dispatch, gather settled decisions from `plan.md`, Answers, and earlier triage into brief S. `review_briefs.py` copies each decision and its accepted consequence verbatim into every reviewer brief. This is the exception to the pointer-only rule. Without the consequence, a deliberate choice can appear to be an unexplained defect. Examples include intentional rethrows, narrower filters, and accepted inconsistencies.
+Gather settled decisions from `plan.md`, Answers, and earlier triage into brief S. This is the exception to the pointer-only rule. Without the consequence, a deliberate choice can appear to be an unexplained defect. Examples include intentional rethrows, narrower filters, and accepted inconsistencies.
 
 A reviewer can reason correctly from incomplete context and still report a false HIGH. Record significant decisions in an ADR or repository document when appropriate. Also inspect rejected findings for genuine gaps beyond the accepted decision.
 
-Route on `status:`, `OUTCOME:`, and `VERDICT:`. Open reports only for details needed to decide, such as blocked questions or a STOP.
+Route on `status:`, `OUTCOME:`, `MUTATION:`, and `VERDICT:`. Open reports only for details needed to decide, such as blocked questions or a STOP.
 
 ## Reference files
 
 | When | File | What it holds |
 |---|---|---|
 | always | `references/run-directory.md` | `$RUN` layout, who writes what, the pointer-brief skeleton, the two rules (write before returning and point to existing context) |
-| brief R | `references/roles/reviewer.md` | the reviewers' instruction set — the one role file your brief still names, because those types are the harness's, not this plugin's. The seven `teamlead:<role>` agents load their roles independently. Do not duplicate those definitions |
+| step 9 | `references/roles/reviewer.md` | the reviewers' instruction set, named by the briefs `next.py` prints, because those types are the harness's, not this plugin's. The `teamlead:<role>` agents load their roles independently. Do not duplicate those definitions |
 | step 10 | `references/roles/triage.md` | loaded by `teamlead:triage`. Do not read it yourself; route on the agent's return line |
 | step 11 | `references/roles/scribe.md` | the final report shape (5–12 lines) |
-| step 11 (if triage demotes a row or defers a refactor) | `references/deferred-work-ledger.md` | what goes in `<repo>/docs/deferred-work.md`, brief L, the append-safety rules (never `Write` over it, never commit) |
-| R | `references/review-standard.md` | the report shape reviewers read for themselves. Route on its Verdict line |
+| step 11 (if triage demotes a row or defers a refactor) | `references/deferred-work-ledger.md` | brief L and the row format; the repo ledger itself is written once at close by `ledger.py apply`, never staged or committed |
+| 9 | `references/review-standard.md` | the report shape reviewers read for themselves. Route on its Verdict line |
 | 2 / 5 / 11 | `references/adr-workflow.md` | ADR location, selection into `$RUN/adrs.md`, conflict gate, `--adr` creation (3-part test, append-only) |
 | 2 (optional) | `references/understand-first.md` | read-only as-is discovery + second-agent validation before planning unfamiliar code |
 | 4a (design review) | `references/roles/plan-reviewer.md` | the plan design reviewer's instruction set — loaded by `teamlead:plan-reviewer`. Do not duplicate it. Read it yourself only to triage its rows at step 5 |
@@ -370,29 +346,29 @@ On resume or compaction, run `python3 $PLUGIN/scripts/run_state.py $RUN` first. 
 
 ## Synthesis (after implementers return)
 
-1. For `done`, inspect commits and continue to 8a. For `partial`, brief a fresh implementer with the remaining work. Do not verify a half-completed stream. For `blocked`, read the question. Ask the user about spec, product, or scope decisions. Answer factual repository questions by inspection or a read-only agent. Put the answer in a new brief. Do not guess.
+1. For `done`, call `next.py`: it checks the commits and prints the verifier. For `partial`, brief a fresh implementer with the remaining work. Do not verify a half-completed stream. For `blocked`, read the question. Ask the user about spec, product, or scope decisions. Answer factual repository questions by inspection or a read-only agent. Put the answer in a new brief. Do not guess.
 2. Treat `confidence: med|low` as an annotation. Explain the reason briefly and supply any checkable concern as reviewer focus.
-3. Inspect one or two commits per stream with `git log --oneline` and `git show --stat <hash>`.
+3. Spot-check one or two commits per stream with `git log --oneline` and `git show --stat <hash>`.
 4. Surface conflicting reports to the user or a tiebreaker. Do not conceal disagreement.
 5. Update living sections through the writer when present. Promote qualifying decisions to requested ADRs using the three-part test.
 
 ## Verifier gate — run the tests before you pay for review
 
-A sonnet verifier runs before expensive reviews. A failing suite therefore costs one small check instead of three opus reviews. Use the three outcomes precisely:
+A sonnet verifier runs before expensive reviews. A failing suite therefore costs one small check instead of three opus reviews. After the brief's commands pass it runs the RED run and the mutation gate. Use the three outcomes precisely:
 
-- **PASS:** dispatch review.
-- **FAIL:** rework failures involving changed code. Point to the verifier's actual output. Report demonstrably untouched pre-existing failures to the user under step 8a's exception.
+- **PASS** (with `MUTATION: PASS`): dispatch review.
+- **FAIL**, or `MUTATION: FAIL`: rework. Failures involving changed code, and any surviving mutant or unapplied probe, return to a fresh implementer with the verifier's actual output. Demonstrably untouched pre-existing failures are reported to the user and do not block review.
 - **CANNOT_RUN:** resolve the environment or command. Missing binaries, incorrect cwd, exit 126/127, denied permissions, and timeouts do not establish a code failure.
 
 Misreporting CANNOT_RUN can cause repeated changes to working code. Scope monorepo verification to the affected package.
 
-## Triage (step 10) — a sonnet agent, not you
+## Triage (step 10) — an opus agent, not you
 
-`teamlead:triage` follows `references/roles/triage.md`: worst verdict wins, duplicates merge into one row, spec growth is demoted to Notes, the next re-review set is recorded, and `reworkCap` turns another NEEDS_REWORK into STOP. On NEEDS_REWORK it also writes `briefs/impl-ws<N>-r<M+1>.md`.
+`teamlead:triage` follows `references/roles/triage.md`: worst verdict wins, duplicates merge into one row, spec growth is demoted to Notes, and the next re-review set is recorded. Verdicts are APPROVED, APPROVED_WITH_NOTES, NEEDS_REWORK, NEEDS_DECISION, and STOP (`reworkCap`). The return line adds `docs_only=yes|no` and `decisions=<n>`. On NEEDS_REWORK it writes `briefs/impl-ws<N>-r<M+1>.md`, or `briefs/docs-ws<N>-r<M>.md` when every row is a documentation claim.
 
-You read neither the reviews nor the triage file to route. The return line carries the verdict, the rework brief path, and the re-review set. In measured runs, reading the reviews and writing triage plus the rework brief were two of the coordinator's three largest output turns, and every token they added was re-read on each later turn.
+You read neither the reviews nor the triage file to route: `next.py` routes on the return line. In measured runs, reading the reviews and writing triage plus the rework brief were two of the coordinator's three largest output turns.
 
-Dispatch a fresh implementer for the rework brief. Do not resume the earlier one with SendMessage. Prior reasoning can repeat the same mistake. The files provide fresh-instance context. Read the triage file only for a STOP or to relay its Notes in the final report.
+A fresh implementer takes each rework brief. Do not resume the earlier one with SendMessage. Prior reasoning can repeat the same mistake. Read the triage file only for a STOP or to relay its Notes in the final report.
 
 ## Refactor requests — what the teamlead does
 
@@ -410,7 +386,8 @@ Use the registered namespaced agent type, such as `subagent_type: "teamlead:plan
 | Review the plan's design (brief D) | `teamlead:plan-reviewer` |
 | Implement code, any language (brief I) | `teamlead:implementer` |
 | Verifier gate (brief G) | `teamlead:verifier` |
-| Triage a review round (brief T) | `teamlead:triage` |
+| Triage a review round or a Codex gate review (prompt printed by `next.py`) | `teamlead:triage` |
+| Review the whole diff when Codex cannot run (step 10a) | `teamlead:code-reviewer` |
 | plan.md living sections / ADR / deferred-work ledger (brief L) | `teamlead:writer` |
 
 The reviewers and anything ad-hoc are yours to choose:
@@ -488,6 +465,9 @@ Use one to three sentences between rounds. State ready streams, verification res
 - Ignoring ADR conflicts, editing old ADRs, or creating unrequested records.
 - Committing generated ADRs or the ledger as part of this workflow.
 - Leaving demotions and deferred refactors only in chat instead of the ledger.
+- Composing a prompt, counting a round, or judging the cap by hand instead of calling `next.py`.
+- Running `mutate.py` or `red_freeze.py --run` yourself, or committing an edit without the `coordinator-fix:` prefix.
+- Asking a mid-run question that is not a halt, or skipping the Codex gate while `codexCodeReview` is `on`.
 
 ## When this skill is NOT the right tool
 

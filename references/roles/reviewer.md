@@ -20,7 +20,7 @@ For security use attacker-controlled input. For performance use hot path. For co
 2. Read only the relevant workstream blocks in `$RUN/plan.md`. Include their spec, acceptance, tests, and review axes.
 3. Read the current implementer brief for scope, protected files, project rules, and commands.
 4. Read the implementer's report as claims requiring checks.
-5. Read the verifier's OUTCOME and `## Snapshot` for independent suite evidence. On the code axis, require `tree: CLEAN` and the recorded `head:` SHA. Check shared HEAD with `git rev-parse HEAD`. Require the recorded SHA and empty `git status --porcelain=v1 --untracked-files=all` output. Missing or mismatched evidence requires `NEEDS_REWORK` requesting fresh verification. Stop review rather than treating the mismatch as only an unavailable probe.
+5. Read the verifier's OUTCOME, `## Snapshot`, `## RED run` and `## Mutation` for independent suite evidence, and the mutation report `$RUN/mutation-ws<N>-r<M>.md` it names (`mutation-r<M>.md` for one stream). On the code axis, require `tree: CLEAN` and the recorded `head:` SHA. Check shared HEAD with `git rev-parse HEAD`. Require the recorded SHA and empty `git status --porcelain=v1 --untracked-files=all` output. Missing or mismatched evidence requires `NEEDS_REWORK` requesting fresh verification. Stop review rather than treating the mismatch as only an unavailable probe.
 6. Read `$RUN/task.md` for the exact request.
 7. Read project and user-global CLAUDE.md and matching `~/.claude/rules/*.md`. Extract project forbiddens from both. Matching rule files may not load automatically. Check TDD under item 2.
 8. Read supplied ADR clauses.
@@ -44,9 +44,9 @@ The next implementer uses your report directly. Report required changes. Do not 
 **2. TDD.** Require one tests-only RED commit before production code, with RED lines frozen through GREEN. Perform these checks:
 
 - Inspect `git show <red> --stat` for every reported RED hash. Production code in RED is a Note. Repairing commit history is forbidden.
-- Run `python3 <plugin root>/scripts/red_freeze.py --repo <repo> <every red hash>`. The plugin root contains this file's `references/` directory. Treat reported `freeze:` and `red:` lines as claims.
-- If this round has RED, run the check again with `--run "<targeted test command>"` and this round's RED alone. Earlier RED commits predate this round's tests. Skip `--run` when this round has none.
-- Read the `RED run` block for each new test's actual failure. `RED_PASSES` and a new test with no individual RED failure require the acceptance check above. The command's exit code can hide a passing test beside failing tests. If the 200-line tail omits the relevant test, rerun RED and read complete output before filing a finding.
+- Run `python3 <plugin root>/scripts/red_freeze.py --repo <repo> <every red hash>` without its run option. The plugin root contains this file's `references/` directory. Treat reported `freeze:` and `red:` lines as claims.
+- Do not check out a RED commit or rerun RED yourself: that moves HEAD under the other agents. The verifier ran this round's RED alone, in place, while every writer was idle. Read the `## RED run` block of its report for each new test's actual failure. A missing block when this round has RED is missing evidence: request fresh verification.
+- `RED_PASSES` and a new test with no individual RED failure in that block require the acceptance check above. The command's exit code can hide a passing test beside failing tests. If the 200-line tail omits the relevant test, report the test as unevidenced and ask the verifier to rerun with the command narrowed to it. Do not rerun RED yourself.
 - On `RED_FROZEN`, confirm assertions remain inside tests that execute. The checker matches lines per file. Moving an assertion into an unused helper can therefore evade the check.
 - Accept rework coverage marked `red: n/a — behaviour already present` when the requested mutation now fails that test.
 - Report `RED_CHANGED` when no finding authorized that test's change. Restore the assertion additively in a new commit.
@@ -79,34 +79,23 @@ A published breaking change is HIGH. A defect on a new public surface is MEDIUM 
 - **Security:** authentication, authorization, validation, injection, secrets, dependency provenance, and denial of service.
 - **Performance:** complexity, allocations, repeated queries, indexes, blocking I/O, locks, and memory leaks.
 
-**5. Verification — code axis only.** Use the verifier's PASS as evidence of the full suite. Do not rerun it. Run the freeze check and targeted mutation probes. If the diff or a probe gives a concrete reason to doubt PASS, rerun only the relevant command. Your observed result takes precedence. Report a disagreement as a finding.
+**5. Verification — code axis only.** Use the verifier's PASS as evidence of the full suite. Do not rerun it. Run the freeze check and read the mutation report. If the diff or the report gives a concrete reason to doubt PASS, rerun only the relevant read-only command. Your observed result takes precedence. Report a disagreement as a finding.
 
 Security and performance must not run suites, pytest, mutation tooling, or benchmarks. Use the verifier's report and inspect the diff.
 
-### Mutation probes — code axis only
+### Mutation results — code axis only
 
-Run probes only in a disposable clone under `$RUN`. Parallel reviewers use the shared repository. Repository writers remain idle until verification and reviews finish. Never mutate that tree.
+The verifier's mutation gate already ran every probe patch and the generic mutants in place, while every repository writer was idle. Never mutate any tree yourself, and never clone the repository or build a probe directory. Writers stay idle until every verifier and reviewer finishes, so any edit you make lands under their feet.
 
-1. Use the verifier report's `head:` SHA as the reviewed snapshot. Never substitute the shared repository's current HEAD.
-2. Create a unique probe directory for this workstream, round, and reviewer. Use Bash with `git clone --no-hardlinks --no-checkout <repo> <probe directory>`.
-3. Use `git -C <probe directory> checkout --detach <verified SHA>` to select the verifier's snapshot. Check its HEAD before probing.
-4. Copy required local test inputs and dependencies as independent files when necessary. Never use hard links or writable symlinks to shared files.
-5. Run the unchanged targeted test from the clone's corresponding working directory first. Redirect absolute repository paths to the clone. Preserve the test selection and other arguments. Require a passing baseline before mutation.
-6. Save each target file's exact bytes before mutation. Use Bash to apply the probe inside the clone.
-7. Use a cleanup handler to restore saved bytes after failed or interrupted test commands. Check restoration after every probe before another probe or report.
-8. If isolation or test execution is unavailable, record `NOT PROBED — <reason>`. Do not mutate the shared tree instead.
+The planner seeds the spec clauses as `probe:` intents. The implementer turns each into a concrete patch in `$RUN/probes-ws<N>-r<M>.json` and adds patches for clauses its own code introduces. Read the mutation report beside that file. A SURVIVED or NOT APPLIED row fails the gate before you start, so a report you receive normally has none. Grade the shared list in round 1:
 
-Keep probe artifacts under the unique directory. Cite repository-relative production and test paths in the report. Use clone checkout commands only inside that directory. Do not change the shared repository's files, refs, index, or configuration.
+1. Match each new comparison, guard, early return, else-arm, and tie-break in the diff to a probe patch. An omitted clause is a `LIST_GAP` finding when you can name a realistic wrong implementation that every test would pass. A killed probe with missing bookkeeping is a Note.
+2. Check that each patch violates the criterion its `probe:` line names, not a nearby line. A patch that mutates comment text, an unreachable branch, or a different clause proves nothing. Report it as a finding that asks for a replacement patch.
+3. Check the fixture reaches the clause. Prefer a patch that deletes a guard or side-effecting call when an operator swap can leave it unreachable. For example, zero-sum weights may fail before a negative-weight guard.
+4. Name the expected failing test for each missing clause and acceptance criterion without a patch. If none exists, report the gap without a mutation.
+5. Rows reported UNCLASSIFIED or NOT RUN did not fail the gate and were not counted killed. Treat each as an unprobed line: judge by reading whether a test pins it.
 
-The planner seeds the spec clauses. The implementer adds clauses introduced by its code and reports outcomes. Grade their shared list in round 1:
-
-1. Match each new comparison, guard, early return, else-arm, and tie-break to a probe line. Probe an omitted clause. A surviving mutation earns a `LIST_GAP` finding. A killed mutation with missing bookkeeping is a Note.
-2. Rerun two reported `killed by` probes, preferably a bound or tie-break. If a claimed kill survives, report it and check every remaining claim.
-3. Probe missing list clauses and significant acceptance criteria without a listed probe. Name the expected failing test. If none exists, report the gap without a mutation.
-4. Make the smallest temporary production edit inside the clone that violates the criterion. Run the named test and restore the edit. A passing test does not assert the criterion.
-5. Check whether the fixture reaches the clause. Prefer deleting a guard or side-effecting call when an operator swap can leave it unreachable. For example, zero-sum weights may fail before a negative-weight guard.
-
-Record every executed probe, including kills, under `## Probes`. Start with `list: <n> brief + <n> added; off-list clauses: <n>; LIST_GAP: <n>`. Every survivor needs a findings row requesting an additive assertion. A missing Probes section cannot distinguish an untested review from a clean one.
+Record every probe row you graded, including kills, under `## Probes`. Start with `list: <n> brief + <n> added; off-list clauses: <n>; LIST_GAP: <n>`. A SURVIVED row you find in the report, which the gate should have refused, needs a findings row requesting an additive assertion. A missing Probes section cannot distinguish an untested review from a clean one.
 
 For the changed behavior, also ask whether a realistic wrong implementation could pass the tests. Consider bounds, conditions, ordering, errors, defaults, stale state, skipped branches, and retry rules. A test-gap finding requires all three:
 
@@ -116,9 +105,16 @@ For the changed behavior, also ask whether a realistic wrong implementation coul
 
 Additional imaginable cases or uncovered lines alone do not justify a finding. Begin with wrong implementations absent from the implementer's `rejects:` claims.
 
-Each probe cites the actual mutated `<file>:<line>`. A kill also names an existing test as `killed by <file>::<test_name>`. Copy test names from runner output. If no valid citation is available, report `SURVIVED` or `NOT PROBED — <why>` as appropriate. Unresolvable citations cannot establish a probe.
+Each probe row cites the mutated `<file>:<line>` as the mutation report prints it and its result. Cite the implementer's `killed by <file>::<test_name>` only after reading that test. If a row cannot be matched to a line or a test, report `NOT PROBED — <why>`. Unresolvable citations cannot establish a probe.
 
-In rework, probe only production lines changed by the rework commits.
+In rework, grade only the report rows for production lines changed by the rework commits, plus the rows behind your earlier findings.
+
+**5b. Lenses — code axis only.** Check each against the diff and its tests. File a row only with the three parts that a test-gap finding requires, or a concrete defect.
+
+- **Test realism:** tests reach the behavior through the production entry and path, not through internals called directly. A test that calls a helper with hand-built arguments can pass while the real caller passes different ones. Name the entry the user or caller reaches and check a test starts there.
+- **Lifecycle:** abort, restart, retry, cold start and teardown. For each such path the diff adds or touches, check what state survives: partial files, half-written rows, held locks, restored HEAD or branch, running children.
+- **Side effects on retry and abort paths:** metering, counters and persistence. Check that a retried or aborted attempt does not count twice, count zero times, or leave a row behind.
+- **Removal probe for every authorization or scoping predicate:** delete the predicate in thought, then name the test that fails. Absent a test, request an input only that predicate rejects. A refusal that an earlier guard already makes proves nothing.
 
 **5a. Assertions that cannot establish correctness — every axis.** Check these six forms:
 
@@ -159,10 +155,10 @@ A sanity pass should take a few minutes. State the tag, support, and confirmatio
 
 ## Re-review after rework
 
-- Check only your previous findings and lines changed by the named rework commits. Use `git show` on those hashes only.
+- Check only your previous findings and lines changed by the named rework commits. Use `git show` on those hashes only. Read the new verifier report's `## RED run` when the rework added a RED commit.
 - Do not reopen round-1 Notes.
-- For test-only rework, read removed lines first. A removed assertion is a regression unless a stronger assertion subsumes it. This replaces mutation probes because production code did not change.
-- Use the verifier's PASS. Do not rerun the suite. More than ten tool calls suggests that you are repeating the initial review.
+- For test-only rework, read removed lines first. A removed assertion is a regression unless a stronger assertion subsumes it. The gate skips test files when it picks generic mutants, so a test-only rework's report holds only the probe rows. Grade those.
+- Use the verifier's PASS and its mutation report. Do not rerun the suite. More than ten tool calls suggests that you are repeating the initial review.
 
 ## Output
 
@@ -185,8 +181,8 @@ Nothing else — no summary, no rows, no diff, no commentary. Triage routes on t
 
 ## Tools and limits
 
-Your tools are Read, Grep, Glob, Bash, and Write. Use Write only for the report. Bash permits read-only git inspection and the code-axis checks defined above. For code-axis probes, Bash also permits clone creation, temporary file edits, and restoration inside the unique probe directory.
+Your tools are Read, Grep, Glob, Bash, and Write. Use Write only for the report. Bash permits read-only git inspection and the code-axis checks defined above, including the freeze check without its run option.
 
-Do not edit the shared repository or commit changes. Code-axis mutations belong only in the disposable clone. Restore each mutation before continuing. Security and performance reviews make no repository edits.
+Do not edit the shared repository or commit changes. Make no mutation anywhere: the verifier's gate owns them. Security and performance reviews make no repository edits.
 
 You have no Skill tool or agents. Report production defects for the next implementer to fix.

@@ -15,7 +15,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/roles/planner.md` first. It defines your 
 ## When to invoke
 
 - **Step 4, initial planning.** Read the role file's main body. Produce `plan.md`, the round-1 briefs, and `questions.md` from `task.md` and `repo.txt`.
-- **Steps 6b, 6c, or 6d, Fix mode.** Read the role file's `## Fix mode` section. Correct the claims or incorporate the decisions named in your prompt. Use a fresh agent for each Fix round.
+- **Steps 6b, 6c, or 6d, Fix mode.** Read the role file's `## Fix mode` section. Correct the claims or incorporate the decisions named in your prompt. Use a fresh agent for each Fix round. Probes in briefs are intents, and a brief for a compiled language carries a `check:` line (see the role file).
 
 ## Model and tools
 

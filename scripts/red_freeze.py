@@ -22,8 +22,9 @@ line (exit 1). A bad revision, or a RED commit that is not an ancestor of
 `--head`, is a usage error (exit 2). A RED commit touching a file that does not
 look like a test is a `note:`, not a failure — the reviewer judges that one.
 
-`--run "<test command>"` also runs that command in a clean export of each RED
-commit and prints `RED run <sha>: exit <n>` with the output's tail. That is the
+`--run "<test command>"` also runs that command with each RED commit checked
+out in place — so the worktree's untracked dependencies (node_modules, a venv)
+are there — and prints `RED run <sha>: exit <n>` with the output's tail. That is the
 failure the report's `red:` lines quote: a report written after GREEN has only
 HEAD's and the probes' output at hand, and quotes one of those instead. A RED
 run that exits 0 is `RED_PASSES <sha>` (exit 1) — tests green on arrival. Only
@@ -32,20 +33,24 @@ it shows as a `red:` line with no matching failure in the block — unless
 the block opens with `(... N earlier lines omitted)`, when the failure may sit
 above the tail and the reviewer reruns the command to see it. Every RED
 given gets the same command, so on a rework round pass `--run` this round's RED
-alone — an earlier RED predates this round's tests. The export holds tracked
-files only, so the command must work from a fresh clone.
+alone — an earlier RED predates this round's tests. `--run` needs a tree with no
+tracked changes (exit 2 otherwise, nothing checked out) and puts the branch and
+HEAD back afterwards, also on SIGINT/SIGTERM, after killing every process the
+command left in its session (a backgrounded child included). It moves HEAD, so only the
+verifier runs it, while every repository writer is idle; the implementer and
+the reviewers run the freeze check without `--run`.
 
 No dependencies beyond git, for the same reason as the rest of `scripts/`.
 """
 from __future__ import annotations
 
 import argparse
-import io
+import contextlib
+import os
 import re
+import signal
 import subprocess
 import sys
-import tarfile
-import tempfile
 from collections import Counter
 
 TEST_PATH = re.compile(
@@ -57,12 +62,17 @@ class GitError(Exception):
     pass
 
 
-def git(repo: str, *args: str) -> str:
-    proc = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+def _git(repo: str, args: tuple[str, ...], new_session: bool = False) -> str:
+    proc = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True,
+                          start_new_session=new_session)
     if proc.returncode != 0:
         why = proc.stderr.strip() or f"exited {proc.returncode}"
         raise GitError(f"git {' '.join(args)}: {why}")
     return proc.stdout
+
+
+def git(repo: str, *args: str) -> str:
+    return _git(repo, args)
 
 
 def is_ancestor(repo: str, sha: str, head: str) -> bool:
@@ -122,22 +132,78 @@ def check(repo: str, head: str, reds: list[str]) -> tuple[list[str], list[str], 
 TAIL = 200
 
 
+# How often the wait on the command looks at a recorded signal.
+POLL_SECONDS = 0.1
+_recorded: list[int] = []
+
+
+def _record(signum: int, _frame: object) -> None:
+    # Never raises: an exit raised at an arbitrary statement could skip the group
+    # kill, the restore or the handler restore. run_red exits at fixed points.
+    _recorded.append(signum)
+
+
+def _exit_if_signalled() -> None:
+    if _recorded:
+        raise SystemExit(128 + _recorded[0])
+
+
+def _kill_group(proc: subprocess.Popen[str]) -> None:
+    """SIGKILL `proc`'s session and reap it, so nothing outlives the restore."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    proc.wait()
+
+
 def run_red(repo: str, red: str, cmd: str) -> tuple[int, str]:
-    """Run `cmd` in an export of `red`; return (exit code, output tail)."""
-    tar = subprocess.run(["git", "-C", repo, "archive", "--format=tar", red],
-                         capture_output=True)
-    if tar.returncode != 0:
-        raise GitError(f"git archive {red}: {tar.stderr.decode().strip()}")
-    with tempfile.TemporaryDirectory() as tree:
-        with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as tf:
-            # The data filter exists from 3.9.17/3.12; older 3.9s extract as before.
-            if hasattr(tarfile, "data_filter"):
-                tf.extractall(tree, filter="data")
-            else:
-                tf.extractall(tree)
-        proc = subprocess.run(cmd, shell=True, cwd=tree, text=True,
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    lines = proc.stdout.rstrip("\n").splitlines()
+    """Run `cmd` on `red` checked out in place; return (exit code, output tail).
+
+    The tree must have no tracked changes. `cmd` runs in its own session; on every
+    exit path that whole group is killed and reaped before HEAD goes back to the
+    branch (or the detached commit) it was on, also on SIGINT/SIGTERM and when
+    `cmd` fails. A descendant that calls setsid itself is out of reach.
+    """
+    if git(repo, "status", "--porcelain", "--untracked-files=no").strip():
+        raise GitError("the working tree must be clean for --run "
+                       "(commit or stash tracked changes first)")
+    sha = git(repo, "rev-parse", "--verify", f"{red}^{{commit}}").strip()
+    branch = git(repo, "branch", "--show-current").strip()
+    origin = branch or git(repo, "rev-parse", "HEAD").strip()
+    _recorded.clear()
+    old = {s: signal.signal(s, _record)
+           for s in (signal.SIGINT, signal.SIGTERM)}
+    proc: subprocess.Popen[str] | None = None
+    exiting = False
+    try:
+        git(repo, "checkout", "-q", "--no-overwrite-ignore", "--detach", sha)
+        proc = subprocess.Popen(cmd, shell=True, cwd=repo, text=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                start_new_session=True)
+        while True:
+            _exit_if_signalled()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                output, _ = proc.communicate(timeout=POLL_SECONDS)
+                break
+    except BaseException:
+        exiting = True
+        raise
+    finally:
+        try:
+            if proc is not None:
+                _kill_group(proc)
+            # -f drops edits the command made to tracked files; the tree was clean.
+            # Its own session keeps a terminal's group-wide SIGINT off git.
+            back = ["checkout", "-q", "-f", *([] if branch else ["--detach"]), origin]
+            _git(repo, tuple(back), new_session=True)
+        finally:
+            for s, handler in old.items():
+                signal.signal(s, handler)
+        if not exiting:
+            _exit_if_signalled()
+    lines = output.rstrip("\n").splitlines()
     if len(lines) > TAIL:
         cut = len(lines) - TAIL
         lines = [f"(... {cut} earlier lines omitted)", *lines[-TAIL:]]
@@ -151,7 +217,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--repo", default=".")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--run", metavar="CMD",
-                    help="test command to run in an export of each RED commit")
+                    help="test command to run on each RED commit, checked out "
+                    "in place")
     ap.add_argument("reds", nargs="+", metavar="red-commit")
     args = ap.parse_args(argv)
     runs: list[tuple[str, int, str]] = []

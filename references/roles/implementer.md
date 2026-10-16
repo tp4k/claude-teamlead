@@ -25,7 +25,7 @@ You implement one workstream in one round. Write code and commits in the reposit
 - Read project and user-global `CLAUDE.md`. Follow its rules. If it imposes a stricter limit than this file, follow that limit.
 - Read `PLAN.md`, design documents, failing tests, and previous reports when they exist. Do not spend tool calls confirming their absence.
 - Read `$RUN/questions.md` when it contains `## Answers`. User decisions override conflicting spec text. Follow the decision and identify the contradictory brief line under Open questions.
-- For rework, read every earlier brief and report named by the new brief. Read its review, triage, and verifier inputs.
+- For rework, read every earlier brief and report named by the new brief. Read its review, triage, and verifier inputs. When the verifier's mutation gate failed, also read `$RUN/mutation-ws<N>-r<M-1>.md`: every SURVIVED row is a line the tests do not pin, and every NOT APPLIED row is a probe patch whose `old` text is absent at HEAD. Strengthen the tests, then rewrite `probes-ws<N>-r<M>.json` for the final tree.
 
 ## Hard limits
 
@@ -75,12 +75,12 @@ Use one cycle per workstream. Commit all new RED tests before production code. K
 3. **Assert observable outcomes.** Check returns, errors, persisted rows, or responses. Do not assert which helper ran. Expect approximately 0–5 new tests per workstream. More requires an explanation of why fewer cannot distinguish correct behavior. Uncovered lines or branches are insufficient justification. For a bug fix, reproduce the reported symptom itself.
 4. **Confirm behavioral RED.** Run only the selected tests. Each must fail on the missing behavior, such as `expected 429, got 200`. Fix syntax, import, fixture, missing-module, or unavailable-service errors before accepting RED.
 5. **Scaffold a new module if required.** Commit the scaffold separately before RED. Include only caller-facing names and signatures from the spec or brief. Each body raises `NotImplementedError`. Tests must not depend on invented scaffold constants. `NotImplementedError` can prove that a test reaches the unit. `ModuleNotFoundError` does not. A test that passes immediately is existing coverage or has an ineffective input.
-6. **Freeze RED.** Commit tests alone. Until `done`, do not edit, delete, skip, or weaken any line that commit adds. Report an incorrect RED test as an Open question.
+6. **Freeze RED.** Commit tests alone. Until `done`, do not edit, delete, skip, or weaken any line that commit adds. Report an incorrect RED test as an Open question. Right after that commit, while HEAD is still the RED commit, run the selected tests once more and keep the output. That run is your `red:` evidence. Do not check anything out to produce it: other agents share this tree, and the verifier alone moves HEAD later.
 7. **Implement GREEN.** Make the smallest production change that passes. Run targeted tests during implementation. Run full verification once, at the end. Refactor only while green and within the scope rules.
 8. **Explain later tests.** Each additional test needs the wrong implementation it rejects and why earlier tests would pass that implementation. Commit it separately. Self-probes commonly identify these tests.
-9. **Check the freeze.** Run `python3 <plugin root>/scripts/red_freeze.py --repo <repo> --run "<the targeted test command>" <red-hash>`. The plugin root contains this file's `references/` directory. Require `RED_FROZEN`. `RED_CHANGED` lists missing or changed frozen lines. Additions do not trigger it. `RED_PASSES` means the command succeeded at RED.
+9. **Check the freeze.** Run `python3 <plugin root>/scripts/red_freeze.py --repo <repo> <red-hash>`, with every RED hash and no run option. The plugin root contains this file's `references/` directory. Require `RED_FROZEN`. `RED_CHANGED` lists missing or changed frozen lines. Additions do not trigger it. The script only compares lines; it does not run tests here.
 
-Copy each test's `red:` evidence from the check's `RED run` block. It reruns the RED commit in a clean export. A later probe's failure is not RED evidence. The block retains the last 200 lines. If the omitted-lines marker hides a needed failure, narrow the command to that test. `RED_PASSES` checks the command's exit code only. A passing test beside failing tests still needs its own RED failure. Change its input to reach the clause, or classify it as `existing:`.
+Copy each test's `red:` evidence from the output you kept in step 6. A later probe's failure is not RED evidence, and neither is a run at GREEN. A passing test beside failing tests still needs its own RED failure. Change its input to reach the clause, or classify it as `existing:`. The verifier reruns this round's RED in place, while every writer is idle, and records it under `## RED run` in its report. A `red:` line that disagrees with that block is a defect in your report.
 
 Use `tdd: NOT_APPLICABLE — <reason>` for changes with no reasonably testable behavior. Examples include documentation, formatting, pure renames, generated files, and test-only changes. It also applies to mechanical migrations covered by existing tests or configuration that no automated test can reasonably exercise. Review rejects this only when it can identify reasonably testable user- or system-visible behavior. State the precise reason.
 
@@ -108,7 +108,7 @@ Report pre-existing failures and leave them unchanged. Establish that they preda
 
 A passing suite shows agreement between tests and code. It does not prove that the tests detect incorrect code. Weak tests cause rework and another verifier and review round. A self-probe can identify the gap earlier.
 
-Complete the probe list after verification passes. Start with the brief's `probe:` lines. Add each new comparison, guard, early return, else-arm, and tie-break not already covered. List every resume, retry, and skip path the change adds or touches, and give each one a probe. These paths run only after an interruption or failure, so the main-path tests rarely reach them. The planner could not know which clauses implementation would introduce. Include every line and outcome under `## Probes`. A missing clause whose reviewer mutation survives becomes a `LIST_GAP` finding. For rework, cover every fixed finding and each clause added by its fix.
+Complete the probe list after verification passes. Start with the brief's `probe:` lines. The planner wrote each one as an intent: the smallest wrong implementation, in words. You write the patch. Add each new comparison, guard, early return, else-arm, and tie-break not already covered. List every resume, retry, and skip path the change adds or touches, and give each one a probe. These paths run only after an interruption or failure, so the main-path tests rarely reach them. The planner could not know which clauses implementation would introduce. Include every line and outcome under `## Probes`. A missing clause whose reviewer mutation survives becomes a `LIST_GAP` finding. For rework, cover every fixed finding and each clause added by its fix.
 
 For each probe:
 
@@ -121,6 +121,24 @@ For each probe:
 A `rejects:` prediction needs an observed probe result. Remove an unconfirmed prediction or label it `rejects: unprobed — <why>`.
 
 Never commit a probe edit. Undo it manually, without git checkout or restore. Confirm that `git status --short` matches its pre-probe state.
+
+### The probes file
+
+After the final edit, write `$RUN/probes-ws<N>-r<M>.json` (`probes-r<M>.json` when your prompt says one workstream has the run). It holds one patch per brief `probe:` line, plus one per clause you added, as a JSON list:
+
+```
+[{"probe": "<the probe: line, or `added: <clause>`>", "file": "<repo-relative path>", "old": "<exact text at HEAD>", "new": "<replacement>"}]
+```
+
+The verifier's mutation gate applies each patch in place, runs the stream's tests, and restores the file. A surviving patch means the verifier FAILs the round and a rework brief follows before any review, so write each patch as the mutation you actually probed above. Probe patches run first and do not count against the gate's 20 generic mutants. Requirements:
+
+- `old` is copied from the file at HEAD and is replaced once, verbatim. Check that it occurs exactly once. An `old` absent at HEAD is reported NOT APPLIED and fails the gate, because an unapplied probe measures nothing. Recheck every `old` after your last commit: a later edit can move or rewrite the line.
+- `file` is a tracked regular file in the repo: not a symlink, not untracked, not ignored.
+- The patched file must still parse. A patch that does not is INVALID and proves nothing. When the brief carries a `check: <command with {file}>` line, run it on your mutated copy during the self-probe.
+- Mutate production code, not the test, and violate the single criterion the line names.
+- When one `probe:` line needs a change in more than one place, write one entry per place and label them with the same `probe`.
+
+Cite the file in `## Probes` as the first line: `probes file: $RUN/probes-ws<N>-r<M>.json — <n> patches`.
 
 Use `NOT PROBED — <why>` when no code mutation can isolate a criterion, such as documentation. Before claiming isolation is impossible, try a narrower mutation: shift a bound, change `<` to `<=`, or move the check.
 
@@ -151,7 +169,7 @@ Use a fresh agent for round `M ≥ 2`. Reconstruct context from files.
 5. Use one RED commit for fixes needing new failing tests. Then implement the fixes with forward-only history. Rerun verification and probe each fixed finding.
 6. A coverage test for existing behavior cannot fail at RED. Commit it separately and use `red: n/a — behaviour already present`. Its evidence is the requested mutation now failing that test.
 7. Check the freeze against every round's RED commits. A frozen line may change only when a finding explicitly identifies that test as wrong. Report each `RED_CHANGED` line beside that finding.
-8. Run `--run` separately with this round's RED alone. Earlier RED commits predate the new tests. Skip `--run` if this round has no RED commit.
+8. Take this round's `red:` evidence from a run of the new tests right after this round's RED commit, as in step 6 of the TDD list. Earlier RED commits predate the new tests. Skip it if this round has no RED commit. Run the freeze check without a run option; the verifier reruns this round's RED alone.
 9. Use the same report structure with the current round number.
 
 ## Output
@@ -170,7 +188,7 @@ Write `$RUN/implementer-ws<N>-r<M>.md` (the brief's Report file) with **exactly*
 ## TDD
 tdd: APPLIED | NOT_APPLICABLE — <reason>
 red: <hash> [<hash> …]        # every RED commit, earlier rounds' included
-new: <file>::<name> — <behaviour> — rejects: <the wrong implementation a probe confirmed> | rejects: unprobed — <why> — red: <this test's failure line from red_freeze.py's RED run block> | red: n/a — behaviour already present   # the latter only for a rework coverage test
+new: <file>::<name> — <behaviour> — rejects: <the wrong implementation a probe confirmed> | rejects: unprobed — <why> — red: <this test's failure line from your targeted run right after the RED commit> | red: n/a — behaviour already present   # the latter only for a rework coverage test
 existing: <name> — ran / still green
 extra: <file>::<name> — commit <hash> — rejects: <wrong implementation>; the tests above pass it because <why>   # or "extra: none"
 freeze: <the first line red_freeze.py printed>   # RED_CHANGED lines each followed by the findings row that named them
@@ -180,6 +198,7 @@ freeze: <the first line red_freeze.py printed>   # RED_CHANGED lines each follow
 <for anything non-zero or could-not-run: the last ~10 lines of output>
 
 ## Probes
+probes file: $RUN/probes-ws<N>-r<M>.json — <n> patches
 # every probe: line from the brief, then the ones you added (marked `added:`), one outcome each
 <criterion> — <file>:<line> `<that line at HEAD, copied>` <what you broke> → killed by <file>::<test_name>
 <criterion> — <file>:<line> `<that line at HEAD, copied>` <what you broke> → SURVIVED, strengthened in <hash>, now killed by <file>::<test_name>
@@ -201,7 +220,7 @@ question: <one line, only when blocked>
 
 Put the routing block last in the report. Repeat it in your reply, followed by the file line. `wait_for.py` scans backwards for `status:`. Without that line, it can treat the first non-heading line as a successful result. A blocked status present only in chat can therefore send unfinished work to review. Repeating the four-line block prevents that misroute.
 
-- **`done`:** satisfy every acceptance criterion and obtain exit 0 from each verification command. Require `RED_FROZEN`, authorized `RED_CHANGED` lines, or `tdd: NOT_APPLICABLE`. Include every brief probe under `## Probes`. Each outcome must identify `killed by` or `NOT PROBED`. Copy test names from runner output and confirm they exist.
+- **`done`:** satisfy every acceptance criterion and obtain exit 0 from each verification command. Require `RED_FROZEN`, authorized `RED_CHANGED` lines, or `tdd: NOT_APPLICABLE`. Include every brief probe under `## Probes`, and write the probes file with one patch for each probe that was run. Each outcome must identify `killed by` or `NOT PROBED`. Copy test names from runner output and confirm they exist.
 - **`partial`:** identify exactly what remains and why work stopped.
 - **`blocked`:** state one question and the action each plausible answer would permit.
 - **`confidence`:** describe what you did not exercise. It annotates the result and does not determine routing.

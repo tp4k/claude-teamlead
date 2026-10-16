@@ -66,6 +66,15 @@ AXIS_TEXT: dict[str, tuple[str, str]] = {
         "where an existing one fits, a layering the tree does not use, and any "
         "place the plan's assumption about existing code is wrong.",
     ),
+    "failure-modes": (
+        "Failure modes and semantics",
+        "For each workstream, what happens on restart, on cold start, on abort "
+        "midway, on retry, and when a dependency is degraded rather than down? "
+        "Where the plan adds a metric or counter, what exactly does it count — "
+        "attempts or successes, per run or per process, and does a retry count "
+        "twice? Flag a path the plan leaves undefined and any state a restart "
+        "would corrupt or silently reset.",
+    ),
 }
 
 

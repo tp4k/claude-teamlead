@@ -3,13 +3,9 @@
 
 Two rules here are worth more than the code that implements them.
 
-The first is the seed. Every run option defaults to off in `paths.DEFAULTS`, so
-a machine with no config file would run with no security review and no perf
-review — and the failure is invisible, because a reviewer that never ran and a
-reviewer that found nothing produce the same silence in the final report. The
-seed is what keeps "everything defaults to off" from meaning "the two reviewers
-you already had are gone". It must therefore fire exactly once, and never touch
-a config the user has since edited.
+The first is the seed. The in-code defaults already enable the specialists
+(`when-needed`), so the seed writes only a comment. It must fire exactly once
+and never touch a config the user has since edited (D15).
 
 The second is the asymmetry between a bad config value and a bad flag. A config
 typo is skipped so the next tier answers; a flag typo stops the run. The reason
@@ -26,6 +22,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 SCRIPT = Path(__file__).resolve().parent / "run_config.py"
 
@@ -67,15 +65,16 @@ def fixture(tmp: Path) -> tuple[Path, Path]:
     return home, repo
 
 
-def case_a_missing_config_is_seeded_with_both_reviewers(tmp: Path) -> None:
+def case_a_missing_config_is_seeded_without_forcing_specialists_on(tmp: Path) -> None:
     home, repo = fixture(tmp)
     out = run(home, repo).stdout
     written = json.loads((home / "config.json").read_text())
     check(
-        "an absent config is seeded, reviewers on",
-        written["securityReview"] == "on"
-        and written["perfReview"] == "on"
-        and value_of(out, "securityReview") == "on"
+        "an absent config is seeded, and the seed does not write specialists on",
+        "securityReview" not in written
+        and "perfReview" not in written
+        and value_of(out, "securityReview") == "when-needed"
+        and value_of(out, "perfReview") == "when-needed"
         and "seeded" in out,
         out,
     )
@@ -149,7 +148,7 @@ def case_a_config_typo_is_skipped_not_fatal(tmp: Path) -> None:
     check(
         "an invalid config value falls through to the default",
         proc.returncode == 0
-        and value_of(proc.stdout, "securityReview") == "off"
+        and value_of(proc.stdout, "securityReview") == "when-needed"
         and source_of(proc.stdout, "securityReview") == "default",
         proc.stdout + proc.stderr,
     )
@@ -212,7 +211,8 @@ def case_task_text_is_not_mistaken_for_flags(tmp: Path) -> None:
     proc = run(home, repo, "--flags", "rewrite the --perf-ish helper in utils")
     check(
         "an unrecognised token is ignored, not an error",
-        proc.returncode == 0 and value_of(proc.stdout, "perfReview") == "on",
+        proc.returncode == 0
+        and value_of(proc.stdout, "perfReview") == "when-needed",
         proc.stdout + proc.stderr,
     )
 
@@ -361,8 +361,100 @@ def case_an_unknown_choice_key_is_rejected(tmp: Path) -> None:
     )
 
 
+def opus_code_review_in(home: Path) -> object:
+    """`opusCodeReview` is no run option, so resolve it the way review_package does."""
+    import paths
+
+    saved = os.environ.get("TEAMLEAD_HOME")
+    os.environ["TEAMLEAD_HOME"] = str(home)
+    try:
+        return paths.setting("opusCodeReview", None, paths.one_of("opusCodeReview"))
+    finally:
+        if saved is None:
+            del os.environ["TEAMLEAD_HOME"]
+        else:
+            os.environ["TEAMLEAD_HOME"] = saved
+
+
+def case_defaults_without_global_config(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    target = tmp / "run" / "config.json"
+    out = run(home, repo, "--flags", "rewrite the cache", "--out", str(target)).stdout
+    written = json.loads(target.read_text())
+    expected = {
+        "codexPlanReview": "always",
+        "codexCodeReview": "on",
+        "opusCodeReview": "fallback",
+        "securityReview": "when-needed",
+        "perfReview": "when-needed",
+    }
+    check(
+        "with no config every default is the new one, sourced from default",
+        all(
+            value_of(out, key) == want and source_of(out, key) == "default"
+            for key, want in expected.items()
+        )
+        and written["codexPlanReviewAxes"][-1] == "failure-modes"
+        and opus_code_review_in(home) == "fallback",
+        out + target.read_text(),
+    )
+
+
+def case_existing_global_config_wins(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    home.mkdir()
+    (home / "config.json").write_text(json.dumps({"securityReview": "on"}))
+    out = run(home, repo).stdout
+    check(
+        "a global config saying on still resolves to on, not migrated",
+        value_of(out, "securityReview") == "on"
+        and value_of(out, "perfReview") == "when-needed",
+        out,
+    )
+
+
+def case_opus_code_review_reaches_the_run_config(tmp: Path) -> None:
+    home, repo = fixture(tmp)
+    home.mkdir()
+    (home / "config.json").write_text(json.dumps({"opusCodeReview": "off"}))
+    target = tmp / "run" / "config.json"
+    run(home, repo, "--out", str(target))
+    from_config = json.loads(target.read_text())["options"].get("opusCodeReview")
+    (home / "config.json").write_text(json.dumps({"opusCodeReview": "fallback"}))
+    out = run(home, repo, "--choice", "opusCodeReview=off", "--out", str(target))
+    from_card = json.loads(target.read_text())["options"].get("opusCodeReview")
+    check(
+        "a global opusCodeReview and a card answer both land in the run config",
+        from_config == "off"
+        and from_card == "off"
+        and source_of(out.stdout, "opusCodeReview") == "options card",
+        out.stdout + out.stderr,
+    )
+
+
+def case_config_example_matches_the_defaults(tmp: Path) -> None:
+    import paths
+
+    example = json.loads((SCRIPT.parent.parent / "config.example.json").read_text())
+    drift = [
+        key
+        for key, value in paths.DEFAULTS.items()
+        if key in example
+        and example[key] != (list(value) if isinstance(value, tuple) else value)
+    ]
+    check(
+        "config.example.json matches paths.DEFAULTS, axes end on failure-modes",
+        not drift and example["codexPlanReviewAxes"][-1] == "failure-modes",
+        f"drift: {drift}",
+    )
+
+
 CASES = [
-    case_a_missing_config_is_seeded_with_both_reviewers,
+    case_opus_code_review_reaches_the_run_config,
+    case_config_example_matches_the_defaults,
+    case_a_missing_config_is_seeded_without_forcing_specialists_on,
+    case_defaults_without_global_config,
+    case_existing_global_config_wins,
     case_an_existing_config_is_never_rewritten,
     case_a_flag_beats_the_config,
     case_a_card_answer_beats_the_flag,

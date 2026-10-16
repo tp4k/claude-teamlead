@@ -1,6 +1,6 @@
 ---
 name: cycle
-description: "Runs a task in a fresh worktree, prepares its environment, moves the session, then invokes /teamlead:delegate and /teamlead:codex-review. Includes user decisions. Use for \"cycle this\", \"full teamlead cycle\", or \"fresh tree + teamlead\"."
+description: "Runs a task in a fresh worktree, prepares its environment, moves the session, then invokes /teamlead:delegate, whose in-loop Codex gate reviews the finished diff. Includes user decisions. Use for \"cycle this\", \"full teamlead cycle\", or \"fresh tree + teamlead\"."
 metadata:
   argument-hint: "<task description> [--slug NAME] [--base REF] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--with-human-readable-plan=off|generate|pause] [--adr] | --resume <slug>"
 allowed-tools: Bash(git worktree list), Bash(git rev-parse *), Bash(git show-ref *), Bash(git check-ignore *), Bash(git log *), Bash(git status *), Bash(git fetch *), EnterWorktree, AskUserQuestion
@@ -8,7 +8,7 @@ allowed-tools: Bash(git worktree list), Bash(git rev-parse *), Bash(git show-ref
 
 # Teamlead cycle
 
-Prepare a fresh worktree, run `/teamlead:delegate`, then run an independent review in one session. Step 7 moves the session into the worktree before implementation.
+Prepare a fresh worktree and run `/teamlead:delegate` in one session. Delegate's final gate gives the diff an independent Codex review inside the run. Step 7 moves the session into the worktree before implementation.
 
 A matching cwd alone does not load path-scoped CLAUDE.md outside workspace roots. `EnterWorktree` moves both cwd and roots. Without it, subagents can miss files such as `apps/server/CLAUDE.md`. Earlier versions required a second session for this move.
 
@@ -21,9 +21,9 @@ Add `--codex-plan-review=always` and `--with-human-readable-plan=generate` only 
 The cycle can present four routine decisions, subject to run settings:
 
 1. **Delegate step 3a:** choose plan review, human plan, security review, and performance review. The card shows current resolved defaults.
-2. **Delegate step 6:** answer unresolved questions and design choices. `go` accepts all recommendations.
-3. **Delegate step 6d:** inspect the final plan when the hold conditions require it. These include scope choices, confirmed design corrections, and a requested pause. Read `$RUN/plan-human.md` when generated.
-4. **Codex-review step 4:** choose which verified findings to fix.
+2. **Delegate step 6:** answer the one batch of unresolved questions, design choices, and any scope card. `go` accepts all recommendations. After this batch the run asks again only when it halts.
+3. **Delegate step 6d:** inspect the final plan when the hold conditions require it. These include confirmed design corrections and a requested pause. Read `$RUN/plan-human.md` when generated.
+4. **Codex-review step 4:** choose which verified out-of-scope findings to follow up. It appears only when you run that skill.
 
 A collision or ambiguous bootstrap can require an additional setup decision. No step merges or pushes.
 
@@ -153,34 +153,32 @@ On `--resume <slug>`, read the task file under `$TEAMLEAD_HOME/tasks/`. Confirm 
 
 Invoke `/teamlead:delegate` with the saved task and `flags:`. Identify this worktree as the repository. Relay the human-readable plan path when generated.
 
-Delegate owns planning, questions, implementation, verification, review, and triage. Do not duplicate them. Its run path is `$TEAMLEAD_HOME/runs/<worktree-dir-name>/<timestamp>-<slug>/`.
+Delegate owns planning, questions, implementation, verification, review, triage, and the Codex gate. Do not duplicate them. Its run path is `$TEAMLEAD_HOME/runs/<worktree-dir-name>/<timestamp>-<slug>/`.
 
-If delegate halts before approval, stop the cycle without external review. Report the cause, run directory, and every landed commit:
+If delegate halts before the gate approves, stop the cycle. No further review runs. Report the cause, run directory, and every landed commit:
 
 - **ADR conflict:** implementation did not start.
-- **Rework cap:** work remains unapproved. Other completed streams may already be approved.
+- **Rework cap:** work remains unapproved, in stream rework or gate rework alike. Other completed streams may already be approved.
 - **CANNOT_RUN:** the environment or command prevented verification.
 - **Blocked or partial:** work needs an answer or another implementation round.
+- **Codex cannot run with `opusCodeReview=off`:** the gate has no reviewer.
 
-External review of unfinished work spends another 10–20 minutes without completing its own acceptance.
 
-## 10. Review — `/teamlead:codex-review`
+## 10. Review — the in-loop Codex gate
 
-After a clean finish, invoke codex-review with this worktree and no default flags. It packages the task, starts fresh Codex in a disposable worktree, and triages every finding. The background review usually takes 10–20 minutes.
+Delegate's step 10a already ran the independent review: after every stream was approved, Codex reviewed the whole diff (the Opus fallback when Codex could not run), triage folded its findings into rework rounds, and the gate looped until clean. Do not start a separate `/teamlead:codex-review` after it.
 
-Use `--no-network` only when no review claim needs GitHub, PR, or CI access. It selects the hard read-only sandbox instead of the disposable networked worktree.
+Run `/teamlead:codex-review` with this worktree only when `codexCodeReview=off` skipped the gate and the user wants the review anyway. Use `--no-network` only when no review claim needs GitHub, PR, or CI access. If Codex cannot run, stop unless `opusCodeReview=fallback`.
 
-If Codex cannot run, stop unless the user's config sets `opusCodeReview=fallback`. That setting dispatches the Opus fallback. Do not add your own fallback setting.
-
-Codex-review reports its ledger and counts, then asks which CONFIRMED, PLAN-DEFECT, and PRE-EXISTING-SUBSYSTEM-REWRITTEN findings to fix. For selected rows, it writes `review-followup.md` and supplies `/teamlead:delegate <path>`.
+Rows the gate triaged as out of scope sit in the run's ledger rows and final report. The user may pick any of them for a follow-up with `/teamlead:codex-review <run>`, which writes `review-followup.md` and supplies `/teamlead:delegate <path>`.
 
 Do not use `--package-only` or report its manual `Follow instructions to review PR @<abs>/PROMPT.md` handoff as the completed review.
 
 ## 11. Closing report
 
-Report the worktree, branch, base SHA, run directory, commit count, plan-review counts, and human-plan path. Include code-review counts with the reviewer identity. Include any follow-up path, delegate command, and deferred-work count.
+Report the worktree, branch, base SHA, run directory, commit count, plan-review counts, and human-plan path. Include the gate's verdict, its reviewer identity (Codex or Opus fallback), and the rework rounds it needed. Include any follow-up path, delegate command, and deferred-work count.
 
-Selected fixes start a separate delegate run with its own plan, questions, and reviews. That run invokes codex-review at step 11. It reviews only new fix commits and checks earlier findings. Codex remains first, with Opus fallback available when it produced the earlier review. Do not hide this separate round inside the initial cycle.
+Selected out-of-scope fixes start a separate delegate run with its own plan, questions, and reviews. That run invokes codex-review at step 11. It reviews only new fix commits and checks earlier findings. Codex remains first, with Opus fallback available when it produced the earlier review. Do not hide this separate round inside the initial cycle.
 
 ## Never
 
@@ -190,4 +188,5 @@ Selected fixes start a separate delegate run with its own plan, questions, and r
 - Ask for relaunch, rename, or cd when EnterWorktree is available and accepted.
 - Hardcode bootstrap, package manager, or `.env` as the sole possible carried file.
 - Report a package-only handoff as a completed review.
+- Run a second Codex review after the in-loop gate ran.
 - Enter a worktree whose bootstrap failed.

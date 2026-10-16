@@ -3,7 +3,7 @@
 
     python3 scripts/test_gate_agent_spawns.py
 
-The failure this pins is a real run, `nsd-m0c-grammar/2026-09-24-1018-m0c-grammar`:
+The failure this pins is a real run, `acme-grammar/2026-09-24-1018-grammar-m3`:
 task.md with `flags: none`, a `complex=yes` plan, a PLAN_VALID validation and
 four implementer briefs — and no config.json, no options card, no plan review
 package. Every implementer spawn was allowed, because nothing looked. The first
@@ -50,7 +50,7 @@ def config(autopilot: bool = False, **options: str) -> str:
 
 
 def mkrun(tmp: Path, files: dict[str, str]) -> Path:
-    run = tmp / "runs" / "nsd-m0c-grammar" / "2026-09-24-1018-m0c-grammar"
+    run = tmp / "runs" / "acme-grammar" / "2026-09-24-1018-grammar-m3"
     run.mkdir(parents=True)
     (run / "repo.txt").write_text(f"{tmp / 'repo'}\n")
     for name, body in files.items():
@@ -118,9 +118,9 @@ def case_m0c_planner_denied(tmp: Path) -> None:
 def case_codex_owed_before_validation(tmp: Path) -> None:
     run = mkrun(tmp, {k: v for k, v in M0C.items() if k != "plan-validation.md"}
                 | {"config.json": config()})
-    expect_deny("hard + complex=yes: validator refused until the Codex review "
-                "started", spawn("teamlead:plan-validator", run),
-                "plan_review_package.py")
+    expect_silent("hard + complex=yes: the validator runs at 4a beside the Codex "
+                  "review, so it is not refused for it",
+                  spawn("teamlead:plan-validator", run))
 
 
 def case_validator_before_plan(tmp: Path) -> None:
@@ -183,26 +183,28 @@ SCOPE_CUT = VALID.replace("Smaller: none", "Smaller: fold WS-2 into WS-1")
 
 
 def case_validator_while_human_plan_is_written(tmp: Path) -> None:
-    """The reported deny: writer and validator spawned in one message. The deny
-    stands, but it must not send the coordinator to spawn a second writer."""
+    """The validator runs at 4a, beside the human-plan writer, so the writer's
+    absence no longer refuses it."""
     run = mkrun(tmp, UNVALIDATED | {"config.json": config(humanReadablePlan="pause")})
-    expect_deny("validator refused while plan-human.md is owed — wait, not respawn",
-                spawn("teamlead:plan-validator", run), "step 4", "already running")
+    expect_silent("validator allowed while plan-human.md is being written",
+                  spawn("teamlead:plan-validator", run))
 
 
 def case_validator_owes_the_relay(tmp: Path) -> None:
-    """The validator runs at 6c, so an unanswered relay comes before it."""
+    """The validator runs at 4a, before the relay, so an unanswered relay no
+    longer holds it back."""
     run = mkrun(tmp, UNVALIDATED | {"questions.md": QUESTIONS})
-    expect_deny("validator refused while the relay is outstanding",
-                spawn("teamlead:plan-validator", run), "step 6", "relay")
+    expect_silent("validator allowed while the relay is outstanding",
+                  spawn("teamlead:plan-validator", run))
 
 
 def case_validator_owes_the_design_fold(tmp: Path) -> None:
-    """Step 6b: CONFIRMED rows are folded before the validator grades the plan."""
+    """The validator grades the plan beside the design review (4a); the 6b fold
+    is owed before dispatch, not before the validator."""
     run = mkrun(tmp, UNVALIDATED | {
         "plan-triage.md": "CONFIRMED 1 · WRONG 0 · SETTLED 0 · OPEN 0\n"})
-    expect_deny("validator refused until the design Fix round ran",
-                spawn("teamlead:plan-validator", run), "step 6b", "Fix mode")
+    expect_silent("validator allowed before the design Fix round",
+                  spawn("teamlead:plan-validator", run))
 
 
 def case_validator_after_annotated_acceptance_allowed(tmp: Path) -> None:
@@ -220,6 +222,17 @@ def case_validator_after_relay_allowed(tmp: Path) -> None:
                   spawn("teamlead:plan-validator", run))
 
 
+def case_pass_two_keeps_pass_one_upgrades(tmp: Path) -> None:
+    upgrade = "WS-1 lexer input: no — reads stdin; requires input: yes"
+    run = mkrun(tmp, dict(REVIEWED, **{
+        "plan-validation.md": VALID.replace("Smaller", f"{upgrade}\n\nSmaller")}))
+    run_hook(spawn("teamlead:plan-validator", run))
+    kept = run / "tag-upgrades.md"
+    text = kept.read_text() if kept.exists() else ""
+    check("a validator spawn copies pass 1's tag upgrade out before pass 2 "
+          "replaces the report", upgrade in text.splitlines(), repr(text))
+
+
 def case_autopilot_validator_skips_relay(tmp: Path) -> None:
     run = mkrun(tmp, UNVALIDATED | {"questions.md": QUESTIONS,
                                     "config.json": config(autopilot=True)})
@@ -229,8 +242,8 @@ def case_autopilot_validator_skips_relay(tmp: Path) -> None:
 
 def case_scope_card_owed(tmp: Path) -> None:
     run = mkrun(tmp, REVIEWED | {"plan-validation.md": SCOPE_CUT})
-    expect_deny("an unanswered scope cut refuses the implementer at 6d",
-                spawn("teamlead:implementer", run), "step 6d", "fold WS-2")
+    expect_deny("an unanswered scope cut refuses the implementer at the step-6 relay",
+                spawn("teamlead:implementer", run), "step 6", "fold WS-2")
 
 
 def case_autopilot_skips_scope_card(tmp: Path) -> None:

@@ -18,7 +18,11 @@ import re
 import sys
 from pathlib import Path
 
-SKILLS = Path(__file__).resolve().parent.parent / "skills"
+import paths
+import run_config
+
+ROOT = Path(__file__).resolve().parent.parent
+SKILLS = ROOT / "skills"
 ALLOWED = {"name", "description", "license", "allowed-tools", "metadata",
            "compatibility"}
 
@@ -212,6 +216,163 @@ def check_followup_contract() -> None:
                         needle in " ".join(step11.split()), needle))
 
 
+def flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def table_rows(text: str) -> list[dict[str, str]]:
+    """The first Markdown table in `text` as header-keyed rows of raw cells."""
+    rows: list[dict[str, str]] = []
+    header: list[str] = []
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            if rows:
+                break
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if not header:
+            header = cells
+        elif not set(line) <= set("|-: "):
+            rows.append(dict(zip(header, cells)))
+    return rows
+
+
+def check_delegate_names_next_py_and_gate() -> None:
+    """The loop routes through next.py and ends in the in-loop Codex gate.
+
+    Reads the loop block only: the same words in a reference table further down
+    would mask a loop that stopped saying them.
+    """
+    delegate = SKILLS / "delegate" / "SKILL.md"
+    loop = flat(section(delegate, "## The coordination loop",
+                        "## Pointer briefs"))
+    for needle in ("scripts/next.py $RUN", "mutation gate", "baseline",
+                   "triage-gate-r", "teamlead:code-reviewer", "reworkCap",
+                   "NEEDS_DECISION", "docs-fix:", "coordinator-fix:",
+                   "decisions-log.md", "ledger.py apply"):
+        results.append((f"delegate loop names {needle!r}", needle in loop,
+                        needle))
+    order = ("4a. ", "6. Relay", "scripts/next.py $RUN", "baseline", "8a. ",
+             "9. Reviewers", "10. TRIAGE", "10a. CODEX GATE", "ledger.py apply")
+    at, cursor, in_order = [], 0, True
+    for needle in order:
+        found = loop.find(needle, cursor)
+        in_order = in_order and found >= 0
+        at.append(found)
+        cursor = found + 1 if found >= 0 else cursor
+    results.append(("delegate loop runs 4a, relay, next.py, baseline, 8a, 9, 10, "
+                    "10a, ledger in that order", in_order, str(at)))
+    results.append(("delegate loop states verify, review, triage, gate, close order",
+                    "Then verify (8a), review (9), triage (10), the Codex gate "
+                    "(10a), and close (11)." in loop, "order sentence"))
+
+
+def check_delegate_asks_one_batch() -> None:
+    """Every plan question, the scope card included, goes out in the step-6 relay."""
+    delegate = SKILLS / "delegate" / "SKILL.md"
+    validator = flat(section(delegate, "4a. ", "5.  PLAN TRIAGE"))
+    relay = flat(section(delegate, "6.  Relay", "6a."))
+    hold = flat(section(delegate, "6d. HOLD GATE", "7.  "))
+    results.append(("delegate 4a dispatches the validator beside the design review",
+                    "teamlead:plan-validator" in validator, "4a"))
+    results.append(("delegate step 6 asks the scope card in the one batch",
+                    "Smaller:" in relay and "Scope card" in relay, "6"))
+    results.append(("delegate step 6d no longer asks the scope card after the relay",
+                    "Scope card" not in hold and "A/B/C" not in hold, "6d"))
+
+
+def check_followups_only_for_out_of_scope_rows() -> None:
+    """The in-loop gate replaces the post-run Codex review; only picked rows follow."""
+    delegate = SKILLS / "delegate" / "SKILL.md"
+    step11 = flat(section(delegate, "11. Any demoted row", "```"))
+    cycle = flat(section(SKILLS / "cycle" / "SKILL.md", "## 10. Review", "## 11."))
+    review = flat(section(SKILLS / "codex-review" / "SKILL.md", "# Review a teamlead",
+                          "## 1."))
+    results.append(("delegate step 11 offers a follow-up for out-of-scope rows only",
+                    "out-of-scope" in step11 and "every demoted" not in step11,
+                    "step 11"))
+    results.append(("delegate step 11 prints no codex-review one-liner for the gate",
+                    "without running it" not in step11, "step 11"))
+    results.append(("cycle step 10 runs no separate Codex review after the gate",
+                    "in-loop" in cycle and "codexCodeReview=off" in cycle,
+                    "cycle step 10"))
+    results.append(("cycle step 10 forbids the separate codex-review after the gate",
+                    "After a clean finish" not in cycle
+                    and "Do not start a separate `/teamlead:codex-review` after it"
+                    in cycle, "cycle step 10"))
+    results.append(("codex-review says the loop already gates the diff in-loop",
+                    "in-loop" in review, "codex-review intro"))
+
+
+def check_readme_defaults_match_paths() -> None:
+    """README states the defaults paths.DEFAULTS holds, and no stale opt-in prose."""
+    readme = ROOT / "README.md"
+    options = section(readme, "## Run options", "## What gets installed")
+    config = section(readme, "## Configuration", "## Troubleshooting")
+    rows = {r["Option"].strip("`"): r for r in table_rows(options)}
+    results.append(("README run options table lists every option",
+                    set(rows) == set(run_config.OPTION_KEYS), str(sorted(rows))))
+    for key, row in rows.items():
+        stated = row.get("Default", "").strip("`")
+        results.append((f"README default of {key} is {paths.DEFAULTS.get(key)!r}",
+                        stated == str(paths.DEFAULTS.get(key)),
+                        f"README says {stated!r}"))
+    for row in table_rows(config):
+        key = row.get("Key", "").strip("`")
+        want = paths.DEFAULTS.get(key)
+        if isinstance(want, (int, str)):
+            stated = row.get("Default", "").strip("`")
+            results.append((f"README Configuration default of {key}",
+                            stated == str(want).lower(), f"README says {stated!r}"))
+    axes = next((r for r in table_rows(config)
+                 if r.get("Key") == "`codexPlanReviewAxes`"), {})
+    results.append(("README Configuration lists every plan-review axis",
+                    all(a in axes.get("Meaning", "") for a in paths.PLAN_REVIEW_AXES),
+                    str(paths.PLAN_REVIEW_AXES)))
+    results.append(("README Configuration no longer says every option defaults off",
+                    "default to `off`" not in config and "default to off" not in config,
+                    "All run options default to off"))
+    results.append(("README does not describe the Codex final gate as opt-in",
+                    "opt-in" not in flat(options).lower()
+                    and "`off` skips the gate" in flat(options), "opt-in"))
+
+
+def check_readme_fences() -> None:
+    """README fences alternate open/close: a stray bare fence turns prose to code."""
+    lines = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+    heading = "### `/teamlead:cycle` \u2014 the same run, plus the tree it runs in"
+    inside, closed_at, stray, heading_inside = False, -1, [], None
+    for number, line in enumerate(lines, 1):
+        if line == heading:
+            heading_inside = inside
+        if not line.startswith("```"):
+            continue
+        if not inside and number == closed_at + 1 and line == "```":
+            stray.append(number)
+        if inside:
+            closed_at = number
+        inside = not inside
+    results.append(("README has no bare fence right after a closing fence",
+                    not stray, f"stray fence at lines {stray}"))
+    results.append(("README cycle heading sits outside a code fence",
+                    heading_inside is False, f"inside fence: {heading_inside}"))
+    results.append(("README closes every code fence", not inside, "unclosed fence"))
+
+
+def check_delegate_run_options_match_paths() -> None:
+    """Defaults the delegate Run options prose states equal paths.DEFAULTS."""
+    options = flat(section(SKILLS / "delegate" / "SKILL.md", "## Run options",
+                           "## The coordination loop"))
+    pairs = re.findall(r"`(\w+)=([\w-]+)`", options)
+    checked = [(k, v) for k, v in pairs if k in run_config.OPTION_KEYS]
+    results.append(("delegate Run options states at least one default",
+                    bool(options) and bool(checked), str(pairs)))
+    for key, value in checked:
+        results.append((f"delegate Run options default of {key} is "
+                        f"{paths.DEFAULTS[key]!r}",
+                        value == str(paths.DEFAULTS[key]), f"says {value!r}"))
+
+
 def section(path: Path, start: str, end: str | None) -> str:
     """The text of `path` from `start` up to the next `end` (or EOF); '' if absent."""
     text = path.read_text(encoding="utf-8")
@@ -226,6 +387,12 @@ def main() -> int:
     check_the_string_check()
     check_the_person_check()
     check_followup_contract()
+    check_delegate_names_next_py_and_gate()
+    check_delegate_asks_one_batch()
+    check_followups_only_for_out_of_scope_rows()
+    check_readme_defaults_match_paths()
+    check_readme_fences()
+    check_delegate_run_options_match_paths()
     skills = sorted(SKILLS.glob("*/SKILL.md"))
     results.append(("skills were found", bool(skills), str(SKILLS)))
     for skill_md in skills:

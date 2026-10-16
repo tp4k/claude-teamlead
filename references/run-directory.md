@@ -36,14 +36,23 @@ The writer owns one assigned file per invocation: living plan sections, a human 
 | `questions.md` | planner, then coordinator for Answers | coordinator, implementers, scribe | Questions with 2–4 lettered options, recommendation, evidence, and alternative consequences. Answers contain verbatim selections and applicable design/scope decisions. With no questions, begin `No open questions.` End with the PLAN_WRITTEN block under Routing. Write this file last as the plan-completion signal. |
 | `briefs/impl-ws<N>-r1.md` | planner | implementer, verifier, reviewers | Workstream scope, quoted spec, acceptance, tests, rules, protected files, and verification commands with cwd. The implementer agent loads its generic role rules independently. |
 | `briefs/impl-ws<N>-r<M>.md` (M ≥ 2) | triage | implementer, verifier, reviewers | Previous-brief pointer, merged findings, any verifier-output pointer, and test additions. |
-| `plan-validation.md` | validator (sonnet) | coordinator, planner in Fix mode | PLAN_VALID or PLAN_NEEDS_FIX, factual findings, and scope observation. For a real cut, supply labeled choices, costs, and Recommend. Otherwise use Smaller: none. Scope observations do not change the verdict. |
-| `implementer-ws<N>-r<M>.md` | implementer (sonnet) | verifier, reviewers, triage | Status, confidence, commits, TDD evidence, freeze result, verification, probes, questions, and refactor requests. |
-| `verifier-r<M>.md` | verifier (sonnet) | reviewers, triage | PASS, FAIL, or CANNOT_RUN with per-command exit codes, output, and touched-file analysis. |
+| `plan-validation.md` | validator (sonnet) | coordinator, planner in Fix mode | PLAN_VALID or PLAN_NEEDS_FIX, factual findings, and scope observation. Pass 1 runs at step 4a beside the design review, and its choices go into the single step-6 batch. Pass 2 runs only when the Fix round returned `new_paths=yes` and asks nothing. For a real cut, supply labeled choices, costs, and Recommend. Otherwise use Smaller: none. Scope observations do not change the verdict. |
+| `implementer-ws<N>-r<M>.md` | implementer (sonnet) | verifier, reviewers, triage | Status, confidence, commits, TDD evidence (`red:` from a run right after the RED commit), freeze result, verification, probes, questions, and refactor requests. |
+| `probes-ws<N>-r<M>.json` | implementer | verifier (mutation gate) | Probe patches: `probe`, `file`, `old`, `new`. For one stream, `probes-r<M>.json`. |
+| `baseline-ws<N>.md` | verifier (sonnet), at the base SHA | verifier, triage | The brief's commands run before any implementer started. A failure here is pre-existing. |
+| `verifier-r<M>.md` | verifier (sonnet) | reviewers, triage | PASS, FAIL, or CANNOT_RUN with per-command exit codes, output, touched-file analysis, a `## RED run` block and a `## Mutation` line. |
+| `verifier-fix-<k>.md` | verifier (sonnet), via next.py | next.py, coordinator (on halt) | Same shape as `verifier-r<M>.md`, for the `coordinator-fix:` commits made after the streams were approved. Commands come from every brief's `## Verification commands`; no RED run. |
+| `mutation-fix-<k>.md` | `mutate.py` | next.py | The mutation gate's report for those `coordinator-fix:` commits. A survivor fails `verifier-fix-<k>.md`. |
+| `mutation-ws<N>-r<M>.md` | `mutate.py` | code reviewer, triage | Per mutant: KILLED, SURVIVED, INVALID, UNCLASSIFIED, NOT RUN or NOT APPLIED. A survivor fails the verifier. |
 | `settled-ws<N>-r<M>.md` | coordinator | review_briefs.py | Settled decisions with accepted consequences, and any step 8a verifier note; `none` when empty. |
 | `briefs/review-r<M>-<axis>.md` | review_briefs.py | reviewer | Brief R for one axis, with settled-ws<N>-r<M>.md copied verbatim. |
 | `briefs/review-r<M>-<axis>.skip` | review_briefs.py | run_state.py | Why that axis was not dispatched this round, so a resumed run stops expecting its report. |
 | `review-r<M>-<axis>.md` | full reviewer (opus) or specialist sanity reviewer (sonnet) | triage | Code, security, or performance report following review-standard.md. |
-| `triage-r<M>.md` | triage agent (sonnet) | later reviewers, final report | Worst verdict, merged defects, demotions and reasons, user Notes, and next review set with each specialist's basis. |
+| `triage-r<M>.md` | triage agent (opus) | later reviewers, Codex gate, final report | Worst verdict (including NEEDS_DECISION), merged defects, demotions and reasons (never dropped), user Notes, `docs_only=`, and next review set with each specialist's basis. The gate's triage is `triage-gate-r<K>.md`. |
+| `briefs/docs-ws<N>-r<M>.md`, `docs-fix-ws<N>-r<M>.md` | triage; writer | writer; router | A docs-only round: the claims to fix, then `DOCS_FIXED rows=<n> commit=<sha>`. |
+| `decisions-log.md` | `next.py` | scribe, final report | Each `recommended:` spec call and each `Smaller:` cut taken without stopping, for the human to veto. |
+| `tag-upgrades.md` | `run_state.py` (and the spawn gate) | `next.py` | Every `requires <tag>: yes` line a validator pass wrote, copied before pass 2 replaces `plan-validation.md`, so an upgrade still selects its reviewer. |
+| `deferred-rows.md` | writer | `ledger.py apply` | Deferred-work rows, no header. Applied to `docs/deferred-work.md` at close; never staged. |
 | `refactor-decisions.md` | coordinator | ledger writer, final report | Append `<reject\|defer\|approve> — <what> — <reason> (<files/symbols>)`. Omit the file when no request exists. |
 | `final-report.md` | coordinator | user | Delivered behavior, commits, roles, manual checks, Notes, and deferred items in 5–12 lines. |
 
@@ -64,7 +73,7 @@ Output: write $RUN/<file> exactly as the role file specifies, then return <the s
 <the few facts only the sender knows: flags, the axis tag and its reason, the commit list, the re-review set>
 ```
 
-The seven pipeline agents load their own role files. Their briefs do not name those roles. The reviewers are harness subagent types this plugin does not own, so brief R alone opens with `Role: read and follow <plugin>/references/roles/reviewer.md` and lists its tools.
+The pipeline agents load their own role files. Their briefs do not name those roles. The reviewers are harness subagent types this plugin does not own, so brief R alone opens with `Role: read and follow <plugin>/references/roles/reviewer.md` and lists its tools.
 
 The return value of an agent is **short and routable** — a verdict line and a file path, never the report. The coordinator reads the file only when it has to decide something the return line does not settle.
 

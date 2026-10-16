@@ -150,55 +150,57 @@ def case_plan_without_questions(tmp: Path) -> None:
 
 
 def case_questions_without_validation(tmp: Path) -> None:
-    """The validator runs at 6c, after the relay — its word has to be on the plan
-    the user's answers may still change, not on the draft they were asked about."""
+    """The validator's first pass runs at 4a, beside the design review and before
+    the relay, so its `Smaller:` scope card can join the one relay batch."""
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS})
-    expect("plan complete, questions unanswered → step 6, the relay, not the "
-           "validator", run, "6", "relay", 1)
+    expect("plan complete, nothing validated → step 4a, the validator, not the "
+           "relay", run, "4a", "VALIDATOR", 0)
 
 
 def case_answered_without_validation(tmp: Path) -> None:
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": ANSWERED})
-    expect("answers in, unvalidated → step 6c, spawn the validator", run,
-           "6c", "VALIDATOR", 0)
+    expect("answers in, unvalidated → step 4a, spawn the validator", run,
+           "4a", "VALIDATOR", 0)
 
 
 def case_reported_validator_before_human_plan(tmp: Path) -> None:
     """The run that hit the spawn gate: pause, no questions, plan-human.md landed.
-    Its next step is the validator at 6c — the old order called it step 4 and
-    sent the coordinator there before the human-readable plan existed."""
+    Its next step is the validator at 4a, which runs beside the human-readable
+    plan's writer, so the writer's own gap is still reported first."""
     files: dict[str, str | None] = {
              "config.json": config(humanReadablePlan="pause"), "task.md": TASK,
              "plan.md": PLAN,
              "questions.md": "# Open questions\n\nNo open questions.\n"}
     expect("pause and no plan-human.md → step 4, writer — or wait if running",
            mkrun(tmp / "a", files), "4", "already running", 0)
-    expect("pause, plan-human.md written, nothing to ask → step 6c, validator",
+    expect("pause, plan-human.md written, nothing to ask → step 4a, validator",
            mkrun(tmp / "b", files | {"plan-human.md": "# The plan\n"}),
-           "6c", "VALIDATOR", 0)
+           "4a", "VALIDATOR", 0)
 
 
 def case_design_fold_before_validation(tmp: Path) -> None:
     """Step 6b: a CONFIRMED design row is always folded, and an answer other than
-    an accepted recommendation changes the plan. The validator grades the plan
-    after that round, so until `## Fix log` exists it is not the next step."""
+    an accepted recommendation changes the plan. The first validator pass already
+    ran at 4a, so what is left to decide here is only whether a Fix round is owed
+    before the plan is dispatched — and until `## Fix log` exists it is."""
     none_asked = "# Open questions\n\nNo open questions.\n"
     picked = QUESTIONS + "\n## Answers\n1. no — keep rounding half-even\n"
     rows: list[tuple[str, dict[str, str | None], str, str, int]] = [
         ("CONFIRMED rows, nothing asked, no Fix log → 6b Fix round",
          {"questions.md": none_asked, "plan-triage.md": "CONFIRMED 2 · WRONG 0 · "
           "SETTLED 0 · OPEN 0\n"}, "6b", "2 CONFIRMED design row(s)", 0),
-        ("an accepted recommendation folds nothing → 6c validator",
-         {"questions.md": ANSWERED}, "6c", "VALIDATOR", 0),
+        ("an accepted recommendation folds nothing → dispatch",
+         {"questions.md": ANSWERED}, "7", "FRESH sonnet implementer", 0),
         ("a non-recommended answer, no Fix log → 6b Fix round",
          {"questions.md": picked}, "6b", "keep rounding half-even", 0),
         # The reported block: the coordinator echoed the option after the phrase.
-        ("an accepted recommendation with its label and a note → 6c validator",
+        ("an accepted recommendation with its label and a note → dispatch",
          {"questions.md": OPTIONED + "\n## Answers\n1. recommendation accepted — "
-          "round half-up (after the user weighed half-even)\n"}, "6c", "VALIDATOR", 0),
-        ("the recommended option repeated verbatim → 6c validator",
+          "round half-up (after the user weighed half-even)\n"},
+         "7", "FRESH sonnet implementer", 0),
+        ("the recommended option repeated verbatim → dispatch",
          {"questions.md": OPTIONED + "\n## Answers\n1. round half-up\n"},
-         "6c", "VALIDATOR", 0),
+         "7", "FRESH sonnet implementer", 0),
         ("the other option repeated verbatim → 6b Fix round",
          {"questions.md": OPTIONED + "\n## Answers\n1. round half-even\n"},
          "6b", "1. round half-even", 0),
@@ -211,14 +213,16 @@ def case_design_fold_before_validation(tmp: Path) -> None:
         ("the phrase inside a longer answer is not an acceptance → 6b Fix round",
          {"questions.md": OPTIONED + "\n## Answers\n1. no recommendation accepted, "
           "round half-even\n"}, "6b", "no recommendation accepted", 0),
-        ("CONFIRMED rows with a Fix log → 6c validator",
+        ("CONFIRMED rows with a Fix log → dispatch",
          {"questions.md": none_asked, "plan.md": PLAN + "\n## Fix log\nx → y\n"
           "PLAN_FIXED fixed=1 new_paths=no\n",
           "plan-triage.md": "CONFIRMED 1 · WRONG 0 · SETTLED 0 · OPEN 0\n"},
-         "6c", "VALIDATOR", 0),
+         "7", "FRESH sonnet implementer", 0),
     ]
     for i, (name, files, step, needle, code) in enumerate(rows):
-        run = mkrun(tmp / str(i), {"task.md": TASK, "plan.md": PLAN, **files})
+        run = mkrun(tmp / str(i), {"task.md": TASK, "plan.md": PLAN,
+                                   "plan-validation.md": VALID,
+                                   "briefs/impl-ws1-r1.md": BRIEF, **files})
         expect(name, run, step, needle, code)
 
 
@@ -228,10 +232,16 @@ def case_autopilot_skips_user_stops_on_resume(tmp: Path) -> None:
     to ask what the gate lets it skip."""
     auto = json.loads(config())
     auto["autopilot"] = True
-    expect("autopilot: unanswered relay → on to the validator",
+    expect("autopilot: validator due at 4a, before the relay it would skip",
            mkrun(tmp / "a", {"config.json": json.dumps(auto), "task.md": TASK,
                              "plan.md": PLAN, "questions.md": QUESTIONS}),
-           "6c", "VALIDATOR", 0)
+           "4a", "VALIDATOR", 0)
+    expect("autopilot: unanswered relay, validated → dispatch",
+           mkrun(tmp / "c", {"config.json": json.dumps(auto), "task.md": TASK,
+                             "plan.md": PLAN, "questions.md": QUESTIONS,
+                             "plan-validation.md": VALID,
+                             "briefs/impl-ws1-r1.md": BRIEF}),
+           "7", "FRESH sonnet implementer", 0)
     expect("autopilot: unanswered scope cut → dispatch",
            mkrun(tmp / "b", {"config.json": json.dumps(auto), "task.md": TASK,
                              "plan.md": PLAN, "questions.md": ANSWERED,
@@ -276,6 +286,99 @@ def case_design_fix_log_does_not_answer_the_validator(tmp: Path) -> None:
            "7", "FRESH sonnet implementer", 0)
 
 
+def case_fix_round_with_new_paths_revalidates(tmp: Path) -> None:
+    """Pass 2 (6c) exists to check the paths a Fix round introduced, so it is owed
+    only when that round said `new_paths=yes`; once it has rewritten the
+    validation, the run moves on. `new_paths=no` goes straight to dispatch."""
+    fixed = PLAN + "\n## Fix log\nclaim → fix\nPLAN_FIXED fixed=1 new_paths=yes\n"
+    files: dict[str, str | None] = {
+        "task.md": TASK, "plan.md": fixed, "questions.md": ANSWERED,
+        "plan-validation.md": NEEDS_FIX, "briefs/impl-ws1-r1.md": BRIEF}
+    run = mkrun(tmp / "yes", files)
+    rewrite_after(run / "plan.md", run / "plan-validation.md")
+    expect("a Fix round that added paths → step 6c, validator pass 2", run,
+           "6c", "VALIDATOR", 0)
+    rewrite_after(run / "plan-validation.md", run / "plan.md")
+    (run / "plan-validation.md").write_text(VALID)
+    rewrite_after(run / "plan-validation.md", run / "plan.md")
+    expect("…and once pass 2 rewrote the validation → dispatch", run,
+           "7", "FRESH sonnet implementer", 0)
+    none = mkrun(tmp / "no", dict(files, **{"plan.md": fixed.replace(
+        "new_paths=yes", "new_paths=no")}))
+    rewrite_after(none / "plan.md", none / "plan-validation.md")
+    expect("a Fix round with new_paths=no needs no second pass → dispatch", none,
+           "7", "FRESH sonnet implementer", 0)
+
+
+def case_pass_two_cut_is_logged_not_asked(tmp: Path) -> None:
+    """Pass 2 asks nothing: a `Smaller:` cut it names first is logged to
+    decisions-log.md and the run goes on to dispatch, never back to the relay."""
+    fixed = PLAN + "\n## Fix log\nclaim → fix\nPLAN_FIXED fixed=1 new_paths=yes\n"
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": fixed, "questions.md": ANSWERED,
+                      "plan-validation.md": SCOPE_CUT,
+                      "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(run / "plan-validation.md", run / "plan.md")
+    expect("a cut first named by validator pass 2 → dispatch, not the relay", run,
+           "7", "FRESH sonnet implementer", 0)
+    log = run / "decisions-log.md"
+    text = log.read_text() if log.exists() else ""
+    check("…and the cut is in decisions-log.md", "fold WS-2 into WS-1" in text, text)
+    state(run)
+    again = log.read_text() if log.exists() else ""
+    check("…once however often the state is read",
+          again.count("fold WS-2 into WS-1") == 1, again)
+
+
+def case_pass_two_reads_the_last_plan_fixed_line(tmp: Path) -> None:
+    """Only the newest Fix round says whether paths are unchecked: an earlier
+    `new_paths=yes` that a later round superseded owes no second pass."""
+    fixed = (PLAN + "\n## Fix log\nclaim → fix\nPLAN_FIXED fixed=1 new_paths=yes\n"
+             "second round\nPLAN_FIXED fixed=1 new_paths=no\n")
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": fixed, "questions.md": ANSWERED,
+                      "plan-validation.md": NEEDS_FIX,
+                      "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(run / "plan.md", run / "plan-validation.md")
+    expect("yes then a later no → the last line rules: dispatch, no pass 2", run,
+           "7", "FRESH sonnet implementer", 0)
+
+
+def case_pass_two_cut_logging_has_two_guards(tmp: Path) -> None:
+    """The pass-2 shortcut must not swallow a cut that still needs the user: one
+    the validation named BEFORE the Fix round (older than plan.md), and one the
+    user already answered (the log would restate their decision as the run's)."""
+    fixed = PLAN + "\n## Fix log\nclaim → fix\nPLAN_FIXED fixed=1 new_paths=yes\n"
+    old = mkrun(tmp / "old", {"task.md": TASK, "plan.md": fixed,
+                              "questions.md": ANSWERED,
+                              "plan-validation.md": SCOPE_CUT,
+                              "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(old / "plan.md", old / "plan-validation.md")
+    expect("a cut from a validation older than the Fix round is still asked", old,
+           "6", "scope selection (fold WS-2 into WS-1)", 1)
+    chosen = mkrun(tmp / "chosen", {
+        "task.md": TASK, "plan.md": fixed,
+        "questions.md": ANSWERED + "scope: A — ship as planned\n",
+        "plan-validation.md": SCOPE_CUT, "briefs/impl-ws1-r1.md": BRIEF})
+    rewrite_after(chosen / "plan-validation.md", chosen / "plan.md")
+    expect("an answered cut that pass 2 repeats dispatches", chosen, "7",
+           "FRESH sonnet implementer", 0)
+    check("…and is not logged as the run's own decision",
+          not (chosen / "decisions-log.md").exists(), "decisions-log.md exists")
+
+
+def case_validator_findings_fold_into_the_one_round(tmp: Path) -> None:
+    """The validator's PLAN_NEEDS_FIX and the user's changed answer are one Fix
+    round, not two: the round the answer owes names the findings too."""
+    picked = QUESTIONS + "\n## Answers\n1. no — keep rounding half-even\n"
+    run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": picked,
+                      "plan-validation.md": NEEDS_FIX})
+    r = state(run)
+    ok = (r.returncode == 0 and "Fix mode" in r.stdout
+          and "keep rounding half-even" in r.stdout
+          and "plan-validation.md" in r.stdout)
+    check("a changed answer and PLAN_NEEDS_FIX → one Fix round naming both", ok,
+          f"exit={r.returncode} out={r.stdout.strip()!r}")
+
+
 SCOPE_CUT = ("# Plan validation\n\nVerdict: PLAN_VALID\n\n## Smaller / none\n\n"
              "WS-2 exists for symmetry; nothing imports it today.\n\n"
              "A) ship as planned — 2 streams, 6 agents\n"
@@ -285,14 +388,19 @@ SCOPE_CUT = ("# Plan validation\n\nVerdict: PLAN_VALID\n\n## Smaller / none\n\n"
 
 
 def case_scope_cut_gets_its_own_card(tmp: Path) -> None:
-    """A named cut has to reach the user as something to answer — at the hold
-    gate, since the validator that names it now runs after the relay. The paired
-    `Smaller: none` case below is what makes this row mean anything: identical
-    files, one word apart, and only this one may stop."""
+    """A named cut has to reach the user as something to answer — inside the one
+    step-6 relay batch, since the validator that names it ran at 4a, before the
+    relay. It is never a second batch at 6d. The paired `Smaller: none` case below
+    is what makes this row mean anything: identical files, one word apart, and
+    only this one may stop."""
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN, "questions.md": ANSWERED,
                       "plan-validation.md": SCOPE_CUT, "briefs/impl-ws1-r1.md": BRIEF})
-    expect("a `Smaller:` cut is asked at 6d, named", run,
-           "6d", "scope selection (fold WS-2 into WS-1)", 1)
+    r = state(run)
+    ok = (r.returncode == 1 and "step: 6 " in r.stdout
+          and "step: 6d" not in r.stdout
+          and "scope selection (fold WS-2 into WS-1)" in r.stdout)
+    check("a `Smaller:` cut is asked inside the step-6 relay, named", ok,
+          f"exit={r.returncode} out={r.stdout.strip()!r}")
 
 
 def case_smaller_none_is_not_a_decision(tmp: Path) -> None:
@@ -317,8 +425,8 @@ def case_accepted_cut_that_was_never_applied(tmp: Path) -> None:
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN_2WS, "questions.md": answered,
                       "plan-validation.md": SCOPE_CUT,
                       "briefs/impl-ws1-r1.md": BRIEF, "briefs/impl-ws2-r1.md": BRIEF})
-    expect("an accepted cut with no Fix-log entry routes to Fix mode, not dispatch",
-           run, "6d", "Scope decision: B — fold WS-2 into WS-1", 0)
+    expect("an accepted cut with no Fix-log entry routes to the 6b Fix round, not "
+           "dispatch", run, "6b", "Scope decision: B — fold WS-2 into WS-1", 0)
 
 
 def case_applied_cut_dispatches(tmp: Path) -> None:
@@ -360,8 +468,8 @@ def case_a_cut_holds_even_with_no_questions(tmp: Path) -> None:
     run = mkrun(tmp, {"task.md": TASK, "plan.md": PLAN,
                       "questions.md": "# Open questions\n\nNo open questions.\n",
                       "plan-validation.md": SCOPE_CUT, "briefs/impl-ws1-r1.md": BRIEF})
-    expect("a scope cut still blocks a run with no questions", run,
-           "6d", "scope selection (fold WS-2 into WS-1)", 1)
+    expect("a scope cut still blocks a run with no questions, inside the relay", run,
+           "6", "scope selection (fold WS-2 into WS-1)", 1)
 
 
 def case_answers_then_no_report(tmp: Path) -> None:
@@ -832,7 +940,8 @@ def case_codex_wanted_but_never_started(tmp: Path) -> None:
 def case_codex_hard_on_a_simple_plan(tmp: Path) -> None:
     """`hard` means complex=yes only; a simple plan owes no review."""
     run = mkrun(tmp, {"config.json": config(codexPlanReview="hard"),
-                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS})
+                      "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
+                      "plan-validation.md": VALID})
     expect("codexPlanReview=hard, complex=no → no review owed, on to the relay", run,
            "6", "relay", 1)
 
@@ -862,7 +971,8 @@ def case_codex_failure_does_not_block(tmp: Path) -> None:
     run = mkrun(tmp, {"config.json": config(codexPlanReview="always"),
                       "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
                       "plan-review-package/PROMPT.md": "review this plan\n",
-                      "plan-review-package/plan-review-attempts.log": ATTEMPT_FAILED})
+                      "plan-review-package/plan-review-attempts.log": ATTEMPT_FAILED,
+                      "plan-validation.md": VALID})
     expect("a started Codex review with no answer (opus off) → on to the relay", run,
            "6", "relay", 1)
 
@@ -891,7 +1001,8 @@ def case_triaged_review_moves_on(tmp: Path) -> None:
                       "task.md": TASK, "plan.md": PLAN, "questions.md": QUESTIONS,
                       "plan-review-package/PROMPT.md": "review this plan\n",
                       "plan-review-package/plan-review-r1.md": "1. WS-1 too big\n",
-                      "plan-triage.md": "CONFIRMED 0 · WRONG 1 · SETTLED 0 · OPEN 0\n"})
+                      "plan-triage.md": "CONFIRMED 0 · WRONG 1 · SETTLED 0 · OPEN 0\n",
+                      "plan-validation.md": VALID})
     expect("reviewed and triaged → on to the relay", run, "6", "relay", 1)
 
 
@@ -1034,6 +1145,11 @@ CASES = [
     case_needs_fix_without_fix_log,
     case_fix_log_present_moves_on,
     case_design_fix_log_does_not_answer_the_validator,
+    case_fix_round_with_new_paths_revalidates,
+    case_pass_two_cut_is_logged_not_asked,
+    case_pass_two_reads_the_last_plan_fixed_line,
+    case_pass_two_cut_logging_has_two_guards,
+    case_validator_findings_fold_into_the_one_round,
     case_scope_cut_gets_its_own_card,
     case_smaller_none_is_not_a_decision,
     case_accepted_cut_that_was_never_applied,

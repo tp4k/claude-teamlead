@@ -11,6 +11,7 @@ Write the final user report after the last round. Gather facts from `$RUN`. Do n
 - **Every `$RUN/verifier-*.md`** — the verification outcome per round, including any pre-existing failures the verifier identified.
 - **Every `$RUN/triage-*.md`** — the verdict per round, the demoted rows and, from the **last** one, the Notes for the user.
 - **`$RUN/refactor-decisions.md`** — if it exists: the coordinator's reject/defer/approve line per refactor request.
+- **`$RUN/decisions-log.md`** — if it exists: each `recommended:` call and `Smaller:` cut taken without stopping to ask.
 - **`$RUN/repo.txt`** — the absolute repository path. Read its commit list with `git log --oneline`.
 
 Count agents and rounds from the actual report files. Each workstream has an implementer, verifier, and triage report per applicable round. Count review files by axis and workstream. Do not assume one verifier or triage file for an entire parallel wave.
@@ -26,6 +27,7 @@ Write `$RUN/final-report.md`. It is 5–12 lines, for the user, and it contains:
 - **Notes:** relay the final triage's Notes. The user decides whether to accept or schedule them. Do not omit or summarize away individual items.
 - **Deferred / demoted / pre-existing:** cite the ledger path, appended count, and uncommitted status. Use none when there were no deferrals. Do not repeat ledger rows. Report pre-existing failures fully because the ledger excludes them.
 - **Failed self-checks:** list every failed integrity or diff check found in the reports, such as a `red_freeze.py` violation, a scope refusal, a `review_package.py` WARNING, or a verifier `CANNOT_RUN`. Give each one's explanation, or say plainly that none was found. Omit the section only when every check passed. A failed check that is left unexplained reads as a passed one.
+- **Decisions taken for you:** when `decisions-log.md` exists, list every line so the user can veto it. Omit the section otherwise.
 - **Open refactor requests:** list undecided requests and the required user decisions. Put approved completed refactors under Delivered. Deferred requests belong in the ledger. Rejected requests need no separate line.
 
 No praise. No restating the spec. No "what's correct". Every line has to be something the user can act on or would be worse off not knowing.

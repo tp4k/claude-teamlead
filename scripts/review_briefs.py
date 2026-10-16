@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 import paths
-from run_state import AXES, SETTING_OF, Run, carried_axes
+from run_state import AXES, SETTING_OF, Run
 
 TAG_OF = {"code": "public", "security": "input", "perf": "hot"}
 TYPE_OF = {
@@ -41,10 +41,9 @@ TYPE_OF = {
     "perf": "performance-engineer",
 }
 TOOLS = (
-    "Tools: Read, Grep, Glob, Bash, Write. Write only the report. Bash permits "
-    "code-probe clone creation, temporary edits, and restoration under $RUN. "
-    "Follow the role's isolation procedure. Never edit the shared repo. "
-    "No commits, Skill tool, or agents."
+    "Tools: Read, Grep, Glob, Bash, Write. Write only the report. Never edit the "
+    "shared repo. Read the verifier's RED run and the mutation report instead of "
+    "re-running them. No commits, Skill tool, or agents."
 )
 
 
@@ -76,7 +75,7 @@ def ws_name(run: Run, ws: int) -> str:
 def brief(run: Run, ws: int, rnd: int, axis: str, how: str, tag: str,
           commits: str, settled: str) -> str:
     root = paths.plugin_root()
-    infix = f"ws{ws}-" if run.multi else ""
+    infix = run.infix(ws)
     infix_line = (
         "Several workstreams share this run: use the ws<N>- infix." if run.multi
         else "One workstream in this run: no ws<N>- infix."
@@ -88,7 +87,7 @@ def brief(run: Run, ws: int, rnd: int, axis: str, how: str, tag: str,
         f"{infix_line}",
         f"Inputs: $RUN/plan.md ## WS-{ws}, $RUN/briefs/impl-ws{ws}-r{rnd}.md, "
         f"$RUN/implementer-ws{ws}-r{rnd}.md, $RUN/verifier-{infix}r{rnd}.md, "
-        "$RUN/task.md, CLAUDE.md.",
+        f"$RUN/mutation-{infix}r{rnd}.md, $RUN/task.md, CLAUDE.md.",
         f"Review standard: {root}/references/review-standard.md. "
         f"Commits: {commits}.",
         f"Tag: {TAG_OF[axis]}={tag}. Use the validator's final tag and the "
@@ -117,9 +116,7 @@ def write_briefs(run_dir: Path, ws: int, rnd: int, tags: dict[str, str],
     run = Run(run_dir.resolve())
     if not (run.run / "repo.txt").is_file():
         raise ValueError(f"{run_dir} has no repo.txt, so it is not a run directory")
-    prev = run.phase_file("triage", ws, rnd - 1) if rnd > 1 else None
-    carried = carried_axes(prev.read_text(errors="replace")) if prev else ()
-    infix = f"ws{ws}-" if run.multi else ""
+    carried = run.carried(ws, rnd)
     out: list[str] = []
     for axis in AXES:
         tag = tags[TAG_OF[axis]]
@@ -137,7 +134,7 @@ def write_briefs(run_dir: Path, ws: int, rnd: int, tags: dict[str, str],
             out.append(f"{axis} skip reason={reason}")
             continue
         skip.unlink(missing_ok=True)
-        path = run.run / "briefs" / f"review-{infix}r{rnd}-{axis}.md"
+        path = run.run / "briefs" / f"review-{run.tag(ws, rnd)}-{axis}.md"
         path.parent.mkdir(exist_ok=True)
         path.write_text(brief(run, ws, rnd, axis, how, tag, commits, settled))
         model = "opus" if how == "full" else "sonnet"

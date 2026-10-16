@@ -74,7 +74,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-from red_freeze import TEST_PATH, GitError, git
+from red_freeze import TEST_PATH, GitError, _git, git
 
 EXIT_PASS, EXIT_FAIL, EXIT_USAGE, EXIT_CANNOT_RUN = 0, 1, 2, 3
 DEFAULT_MAX_GENERIC = 20
@@ -334,8 +334,10 @@ def status_porcelain(repo: str) -> str:
 
 
 def restore(repo: str, path: str) -> None:
+    # Its own session: a Ctrl-C sent to our process group must not kill the
+    # checkout that puts the mutated file back. The handler only records it.
     try:
-        git(repo, "checkout", "--", path)
+        _git(repo, ("checkout", "--", path), new_session=True)
     except GitError as exc:
         raise RestoreError(f"could not restore {path}: {exc}") from exc
 

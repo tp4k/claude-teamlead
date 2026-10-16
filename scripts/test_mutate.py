@@ -1002,6 +1002,49 @@ def case_signal_right_after_popen_kills_the_command(tmp: Path) -> None:
           and repo.status() == "", f"{out}{err}alive={alive}")
 
 
+# Stands in for git on PATH. On the first `checkout` it fires a group-wide SIGINT
+# (what a terminal's Ctrl-C sends) at the group of its parent, mutate.py, so only
+# a restore running outside that group survives it. `-s INT` is the POSIX spelling
+# dash (Ubuntu's /bin/sh) accepts.
+GROUP_SIGINT_GIT = """\
+#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = checkout ] && [ -e "$MUT_MARK" ]; then
+    rm -f "$MUT_MARK"
+    kill -s INT -- "-$(ps -o pgid= -p "$PPID" | tr -d ' ')"
+    sleep 0.3
+  fi
+done
+exec "$REAL_GIT" "$@"
+"""
+
+
+def case_ctrl_c_during_restore_still_restores(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    original = (repo.root / "lib.py").read_text()
+    cmd = same_as_saved(repo, tmp)
+    real_git = subprocess.run(["sh", "-c", "command -v git"], capture_output=True,
+                              text=True, env=ENV).stdout.strip()
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "git").write_text(GROUP_SIGINT_GIT)
+    (bin_dir / "git").chmod(0o755)
+    mark = tmp / "mark"
+    mark.touch()
+    env = {**ENV, "PATH": f"{bin_dir}{os.pathsep}{ENV['PATH']}",
+           "REAL_GIT": real_git, "MUT_MARK": str(mark)}
+    proc = subprocess.run([sys.executable, str(SCRIPT), "--repo", str(repo.root),
+                           "--base", repo.base, "--cmd", cmd, "--commits", commit],
+                          env=env, capture_output=True, text=True, timeout=60,
+                          start_new_session=True)
+    check("a Ctrl-C reaching mutate.py's process group while git restores a "
+          "mutant does not kill the restore: the file is back and it exits 3",
+          not mark.exists() and proc.returncode == 3 and repo.status() == ""
+          and (repo.root / "lib.py").read_text() == original,
+          f"rc={proc.returncode} {proc.stdout}{proc.stderr}status={repo.status()!r}")
+
+
 def case_refusal_runs_no_mutant(tmp: Path) -> None:
     repo = Repo(tmp / "repo")
     commit = repo.stream(STRONG_TEST)
@@ -1059,6 +1102,7 @@ CASES = [
     case_background_child_killed_after_normal_exit,
     case_signal_just_before_restore_still_restores,
     case_signal_right_after_popen_kills_the_command,
+    case_ctrl_c_during_restore_still_restores,
 ]
 
 

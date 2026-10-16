@@ -181,6 +181,14 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 1 if dropped else 0
 
 
+def positive_int(text: str) -> int:
+    # Zero samples would grade nothing yet print PASS for every case.
+    n = int(text)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {n}")
+    return n
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Regression cases for the triage role.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -192,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--cases", default=str(CASES_DIR))
     r.add_argument("--role", default=str(ROLE_FILE))
     r.add_argument("--model", default="sonnet")
-    r.add_argument("--samples", type=int, default=1)
+    r.add_argument("--samples", type=positive_int, default=1)
     r.add_argument("--claude", default="claude", help="CLI to run (tests pass a stub)")
     c = sub.add_parser("compare")
     c.add_argument("before")

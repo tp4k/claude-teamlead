@@ -16,7 +16,7 @@ import os
 import re
 import sys
 import tempfile
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 # A plain import: `python3 scripts/<suite>.py` puts scripts/ first on sys.path.
@@ -187,6 +187,18 @@ def case_a_failing_cli_raises_instead_of_grading_empty_output(tmp: Path) -> None
         del os.environ["STUB_FAIL"]
 
 
+def case_zero_samples_is_refused_before_any_case_runs(tmp: Path) -> None:
+    write_case(tmp / "cases", "hit", 2)
+    os.environ["STUB_ARGV_LOG"] = str(tmp / "argv.log")
+    try:
+        with redirect_stderr(io.StringIO()):
+            replay(tmp, "run", samples=0)
+        check("--samples 0 is refused", False, "replay returned")
+    except SystemExit as e:
+        wrote = (tmp / "run" / "results.json").exists()
+        check("--samples 0 is refused", e.code == 2 and not wrote, f"{e.code} {wrote}")
+
+
 def results_file(tmp: Path, name: str, samples: int, passes: dict) -> str:
     p = tmp / f"{name}.json"
     cases = {cid: {"recorded": "pass", "passes": v} for cid, v in passes.items()}
@@ -246,6 +258,7 @@ CASES = [
 TMP_CASES = [
     case_replay_grades_samples_without_tools_or_sessions,
     case_a_failing_cli_raises_instead_of_grading_empty_output,
+    case_zero_samples_is_refused_before_any_case_runs,
     case_compare_fails_on_a_drop_and_normalises_sample_counts,
     case_compare_catches_a_lost_rows_section,
     case_compare_skips_a_case_present_on_one_side,

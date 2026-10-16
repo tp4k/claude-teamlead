@@ -910,6 +910,98 @@ def case_signal_during_pre_run(tmp: Path) -> None:
           f"rc={proc.returncode} alive={alive} {outlog.read_text()}")
 
 
+def group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    os.killpg(pgid, signal.SIGKILL)
+    return True
+
+
+def case_background_child_killed_after_normal_exit(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    late = tmp / "late"
+    cmd = (f"{{ sleep 1; touch {shlex.quote(str(late))}; }} >/dev/null 2>&1 & "
+           "exit 0")
+    code, out, err = mutate(repo, "--cmd", cmd, "--commits", commit)
+    time.sleep(1.5)
+    check("a background child of a test command that exits normally is killed "
+          "before the next mutant, so it never writes later",
+          code in (0, 1) and not late.exists() and repo.status() == "",
+          f"rc={code} late={late.exists()} {err}")
+
+
+# Runs mutate.main in-process with one hook wrapped, so a SIGTERM lands in a
+# window an outside `kill` cannot aim at.
+HOOK_HARNESS = """\
+import os, signal, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import mutate
+where = sys.argv[2]
+fired = []
+
+def fire():
+    if not fired:
+        fired.append(1)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+real_restore = mutate.restore
+def restore(repo, path):
+    fire()
+    real_restore(repo, path)
+
+real_popen = subprocess.Popen
+def popen(*a, **kw):
+    proc = real_popen(*a, **kw)
+    if kw.get("shell"):
+        print("PGID", proc.pid, flush=True)
+        fire()
+    return proc
+
+if where == "restore":
+    mutate.restore = restore
+else:
+    subprocess.Popen = popen
+print("EXIT", mutate.main(sys.argv[3:]), flush=True)
+"""
+
+
+def hook_run(repo: Repo, where: str, cmd: str, commit: str) -> tuple[str, str]:
+    proc = subprocess.run(
+        [sys.executable, "-c", HOOK_HARNESS, str(SCRIPT.parent), where,
+         "--repo", str(repo.root), "--base", repo.base, "--cmd", cmd,
+         "--commits", commit], env=ENV, capture_output=True, text=True, timeout=60)
+    return proc.stdout, proc.stderr
+
+
+def case_signal_just_before_restore_still_restores(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    original = (repo.root / "lib.py").read_text()
+    out, err = hook_run(repo, "restore", same_as_saved(repo, tmp), commit)
+    check("a SIGTERM landing just before the restore checkout still restores the "
+          "file and exits 3",
+          "EXIT 3" in out.splitlines() and repo.status() == ""
+          and (repo.root / "lib.py").read_text() == original,
+          f"{out}{err}status={repo.status()!r}")
+
+
+def case_signal_right_after_popen_kills_the_command(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    commit = repo.stream()
+    out, err = hook_run(repo, "popen", "sleep 30", commit)
+    pgids = [int(ln.split()[1]) for ln in out.splitlines() if ln.startswith("PGID ")]
+    alive = [p for p in pgids if group_alive(p)]
+    check("a SIGTERM landing right after the test command starts kills its group "
+          "and exits 3",
+          "EXIT 3" in out.splitlines() and bool(pgids) and not alive
+          and repo.status() == "", f"{out}{err}alive={alive}")
+
+
 def case_refusal_runs_no_mutant(tmp: Path) -> None:
     repo = Repo(tmp / "repo")
     commit = repo.stream(STRONG_TEST)
@@ -964,6 +1056,9 @@ CASES = [
     case_signal_during_pre_run,
     case_refusal_runs_no_mutant,
     case_dirty_pre_run_refused_before_mutants,
+    case_background_child_killed_after_normal_exit,
+    case_signal_just_before_restore_still_restores,
+    case_signal_right_after_popen_kills_the_command,
 ]
 
 

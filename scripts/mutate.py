@@ -50,7 +50,9 @@ neither or both of `--commits` / `--files`, or a probe file that is not a
 tracked regular file), 3 cannot run (dirty tree at start, the test command
 failing or not finishing on the unmutated tree, restore failed, interrupted, or
 a dirty tree at the end). SIGTERM and SIGINT
-restore the file being mutated before exiting.
+kill the test command's process group and restore the file being mutated
+before exiting. The group is also killed when the command exits on its own, so
+nothing it backgrounded survives into the restore or the next mutant.
 
 No dependencies beyond git, for the same reason as the rest of `scripts/`.
 """
@@ -81,6 +83,8 @@ COMMENT_PREFIXES = ("#", "//", "/*", "*", "--")
 PROSE_SUFFIXES = (".md", ".markdown", ".rst")
 REGULAR_FILE_MODES = ("100644", "100755")
 KILL_GRACE = 5.0
+# How often a running test command is checked for a recorded signal.
+POLL_SECONDS = 0.1
 
 KILLED, SURVIVED, INVALID = "KILLED", "SURVIVED", "INVALID"
 UNCLASSIFIED, NOT_RUN, NOT_APPLIED = "UNCLASSIFIED", "NOT RUN", "NOT APPLIED"
@@ -341,19 +345,33 @@ class RestoreError(Exception):
 
 
 def run_shell(cmd: str, repo: str, timeout: float) -> Optional[int]:
-    """Exit code of `cmd`, or None when it outlived `timeout` and was killed."""
+    """Exit code of `cmd`, or None when it outlived `timeout` and was killed.
+
+    The command's whole process group is killed however it ends, so a child it
+    backgrounded cannot outlive it into the restore or the next mutant.
+    """
+    exit_if_signalled()
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     proc = subprocess.Popen(cmd, shell=True, cwd=repo, env=env,
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, start_new_session=True)
     try:
-        return proc.wait(timeout=max(timeout, 0.0))
-    except subprocess.TimeoutExpired:
+        return wait_polling(proc, time.monotonic() + max(timeout, 0.0))
+    finally:
         kill_group(proc)
-        return None
-    except BaseException:
-        kill_group(proc)
-        raise
+
+
+def wait_polling(proc: "subprocess.Popen[bytes]", deadline: float) -> Optional[int]:
+    """Wait for `proc`, raising Terminated within POLL_SECONDS of a signal."""
+    while True:
+        exit_if_signalled()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            return proc.wait(timeout=min(POLL_SECONDS, remaining))
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def kill_group(proc: "subprocess.Popen[bytes]") -> None:
@@ -472,10 +490,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
+# Signals are only recorded by the handler and acted on at fixed points (before
+# a command starts, while it is polled, between mutants), so no signal can land
+# between Popen and its handle or between a mutation and its restore.
+_signalled: list[int] = []
+
+
 def on_signal(signum: int, _frame: object) -> None:
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, signal.SIG_IGN)
-    raise Terminated(signum)
+    _signalled.append(signum)
+
+
+def exit_if_signalled() -> None:
+    if _signalled:
+        raise Terminated(_signalled[0])
 
 
 def run(args: argparse.Namespace) -> int:
@@ -494,6 +521,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"usage error: {exc}", file=sys.stderr)
         return EXIT_USAGE
     queue = probes + generic_mutants(repo, scope, args.max_generic)
+    _signalled.clear()
     old_handlers = {s: signal.signal(s, on_signal)
                     for s in (signal.SIGTERM, signal.SIGINT)}
     try:
@@ -536,6 +564,7 @@ def run_queue(repo: str, queue: list[Mutant], args: argparse.Namespace) -> int:
             if report_leftover(repo):
                 return EXIT_CANNOT_RUN
             for m in queue:
+                exit_if_signalled()
                 if time.monotonic() >= deadline:
                     rows.append(Row(m, NOT_RUN))
                     print(describe(rows[-1]), flush=True)
@@ -543,6 +572,7 @@ def run_queue(repo: str, queue: list[Mutant], args: argparse.Namespace) -> int:
                 done, result = evaluate(repo, m, args, deadline)
                 rows.append(Row(done, result))
                 print(describe(rows[-1]), flush=True)
+            exit_if_signalled()
         except Terminated as exc:
             print(f"cannot run: interrupted by signal {exc.signum}", file=sys.stderr)
             report_leftover(repo)

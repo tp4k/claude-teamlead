@@ -566,11 +566,13 @@ if mode == "again":
 
 # Fires a group-wide SIGINT (what a terminal's Ctrl-C sends) as git begins to
 # update HEAD, so only a restore running outside the group survives it.
+# `-s INT` is the POSIX spelling: dash (Ubuntu's /bin/sh) reads `kill -INT --`
+# as a pid of "-" and exits 2 without signalling anyone.
 GROUP_SIGINT_HOOK = """\
 #!/bin/sh
 [ "$1" = prepared ] && [ -e "$RF_MARK" ] || exit 0
 rm -f "$RF_MARK"
-kill -INT -- "-$RF_PGID"
+kill -s INT -- "-$RF_PGID"
 sleep 0.3
 """
 DELAY_SLOW = 1.0

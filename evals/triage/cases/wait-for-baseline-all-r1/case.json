@@ -5,11 +5,14 @@
   "verdict": [
     "NEEDS_REWORK"
   ],
-  "in_rows": [],
+  "in_rows": [
+    "start_mtime|first (call|write)|absent",
+    "RETRY"
+  ],
   "not_in_rows": [
     "\\|\\s*\\**HIGH\\**\\s*\\|",
     "[Nn]egative"
   ],
   "recorded": "pass",
-  "note": "Two LOW rows; 'reject negative --baseline' demotion upheld."
+  "note": "Two LOW rows; 'reject negative --baseline' demotion upheld. Both LOW rows (a file absent at the first call, running the RETRY line) must stay."
 }

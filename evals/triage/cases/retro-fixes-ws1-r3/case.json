@@ -5,11 +5,14 @@
   "verdict": [
     "NEEDS_REWORK"
   ],
-  "in_rows": [],
+  "in_rows": [
+    "[Pp]athspec",
+    "!= ?rel|== ?rel|[Dd]irectory"
+  ],
   "not_in_rows": [
     "\\|\\s*\\**HIGH\\**\\s*\\|",
     "PurePosixPath"
   ],
   "recorded": "pass",
-  "note": "Two LOW rows only; PurePosixPath demotion upheld."
+  "note": "Two LOW rows only; PurePosixPath demotion upheld. Both LOW rows (literal pathspecs, the path == rel check) must stay."
 }

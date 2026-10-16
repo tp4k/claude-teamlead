@@ -114,6 +114,12 @@ def case_every_shipped_case_is_well_formed() -> None:
             bad.append(f"{c['id']}: recorded/verdict")
         if not c["input"].strip():
             bad.append(f"{c['id']}: empty input.md")
+        # A rework verdict with nothing required in Rows passes an empty table.
+        if c["verdict"] == ["NEEDS_REWORK"] and not c["in_rows"]:
+            bad.append(f"{c['id']}: NEEDS_REWORK with no in_rows")
+        # Replay has no tools, so a cut excerpt is all the plan triage gets.
+        if "[truncated]" in c["input"]:
+            bad.append(f"{c['id']}: truncated input.md")
     check("shipped cases are well formed", bad == [], "; ".join(bad))
 
 

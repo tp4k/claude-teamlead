@@ -5,10 +5,13 @@
   "verdict": [
     "NEEDS_REWORK"
   ],
-  "in_rows": [],
+  "in_rows": [
+    "[Pp]athspec|ls-files",
+    "[Dd]ocstring"
+  ],
   "not_in_rows": [
     "\\|\\s*\\**HIGH\\**\\s*\\|"
   ],
   "recorded": "pass",
-  "note": "Severity calibration: real rows, none HIGH."
+  "note": "Severity calibration: real rows, none HIGH. The two MEDIUM rows (the glob pathspec in tracked_regular_file, the stale docstring) must stay."
 }

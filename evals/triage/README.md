@@ -42,7 +42,9 @@ python3 scripts/triage_cases.py replay --out /tmp/after  --samples 3
 python3 scripts/triage_cases.py compare /tmp/before/results.json /tmp/after/results.json
 ```
 
-`baseline-2026-10-16.json` is the frozen `before` for `triage.md` at f435407 (Sonnet, three samples). Every case is `recorded: "pass"`: the runs so far contain no triage overturn, so the set is a regression floor and not yet a target. Every check passes 3/3 except one. `retro-fixes-ws1-r1` promotes the demoted SIGHUP item in 1 of 3 samples, so one sample can't tell an edit's effect from that variation.
+`baseline-2026-10-16.json` is the frozen `before` for `triage.md` at f435407 (Sonnet, three samples). Every case is `recorded: "pass"`: the runs so far contain no triage overturn, so the set is a regression floor and not yet a target. Every check passes 3/3 except two in `retro-fixes-ws1-r1`, which pass 2/3. In one sample triage answers `NEEDS_DECISION` instead of `NEEDS_REWORK`, and in another it promotes the demoted SIGHUP item. One sample can't tell an edit's effect from that variation.
+
+`input.md` holds each source untruncated: the plan's shared sections plus the case's own workstream section, without the living sections written after the round. Replay has no tools, so whatever is cut from the input is missing from triage's view.
 
 `compare` exits 1 if any check's pass rate dropped. Once a `recorded: "miss"` case exists, a role edit should turn it into a pass without dropping anything else. With one sample a run is noise, so use three or more. Keep one frozen `before` result rather than re-running it on every edit; a baseline that moves hides the trend.
 

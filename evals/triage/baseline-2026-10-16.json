@@ -52,7 +52,7 @@
     "retro-fixes-ws1-r1": {
       "recorded": "pass",
       "passes": {
-        "verdict in ['NEEDS_REWORK']": 3,
+        "verdict in ['NEEDS_REWORK']": 2,
         "## Rows section present": 3,
         "in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: SIGHUP": 2,
@@ -64,6 +64,8 @@
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
         "## Rows section present": 3,
+        "in Rows: [Pp]athspec|ls-files": 3,
+        "in Rows: [Dd]ocstring": 3,
         "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3
       }
     },
@@ -72,6 +74,8 @@
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
         "## Rows section present": 3,
+        "in Rows: [Pp]athspec": 3,
+        "in Rows: != ?rel|== ?rel|[Dd]irectory": 3,
         "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: PurePosixPath": 3
       }
@@ -89,10 +93,11 @@
       "passes": {
         "verdict in ['NEEDS_REWORK']": 3,
         "## Rows section present": 3,
+        "in Rows: start_mtime|first (call|write)|absent": 3,
+        "in Rows: RETRY": 3,
         "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: [Nn]egative": 3
       }
     }
-  },
-  "date": "2026-10-16"
+  }
 }

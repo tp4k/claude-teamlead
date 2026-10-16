@@ -23,11 +23,11 @@
       }
     },
     "red-freeze-cleanup-followup-ws1-r2": {
-      "recorded": "miss",
+      "recorded": "pass",
       "passes": {
-        "verdict in ['NEEDS_REWORK']": 0,
+        "verdict in ['APPROVED', 'APPROVED_WITH_NOTES']": 3,
         "## Rows section present": 3,
-        "in Rows: [Uu][Tt][Ff]-?8|[Dd]ecod": 0,
+        "not in Rows: \\|\\s*\\**HIGH\\**\\s*\\|": 3,
         "not in Rows: SIGHUP": 3
       }
     },

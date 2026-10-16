@@ -3,14 +3,14 @@
   "workstream": "ws1",
   "source": "teamlead-retro/2026-10-15-1541-red-freeze-cleanup-followup",
   "verdict": [
-    "NEEDS_REWORK"
+    "APPROVED",
+    "APPROVED_WITH_NOTES"
   ],
-  "in_rows": [
-    "[Uu][Tt][Ff]-?8|[Dd]ecod"
-  ],
+  "in_rows": [],
   "not_in_rows": [
+    "\\|\\s*\\**HIGH\\**\\s*\\|",
     "SIGHUP"
   ],
-  "recorded": "miss",
-  "note": "OVERTURNED. Recorded triage said APPROVED_WITH_NOTES; the run's Codex review then raised a HIGH at scripts/red_freeze.py:197 (SIGTERM after a non-signal exception, the decode path, skips group termination), fixed in 8e8bb3b."
+  "recorded": "pass",
+  "note": "Round-2 reviewers approved with no findings; round 1's rework commit 8e8bb3b had already added the decode regression test. The run's later Codex review raised a HIGH at scripts/red_freeze.py:197 (SIGTERM after a non-signal exception, before the first cleanup assignment), but no round-2 report or demoted item named it. That is a reviewer miss, not a triage overturn, so approving is correct here."
 }

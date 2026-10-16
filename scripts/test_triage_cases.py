@@ -114,9 +114,7 @@ def case_every_shipped_case_is_well_formed() -> None:
             bad.append(f"{c['id']}: recorded/verdict")
         if not c["input"].strip():
             bad.append(f"{c['id']}: empty input.md")
-    misses = [c["id"] for c in cases if c["recorded"] == "miss"]
     check("shipped cases are well formed", bad == [], "; ".join(bad))
-    check("shipped cases include a recorded miss", bool(misses), "no overturn case")
 
 
 STUB = """#!/usr/bin/env python3

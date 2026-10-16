@@ -133,11 +133,17 @@ Worktree <worktree> on <branch>, base <base>@<sha>, <n> file(s) carried, bootstr
 
 The UserPromptSubmit hook names the session from the task. Delegate kickoff prints `SESSION_TITLE=<slug>` to refine the title at the next prompt. Do not ask the user to rename or relaunch.
 
-Only if EnterWorktree is unavailable or declined, print this command and stop:
+EnterWorktree refuses a worktree of a different repository from the one this session was launched in, for example a cycle started from the plugin checkout for an app repository. When it refuses or is unavailable, launch the resume session yourself. Do not ask the user to do it:
 
 ```
-cd <worktree> && claude "/teamlead:cycle --resume <slug>"
+python3 $PLUGIN/scripts/launch_cycle_session.py <worktree> <slug>
 ```
+
+`$PLUGIN` is the plugin root, two levels above this skill's directory. Substitute the absolute path.
+
+- **Exit 0, `LAUNCHED <cmux|tmux> …`:** a new cmux workspace or tmux window is running `claude '/teamlead:cycle --resume <slug>'` with its cwd in the tree. Report the setup line, ending it with `Resume session launched in <cmux|tmux>; part 2 runs there.`, and stop. Part 2 must not also run here.
+- **Exit 1, `MANUAL: …`:** there is no multiplexer to launch into, or it refused. Relay the error and the printed command, then stop. This is the only case where the user types the command.
+- **Exit 2:** a bad slug or path. Fix the argument; it is a step 1 or 3 bug.
 
 Do not add `-n`. The hook derives the new session title from the command.
 
@@ -186,6 +192,7 @@ Selected out-of-scope fixes start a separate delegate run with its own plan, que
 - Reuse an existing worktree or branch. The collision procedure permits inspection, not automatic reuse.
 - Run delegate before the session moves into the worktree.
 - Ask for relaunch, rename, or cd when EnterWorktree is available and accepted.
+- Print the manual resume command when EnterWorktree refuses, before `launch_cycle_session.py` has tried and exited 1.
 - Hardcode bootstrap, package manager, or `.env` as the sole possible carried file.
 - Report a package-only handoff as a completed review.
 - Run a second Codex review after the in-loop gate ran.

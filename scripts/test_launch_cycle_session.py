@@ -113,7 +113,10 @@ def case_refused_launch_falls_back_to_manual(tmp: Path) -> None:
 
 def case_no_claude_binary(tmp: Path) -> None:
     tree = tree_in(tmp)
-    proc, seen = launch(tmp, tree, SLUG, {"CLAUDE_CODE_EXECPATH": str(tmp / "gone")})
+    # An empty PATH dir: a claude in /usr/bin would otherwise start for real.
+    (tmp / "empty").mkdir()
+    proc, seen = launch(tmp, tree, SLUG, {"CLAUDE_CODE_EXECPATH": str(tmp / "gone"),
+                                          "PATH": str(tmp / "empty")})
     check("with no claude binary to run, the manual command is printed with "
           "exit 1",
           proc.returncode == 1 and "MANUAL: " in proc.stdout and not seen,

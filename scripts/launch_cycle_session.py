@@ -7,15 +7,24 @@ Cycle step 7 moves the session with EnterWorktree. That only works for a
 worktree of the repository the session was launched from; a cycle started from
 the plugin checkout (or any other repo) for a task in a different repository
 is refused. The old fallback printed `cd <tree> && claude "..."` and stopped,
-leaving the user to type it. This script types it for them: inside cmux it
-opens a new workspace in the tree, inside tmux a new window, each running
-`claude '/teamlead:cycle --resume <slug>'`. That session starts with its cwd in
-the tree, so its workspace roots, nested CLAUDE.md files and the step 8 cwd
-check are all right from the first prompt.
+leaving the user to type it.
+
+This script starts that session with Claude Code's own background sessions,
+`claude --bg`, run with its cwd in the tree. That needs no particular terminal
+or multiplexer: the session runs under Claude Code's background service and the
+user opens it from any terminal with `claude attach <id>` (or `claude agents`).
+Its cwd is the tree from the first prompt, so its workspace roots, nested
+CLAUDE.md files and the step 8 cwd check are all right.
+
+The binary is CLAUDE_CODE_EXECPATH, the one running this session, because the
+`claude` on PATH can be a terminal's wrapper shim; PATH is the fallback. The
+caller's session identity is stripped from the environment so the new session
+starts as if typed in a fresh shell.
 
 Output and exit codes:
-  0  LAUNCHED <cmux|tmux> <worktree>  the new session is running
-  1  MANUAL: cd <tree> && claude ...  no multiplexer, or it refused the launch
+  0  LAUNCHED <id> <worktree>, then the attach command
+  1  MANUAL: cd <tree> && claude ...  no claude binary, or it refused (for
+     example an untrusted tree); Claude's own error goes to stderr
   2  bad arguments; nothing launched
 """
 from __future__ import annotations
@@ -27,28 +36,24 @@ import shutil
 import subprocess
 import sys
 
-# The cycle's own slug rule (skills/cycle/SKILL.md step 1). Checking it here also
-# keeps the slug inert inside the shell command the multiplexer runs.
-SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,29}")
+# The cycle's own slug rule (skills/cycle/SKILL.md step 1), leading hyphen
+# included; `--name=` keeps such a slug from reading as a claude flag.
+SLUG = re.compile(r"[a-z0-9-]{1,30}")
+BACKGROUNDED = re.compile(r"backgrounded · (\w+)")
+# Variables that describe the calling session, not the user's environment.
+CALLER_IDENTITY = (
+    "CLAUDECODE", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+)
 
 
-def resume_command(slug: str) -> str:
-    return f"claude {shlex.quote(f'/teamlead:cycle --resume {slug}')}"
-
-
-def launch_argv(tree: str, slug: str) -> tuple[str, list[str]] | None:
-    """The multiplexer this process runs inside and the argv that opens the
-    session there, or None. cmux wins over tmux: a tmux inside a cmux pane
-    still sets CMUX_*, and the cmux workspace is the one the user sees."""
-    command = resume_command(slug)
-    cmux = shutil.which("cmux")
-    if os.environ.get("CMUX_SOCKET_PATH") and cmux:
-        return "cmux", [cmux, "new-workspace", "--name", slug, "--cwd", tree,
-                        "--command", command, "--focus", "true"]
-    tmux = shutil.which("tmux")
-    if os.environ.get("TMUX") and tmux:
-        return "tmux", [tmux, "new-window", "-c", tree, "-n", slug, command]
-    return None
+def claude_binary() -> str | None:
+    running = os.environ.get("CLAUDE_CODE_EXECPATH", "")
+    if running and os.access(running, os.X_OK):
+        return running
+    return shutil.which("claude")
 
 
 def main(argv: list[str]) -> int:
@@ -65,20 +70,25 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
 
-    manual = f"MANUAL: cd {shlex.quote(tree)} && {resume_command(slug)}"
-    found = launch_argv(tree, slug)
-    if found is None:
-        print("no cmux or tmux around this session to launch into", file=sys.stderr)
+    prompt = f"/teamlead:cycle --resume {slug}"
+    manual = f"MANUAL: cd {shlex.quote(tree)} && claude {shlex.quote(prompt)}"
+    claude = claude_binary()
+    if claude is None:
+        print("no claude binary found to start the session", file=sys.stderr)
         print(manual)
         return 1
-    name, cmd = found
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    env = {k: v for k, v in os.environ.items() if k not in CALLER_IDENTITY}
+    proc = subprocess.run([claude, "--bg", f"--name={slug}", prompt], cwd=tree, env=env,
+                          capture_output=True, text=True, check=False)
     if proc.returncode != 0:
-        print(f"{name} refused the launch (exit {proc.returncode}): "
+        print(f"claude --bg refused (exit {proc.returncode}): "
               f"{(proc.stderr or proc.stdout).strip()}", file=sys.stderr)
         print(manual)
         return 1
-    print(f"LAUNCHED {name} {tree}  {proc.stdout.strip()}".rstrip())
+    found = BACKGROUNDED.search(proc.stdout)
+    session = found.group(1) if found else slug
+    print(f"LAUNCHED {session} {tree}")
+    print(f"open it from any terminal: claude attach {session}")
     return 0
 
 

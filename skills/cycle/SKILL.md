@@ -141,11 +141,11 @@ python3 $PLUGIN/scripts/launch_cycle_session.py <worktree> <slug>
 
 `$PLUGIN` is the plugin root, two levels above this skill's directory. Substitute the absolute path.
 
-- **Exit 0, `LAUNCHED <cmux|tmux> …`:** a new cmux workspace or tmux window is running `claude '/teamlead:cycle --resume <slug>'` with its cwd in the tree. Report the setup line, ending it with `Resume session launched in <cmux|tmux>; part 2 runs there.`, and stop. Part 2 must not also run here.
-- **Exit 1, `MANUAL: …`:** there is no multiplexer to launch into, or it refused. Relay the error and the printed command, then stop. This is the only case where the user types the command.
-- **Exit 2:** a bad slug or path. Fix the argument; it is a step 1 or 3 bug.
+It starts a Claude Code background session (`claude --bg`) with its cwd in the tree, running `/teamlead:cycle --resume <slug>`. That works in any terminal: the session runs under Claude Code's background service, not in a terminal pane.
 
-Do not add `-n`. The hook derives the new session title from the command.
+- **Exit 0, `LAUNCHED <id> <worktree>`:** report the setup line, ending it with `Resume session <id> started; part 2 runs there. Open it with: claude attach <id>`, and stop. Its cards wait in that session. Part 2 must not also run here.
+- **Exit 1, `MANUAL: …`:** no claude binary, or `claude --bg` refused, for example because the tree is untrusted. Relay Claude's error and the printed command, then stop. This is the only case where the user types the command.
+- **Exit 2:** a bad slug or path. Fix the argument; it is a step 1 or 3 bug.
 
 # Part 2 — run the cycle
 

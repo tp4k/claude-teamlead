@@ -55,15 +55,17 @@ def recently_touched(run: Path) -> bool:
 def remove(path: Path) -> None:
     # Two kickoffs can prune at once and pick the same paths. Whichever deletes
     # second finds some of them gone, which is the outcome it wanted anyway;
-    # one retry finishes a tree the peer was still halfway through.
-    for _ in range(2):
+    # a retry finishes a tree the peer was still halfway through. A path that
+    # still exists after three attempts is not a race, so that error is real.
+    for attempt in range(3):
         try:
             shutil.rmtree(path)
             return
         except FileNotFoundError:
             if not path.exists():
                 return
-    shutil.rmtree(path)
+            if attempt == 2:
+                raise
 
 
 def bulk_dirs(run: Path) -> list[Path]:
@@ -86,7 +88,12 @@ def bulk_dirs(run: Path) -> list[Path]:
 
 
 def slim(run: Path, dry_run: bool) -> list[Path]:
-    if recently_touched(run):
+    # A peer kickoff that has just created a run sees this one as one run older,
+    # so it may be deleting the whole run under the age policy while we slim it.
+    try:
+        if recently_touched(run):
+            return []
+    except FileNotFoundError:
         return []
     found = bulk_dirs(run)
     if not dry_run:
@@ -109,7 +116,11 @@ def prune(dry_run: bool) -> list[Path]:
                            if p.is_dir() and not p.is_symlink()):
         # A symlinked run reaches outside the runs tree, where slimming would
         # delete checkouts this script never created.
-        runs = [(run_started(p.name), p) for p in repo_dir.iterdir()
+        try:
+            entries = list(repo_dir.iterdir())
+        except FileNotFoundError:
+            continue  # a peer kickoff removed it once it emptied
+        runs = [(run_started(p.name), p) for p in entries
                 if p.is_dir() and not p.is_symlink()]
         dated = sorted(((d, p) for d, p in runs if d is not None),
                        key=lambda x: x[0], reverse=True)

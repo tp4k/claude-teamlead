@@ -10,9 +10,11 @@ symlink reaches outside the run.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import time
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -104,6 +106,40 @@ class SlimTests(unittest.TestCase):
         listed = list(self.rundir.iterdir()) + [self.rundir / "deleted-by-peer"]
         with mock.patch.object(Path, "iterdir", lambda _: iter(listed)):
             self.assertFalse(prune_runs.recently_touched(self.rundir))
+
+    def test_run_a_peer_deleted_whole_is_not_an_error(self) -> None:
+        age(self.rundir)
+        gone = self.rundir.parent / "2026-01-01-0000-deleted-by-peer"
+        self.assertEqual(prune_runs.slim(gone, dry_run=False), [])
+
+    def test_repo_dir_a_peer_removed_is_not_an_error(self) -> None:
+        age(self.rundir)
+        repo_dir = self.rundir.parent
+        real_iterdir = Path.iterdir
+
+        def iterdir(path: Path) -> Iterator[Path]:
+            if path == repo_dir:
+                raise FileNotFoundError(path)
+            return real_iterdir(path)
+
+        with mock.patch.object(Path, "iterdir", iterdir):
+            self.assertEqual(prune(dry_run=False), [])
+
+    def test_tree_a_peer_keeps_emptying_is_finished(self) -> None:
+        clone = self.rundir / "probe-ws1-r1-code"
+        real_rmtree = shutil.rmtree
+        calls: list[Path] = []
+
+        def racing_rmtree(path: Path) -> None:
+            calls.append(path)
+            if len(calls) < 3:
+                raise FileNotFoundError(path)  # the peer took a child first
+            real_rmtree(path)
+
+        with mock.patch.object(prune_runs.shutil, "rmtree", racing_rmtree):
+            prune_runs.remove(clone)
+        self.assertEqual(len(calls), 3)
+        self.assertFalse(clone.exists())
 
     def test_dry_run_reports_without_deleting(self) -> None:
         age(self.rundir)

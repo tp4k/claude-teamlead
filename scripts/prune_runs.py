@@ -86,8 +86,12 @@ def prune(dry_run: bool) -> list[Path]:
     removed: list[Path] = []
     if not runs_dir.is_dir():
         return removed
-    for repo_dir in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
-        runs = [(run_started(p.name), p) for p in repo_dir.iterdir() if p.is_dir()]
+    for repo_dir in sorted(p for p in runs_dir.iterdir()
+                           if p.is_dir() and not p.is_symlink()):
+        # A symlinked run reaches outside the runs tree, where slimming would
+        # delete checkouts this script never created.
+        runs = [(run_started(p.name), p) for p in repo_dir.iterdir()
+                if p.is_dir() and not p.is_symlink()]
         dated = sorted(((d, p) for d, p in runs if d is not None),
                        key=lambda x: x[0], reverse=True)
         for i, (started, path) in enumerate(dated):

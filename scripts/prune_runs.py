@@ -43,8 +43,27 @@ def run_started(name: str) -> datetime | None:
 def recently_touched(run: Path) -> bool:
     # Reports are written at the top of the run dir, so its direct entries are
     # enough; walking a tree that may hold gigabytes would cost more than it saves.
-    stamps = [run.stat().st_mtime] + [p.lstat().st_mtime for p in run.iterdir()]
+    stamps = [run.stat().st_mtime]
+    for p in run.iterdir():
+        try:
+            stamps.append(p.lstat().st_mtime)
+        except FileNotFoundError:
+            continue  # a concurrent prune removed it between listing and stat
     return time.time() - max(stamps) < LIVE_SECONDS
+
+
+def remove(path: Path) -> None:
+    # Two kickoffs can prune at once and pick the same paths. Whichever deletes
+    # second finds some of them gone, which is the outcome it wanted anyway;
+    # one retry finishes a tree the peer was still halfway through.
+    for _ in range(2):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            if not path.exists():
+                return
+    shutil.rmtree(path)
 
 
 def bulk_dirs(run: Path) -> list[Path]:
@@ -72,7 +91,7 @@ def slim(run: Path, dry_run: bool) -> list[Path]:
     found = bulk_dirs(run)
     if not dry_run:
         for path in found:
-            shutil.rmtree(path)
+            remove(path)
     return found
 
 
@@ -98,11 +117,15 @@ def prune(dry_run: bool) -> list[Path]:
             if i >= keep_last and started < cutoff:
                 removed.append(path)
                 if not dry_run:
-                    shutil.rmtree(path)
+                    remove(path)
             else:
                 removed.extend(slim(path, dry_run))
-        if not dry_run and not any(repo_dir.iterdir()):
-            repo_dir.rmdir()
+        if not dry_run:
+            try:
+                if not any(repo_dir.iterdir()):
+                    repo_dir.rmdir()
+            except OSError:
+                pass  # a peer kickoff removed it already, or just started a run in it
     return removed
 
 

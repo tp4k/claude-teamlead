@@ -14,7 +14,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import prune_runs
 from prune_runs import prune
 
 OLD = time.time() - 2 * 3600
@@ -87,6 +89,21 @@ class SlimTests(unittest.TestCase):
         age(outside)
         prune(dry_run=False)
         self.assertTrue((outside / "checkout" / ".git").is_dir())
+
+    def test_path_a_peer_prune_already_removed_is_not_an_error(self) -> None:
+        age(self.rundir)
+        clone = self.rundir / "probe-ws1-r1-code"
+        gone = self.rundir / "probe-ws9-r1-code"
+        # The peer kickoff listed both and has already deleted the first one.
+        with mock.patch.object(prune_runs, "bulk_dirs", return_value=[gone, clone]):
+            self.assertEqual(prune(dry_run=False), [gone, clone])
+        self.assertFalse(clone.exists())
+
+    def test_child_vanishing_mid_scan_is_not_an_error(self) -> None:
+        age(self.rundir)
+        listed = list(self.rundir.iterdir()) + [self.rundir / "deleted-by-peer"]
+        with mock.patch.object(Path, "iterdir", lambda _: iter(listed)):
+            self.assertFalse(prune_runs.recently_touched(self.rundir))
 
     def test_dry_run_reports_without_deleting(self) -> None:
         age(self.rundir)

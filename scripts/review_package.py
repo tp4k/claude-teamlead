@@ -630,10 +630,18 @@ def add_followup(add: Callable[[str], None], ctx: dict) -> None:
             "it holds more than this iteration; the commits after that review "
             "are the ones written to answer it."
         )
+    if ctx.get("final_gate"):
+        add("This is a cumulative final gate. Derive fresh caller-contract scenarios "
+            "before reading the earlier review. Its conclusions, including scope "
+            "classifications, remain challengeable when cumulative behavior exposes "
+            "a concrete defect. Classify responsibility explicitly for triage.")
+        add("")
+    scope_rule = ("record earlier scope decisions." if ctx.get("final_gate") else
+                  "were settled — do not reopen them.")
     add(
         f"`{earlier}` is the review this change was written to close: its "
         "`## Findings to fix` rows are the acceptance criteria, and its "
-        f"`## Not in scope` rows were settled — do not reopen them. {range_line}"
+        f"`## Not in scope` rows {scope_rule} {range_line}"
     )
     add("")
     add("Two jobs, and the second is not optional:")
@@ -664,7 +672,9 @@ def build_prompt(ctx: dict) -> str:
     add("")
     add(
         "You are reviewing a completed change written by an AI coding agent. "
-        "Review it as ONE unit of work. Do NOT review commit by commit: the "
+        "Review it as ONE unit of work. Derive fresh caller-contract scenarios "
+        "before consulting earlier review conclusions. Do NOT review commit by "
+        "commit: the "
         "history is TDD-shaped (a commit whose tests are meant to fail, then "
         "the fix) and rework-shaped (later rounds strengthen earlier "
         "assertions), so individual commits are states nobody intends to keep."
@@ -676,6 +686,11 @@ def build_prompt(ctx: dict) -> str:
     add(f"- Branch: `{ctx['branch']}`")
     add(f"- Base commit: `{base}`")
     add(f"- Head commit: `{head_sha}`")
+    if ctx.get("verification_base"):
+        add(f"- Verification / rework base: `{ctx['verification_base']}`")
+        add("- Review range: cumulative deliverable from the target-branch base above; "
+            "the verification base applies only to this run’s verification "
+            "and accounting.")
     add("")
     add(
         f"This review is against the final HEAD, `{head_sha}`: docs, "
@@ -703,7 +718,9 @@ def build_prompt(ctx: dict) -> str:
     add("")
     if ctx["package_files"]:
         add(
-            "Read every file listed here — they are the package, and nothing "
+            "Read every file listed here after deriving fresh contract scenarios; "
+            "postpone earlier review conclusions until then. These are the package, "
+            "and nothing "
             "in them is repeated below. The paths are absolute because the "
             "only thing you were handed is this prompt's own path:"
         )
@@ -912,6 +929,30 @@ def build_prompt(ctx: dict) -> str:
         )
         add("")
 
+    add("## Independent behavioral review")
+    add("")
+    add(
+        "Before consulting earlier review conclusions or demotions, derive fresh "
+        "scenarios from the code's contracts. Trace changed behavior through real "
+        "callers, input transformations, state aggregation across multiple steps, "
+        "and downstream consumers. Identify units, lifetime and reset boundaries "
+        "of values crossing those interfaces. The plan is evidence of intent; "
+        "challenge its factual assumptions against the code and caller contracts."
+    )
+    add(
+        "For each concrete correctness risk that inspection and existing evidence "
+        "cannot settle, execute a targeted probe you design independently. Use only "
+        "the disposable review tree for dependency setup, temporary tests and probes; "
+        "never modify the shared checkout. Record inputs, expected and observed "
+        "results, "
+        "commands and relevant caller paths. Existing verifier results can establish "
+        "routine suite health but cannot replace a missing caller-level scenario. "
+        "Do not manufacture findings to meet a quota: disprove plausible defects too. "
+        "Separate newly exposed defects, faulty plan assumptions, untouched "
+        "pre-existing "
+        "behavior and optional improvements, comparing against the review base."
+    )
+    add("")
     add("## What to check")
     add("")
     if ctx["plan_structured"]:
@@ -951,14 +992,15 @@ def build_prompt(ctx: dict) -> str:
     )
     add(
         "4. **Do the new tests measure anything?** For each new or changed "
-        "assertion, name the production line whose mutation would make it "
-        "fail. If you cannot name one, the assertion is vacuous — report it. "
+        "behavior assertion, name the production line whose mutation would make it "
+        "fail. For fixture-data invariants, check the data contract instead. "
+        "Establish the assertion’s purpose and base behavior before reporting "
+        "it as vacuous. "
         "Look specifically for: assertions over an empty collection, "
         "selectors that never match, `expect` calls on a value that was "
         "already true before the change, and tests that encode the same "
-        "mistake the code makes. This axis matters most: in a previous run of "
-        "this workflow, both rework rounds were caused by assertions that "
-        "measured nothing, and none by broken production code."
+        "mistake the code makes. Caller-level correctness and fresh scenarios "
+        "take priority over auditing implementer-supplied mutations."
     )
     add(
         "5. **Simplicity, duplication and test bloat.** Is there a simpler "
@@ -1046,8 +1088,13 @@ def build_prompt(ctx: dict) -> str:
         "load-bearing: a finding whose provenance is here can be confirmed "
         "quickly, while one that cannot be traced to a command or a file read "
         "has to be treated as a guess no matter how plausible it reads. "
-        "Reviewing this kind of change without running anything is a valid "
-        "choice; leaving that invisible is not."
+        "Include exactly one standalone status line: `Verification: COMPLETE` or "
+        "`Verification: CANNOT_RUN`. COMPLETE means all essential checks were settled "
+        "by executed probes or explicit code evidence; it does not mean no defects. "
+        "For CANNOT_RUN, include `Unresolved check: <essential scenario and execution "
+        "blocker>` and the command to retry. An unexecuted essential probe prevents "
+        "approval even when routine suites passed. Distinguish optional unchecked "
+        "areas from essential unresolved checks."
     )
     add("")
     if ctx["followup"]:
@@ -1083,6 +1130,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("target", nargs="?", default=None)
     ap.add_argument("--base")
     ap.add_argument("--head", default="HEAD")
+    ap.add_argument("--verification-base", help="pinned run base, recorded separately")
+    ap.add_argument("--final-gate", action="store_true",
+                    help="review cumulative branch even for a follow-up run")
     ap.add_argument("--out")
     ap.add_argument("--plan")
     ap.add_argument(
@@ -1127,7 +1177,7 @@ def main(argv: list[str]) -> int:
     recorded = recorded_commits(run_dir, repo)
     followup, followup_head, followup_warnings = followup_source(task)
     base_override = args.base
-    if followup_head and not base_override:
+    if followup_head and not base_override and not args.final_gate:
         if subprocess.run(
             ["git", "-C", str(repo), "merge-base", "--is-ancestor",
              followup_head, head_sha],
@@ -1141,6 +1191,9 @@ def main(argv: list[str]) -> int:
             )
             followup_head = None
     base, warnings = resolve_base(repo, head_sha, recorded, base_override)
+    verification_base = (git(repo, "rev-parse", "--verify",
+                             f"{args.verification_base}^{{commit}}")
+                         if args.verification_base else None)
     warnings = followup_warnings + warnings
     # Compared by commit, not by origin: a --base naming the reviewed head is
     # the same range and earns the same prompt.
@@ -1238,6 +1291,8 @@ def main(argv: list[str]) -> int:
             "repo": repo,
             "branch": branch,
             "base": base,
+            "verification_base": verification_base,
+            "final_gate": args.final_gate,
             "head_sha": head_sha,
             "task": task,
             "answers": bool(answers),

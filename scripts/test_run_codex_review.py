@@ -474,16 +474,36 @@ def case_a_renamed_file_is_hashed_at_its_destination(tmp: Path) -> None:
 def case_prompt_rewrite_changes_only_the_repo_line(tmp: Path) -> None:
     old = tmp / "source"
     new = tmp / "review-tree"
-    prompt = f"# Review\n\n- Repo / worktree: `{old}`\n\nKeep this exact.\n"
+    prompt = (f"# Review\n\n- Repo / worktree: `{old}`\n\nKeep this exact.\n"
+              f"git -C {old} diff base..head\n")
     rewritten = runner.prompt_for_review_tree(prompt, new)
-    restored = rewritten.replace(
-        f"- Repo / worktree: `{new}`", f"- Repo / worktree: `{old}`"
-    )
+    restored = rewritten.replace(str(new), str(old))
     check(
-        "prompt rewriting points at isolation and preserves every other byte",
-        f"- Repo / worktree: `{new}`" in rewritten and restored == prompt,
+        "prompt rewriting redirects diff commands and preserves other context",
+        f"- Repo / worktree: `{new}`" in rewritten and restored == prompt
+        and f"git -C {new} diff" in rewritten,
         f"rewritten={rewritten!r}",
     )
+
+
+def case_prompt_rewrite_preserves_package_paths(tmp: Path) -> None:
+    old, new = tmp / "app", tmp / "review-tree"
+    package = tmp / "app-review"
+    context = (f"Plan: `{package}/plan.md`\n"
+               f"Input: `{old}/requirements.md`\n"
+               f"git -C {package} status\n")
+    prompt = (f"- Repo / worktree: `{old}`\n"
+              f"git -C {old} diff base..head\n" + context)
+    guidance = f"Paths are relative to `{old}` — e.g. `{old}/src/app.py`.\n"
+    prompt += "## Files changed\n\n" + guidance
+    rewritten = runner.prompt_for_review_tree(prompt, new)
+    check("isolation redirects repository commands without corrupting package prefixes",
+          rewritten == (f"- Repo / worktree: `{new}`\n"
+                        f"git -C {new} diff base..head\n" + context
+                        + "## Files changed\n\n"
+                        + f"Paths are relative to `{new}` — e.g. "
+                        f"`{new}/src/app.py`.\n"),
+          rewritten)
 
 
 def case_a_moved_remote_ref_has_its_own_warning(tmp: Path) -> None:
@@ -1533,6 +1553,7 @@ CASES = [
     case_a_renamed_file_is_hashed_at_its_destination,
     case_a_quoted_path_is_still_hashed,
     case_prompt_rewrite_changes_only_the_repo_line,
+    case_prompt_rewrite_preserves_package_paths,
     case_a_moved_remote_ref_has_its_own_warning,
     case_a_tag_made_inside_the_worktree_is_seen,
     case_config_written_from_a_linked_worktree_is_caught,

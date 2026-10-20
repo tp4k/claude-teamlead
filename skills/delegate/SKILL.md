@@ -219,10 +219,13 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Dispatch dependent streams when their dependencies are approved. Do not loop indefinitely.
 10a. CODEX GATE (codexCodeReview=on; `off` goes to 11). After every stream is approved and any
     `coordinator-fix:` commits have passed their own verifier (verifier-fix-<k>.md), next.py prints:
-      review_package.py $RUN --out $RUN/codex-gate-package, then run_codex_review.py <abs PROMPT.md> --artifact-stem codex-gate
-    in background Bash. Codex reviews the whole diff. Do not poll it: the next call waits on its attempts log.
+      review_package.py $RUN --final-gate --verification-base <pinned base> --out $RUN/codex-gate-package, then run_codex_review.py <abs PROMPT.md> --artifact-stem codex-gate
+    in background Bash. The gate reviews the cumulative target-branch diff; verifier and rework accounting keep the pinned base.
+    Do not poll it: the next call waits on its attempts log.
     Codex could not run → opusCodeReview=fallback spawns teamlead:code-reviewer on the same package;
-    `off` halts. Triage then writes triage-gate-r<K>.md. Its NEEDS_REWORK rows become rework rounds
+    `off` halts. Both reviewers probe caller behavior in disposable trees. Only `Verification: COMPLETE` permits triage.
+    `CANNOT_RUN` or a missing status halts without code rework; resolve the execution blocker, then call `next.py $RUN --retry-gate`.
+    Triage then writes triage-gate-r<K>.md. Its NEEDS_REWORK rows become rework rounds
     (implementer → verifier with RED run and mutation gate, no per-stream reviewers) and the gate runs
     again on the new HEAD, until a gate triage at the current HEAD has no blocking row.
     The gate shares reworkCap with ordinary rework; a rework past it halts for the user.

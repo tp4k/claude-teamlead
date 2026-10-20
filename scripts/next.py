@@ -983,14 +983,88 @@ class Router:
         gates[str(g)] = {**self.gate_record(g), **rec}
         plan.state["gates"] = gates
 
+    def gate_review_path(self, g: int) -> str:
+        rec = self.gate_record(g)
+        if rec.get("review"):
+            return str(rec["review"])
+        pkg = self.run / "codex-gate-package"
+        seen = as_int(rec.get("attempts_seen"))
+        new = terminals(pkg / "codex-gate-attempts.log")[seen:]
+        if new and new[-1][0] == "done":
+            return new[-1][1]
+        opus = pkg / f"opus-review-r{g}.md"
+        return str(opus) if opus.exists() else ""
+
+    def require_gate_complete(self, review: str) -> None:
+        path = Path(review)
+        text = path.read_text(errors="replace") if path.is_file() else ""
+        statuses = re.findall(r"^Verification: (COMPLETE|CANNOT_RUN)[ \t]*$",
+                              text, re.MULTILINE)
+        if statuses != ["COMPLETE"]:
+            unresolved = re.search(r"^Unresolved check: (.+)$", text, re.MULTILINE)
+            detail = (unresolved.group(1) if unresolved else
+                      "missing or invalid verification status")
+            raise Halt(f"Gate verification incomplete: {detail}. Resolve the execution "
+                       "blocker, then run next.py <run> --retry-gate. This does not "
+                       "consume a code-rework round.")
+
+    def archive_gate_briefs(self, g: int) -> Plan | None:
+        """Retire pending briefs from the superseded gate, preserving their text."""
+        started = as_int(self.gate_record(g).get("started_ns"))
+        pending: list[Path] = []
+        for brief in (self.run / "briefs").glob("*-ws*-r*.md"):
+            match = re.fullmatch(r"(impl|docs)-ws(\d+)-r(\d+)\.md", brief.name)
+            if not match or brief.stat().st_mtime_ns < started:
+                continue
+            kind, ws, rnd = match.group(1), int(match.group(2)), int(match.group(3))
+            if kind == "impl":
+                if rnd == 1 or self.r.report(ws, rnd) is not None:
+                    continue
+                output = self.run / f"implementer-{self.r.tag(ws, rnd)}.md"
+            else:
+                output = self.run / f"docs-fix-ws{ws}-r{rnd}.md"
+                if (output.exists()
+                        and output.stat().st_mtime_ns >= brief.stat().st_mtime_ns):
+                    continue
+            # A dispatched writer may still be working even without a report.
+            expects = as_dict(self.state.get("dispatch")).get("expects", [])
+            if str(output) in expects:
+                return Plan(
+                    halt=f"Cannot retry gate while {output.name} is pending; "
+                         "wait for the dispatched writer first", code=1,
+                    expects=[Path(str(path)) for path in expects])
+            pending.append(brief)
+        if pending:
+            archive = self.run / "archive" / f"gate-r{g}-retry-{time.time_ns()}"
+            archive.mkdir(parents=True)
+            for brief in pending:
+                brief.rename(archive / brief.name)
+        return None
+
     def gate_plan(self) -> Plan:
         opts = run_state.options(self.r)
         codex = str(opts.get("codexCodeReview", paths.DEFAULTS["codexCodeReview"]))
         if codex == "off":
             return self.close()
         k = self.last_gate_triage()
+        if self.args.retry_gate:
+            gates = self.gates()
+            if not gates:
+                raise Halt("No gate to retry")
+            g = max(int(n) for n in gates)
+            pkg = self.run / "codex-gate-package"
+            log = pkg / "codex-gate-attempts.log"
+            blocked = self.archive_gate_briefs(g)
+            if blocked is not None:
+                return blocked
+            # Preserve evidence, but old triage and briefs cannot schedule new work.
+            return self.gate_start(g + 1, pkg, log, len(terminals(log)), fresh=True)
+        latest = max((int(n) for n in self.gates()), default=0)
+        if latest > k:
+            return self.gate_run(latest)
         if k:
             tri = self.run / f"triage-gate-r{k}.md"
+            self.require_gate_complete(self.gate_review_path(k))
             tv = verdict(tri)
             if not tv:
                 raise Halt(f"{tri.name} has no `VERDICT:` line: decide the verdict "
@@ -1044,7 +1118,7 @@ class Router:
         lines = [
             self.head_line(),
             f"Gate review: {review}. Gate: {g}. Reviewed HEAD: {self.head()}. "
-            f"Base: {self.base()}.",
+            f"Verification / rework base: {self.base()}. Review base: see PROMPT.md.",
             "This is the independent review of the whole diff after every "
             "workstream was approved. Triage it with your role file.",
             f"Rework briefs, per workstream, if any row needs one: {rows}.",
@@ -1094,19 +1168,25 @@ class Router:
             return self.gate_fallback(g, pkg, opus_file, new[-1][1])
         else:
             return self.gate_start(g, pkg, log, seen, fresh=False)
+        self.require_gate_complete(review)
         plan = Plan(step=f"triage — gate {g}")
         spawn = self.gate_prompt(g, review, False)
         plan.spawns.append(spawn)
+        if Path(review).name.startswith("opus-review-"):
+            plan.cmds.append(("run", f"{self.script('fallback_review_tree.py')} "
+                              f"{q(pkg / 'PROMPT.md')} {q(pkg / f'opus-tree-r{g}')} "
+                              "--cleanup"))
         self.set_gate(plan, g, review=review)
         return plan
 
     def gate_start(self, g: int, pkg: Path, log: Path, seen: int,
                    fresh: bool) -> Plan:
         plan = Plan(step=f"Codex gate {g} — the whole diff, every stream approved")
-        # The pinned base, not review_package.py's merge base with origin/main:
-        # the gate reviews exactly the range the verifiers did.
+        # Resolve review base separately; never change the pinned verifier base.
         plan.cmds.append(("run", f"{self.script('review_package.py')} "
-                          f"{q(self.run)} --base {self.base()} --out {q(pkg)}"))
+                          f"{q(self.run)} --final-gate "
+                          f"--verification-base {self.base()} "
+                          f"--out {q(pkg)}"))
         plan.cmds.append(("run-background",
                           f"{self.script('run_codex_review.py')} "
                           f"{q(pkg / 'PROMPT.md')} --artifact-stem codex-gate"))
@@ -1129,6 +1209,11 @@ class Router:
             f"PROMPT.md: {pkg}/PROMPT.md",
             f"Repo: {self.repo}",
             f"Answer: {opus_file}",
+            "Before reviewing, prepare an isolated tree with: "
+            f"{self.script('fallback_review_tree.py')} {q(pkg / 'PROMPT.md')} "
+            f"{q(pkg / f'opus-tree-r{g}')}. Read the emitted PROMPT.md instead. "
+            "If preparation fails, write Verification: CANNOT_RUN and name "
+            "the unresolved isolation check. Never probe in the shared checkout.",
             f"Codex could not run ({why}), so this is the only review of this "
             "change.",
         ])
@@ -1153,6 +1238,9 @@ class Router:
     # --- the whole decision --------------------------------------------------
 
     def plan(self) -> Plan:
+        if self.args.retry_gate:
+            self.base()
+            return self.gate_plan()
         if (self.run / "final-report.md").exists():
             owed = run_state.followup_rereview_owed(self.r)
             if owed:
@@ -1168,6 +1256,9 @@ class Router:
                         code=1 if needs_user else 0)
         self.base()
         self.log_gate_decisions()
+        latest = max((int(n) for n in self.gates()), default=0)
+        if latest and not self.args.retry_gate and self.gate_review_path(latest):
+            self.require_gate_complete(self.gate_review_path(latest))
         plan = self.stream_plan()
         if plan is None:
             plan = self.fix_plan() or self.gate_plan()
@@ -1262,6 +1353,8 @@ def decide(run: Path, argv: list[str]) -> int:
                     help="seconds to wait before exit 3 (default 480)")
     ap.add_argument("--redo", action="store_true",
                     help="print the current dispatch again instead of waiting")
+    ap.add_argument("--retry-gate", action="store_true",
+                    help="rerun final review after resolving an execution blocker")
     ap.add_argument("--base", metavar="SHA",
                     help="pin the base SHA (default: HEAD on the first call)")
     args = ap.parse_args(argv)
@@ -1272,7 +1365,7 @@ def decide(run: Path, argv: list[str]) -> int:
     router = Router(run, args)
     print(f"RUN={run}")
     print(f"repo={router.repo}")
-    if not args.redo:
+    if not args.redo and not args.retry_gate:
         waited = wait_pending(router, args)
         if waited is not None:
             return waited

@@ -1268,7 +1268,37 @@ def case_the_review_is_against_the_final_head(tmp: Path) -> None:
     )
 
 
+def case_cumulative_two_runs(tmp: Path) -> None:
+    repo, run, base = scaffold(tmp, None)
+    git(repo, "update-ref", "refs/remotes/origin/main", base)
+    first_head = git(repo, "rev-parse", "HEAD").strip()
+    previous = tmp / "earlier.md"
+    previous.write_text("<!-- teamlead:review-followup -->\n"
+                        f"Reviewed head: {first_head}\n\nEarlier review.\n")
+    (run / "task.md").write_text(f"followup-of: {previous}\nBuild it.")
+    (repo / "second.txt").write_text("second run\n")
+    git(repo, "add", "second.txt")
+    git(repo, "commit", "-qm", "second run")
+    def make(*args: str) -> str:
+        subprocess.run([sys.executable, str(PACKAGER), str(run), "--out",
+                        str(tmp / "package"), *args], check=True,
+                       capture_output=True)
+        return (tmp / "package/PROMPT.md").read_text()
+    narrow = make()
+    check("standalone follow-up keeps its narrow range",
+          f"Base commit: `{first_head}`" in narrow and "a.txt |" not in narrow,
+          narrow)
+    for pinned in (base, first_head):
+        cumulative = make("--final-gate", "--verification-base", pinned)
+        check("final gate includes previous runs while preserving pinned base",
+              f"Base commit: `{base}`" in cumulative
+              and f"Verification / rework base: `{pinned}`" in cumulative
+              and "a.txt" in cumulative and "second.txt" in cumulative,
+              cumulative)
+
+
 CASES = [
+    case_cumulative_two_runs,
     case_gate_lenses_in_rubric,
     case_notes_to_rejudge,
     case_no_triage_no_section,

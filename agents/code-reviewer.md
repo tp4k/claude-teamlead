@@ -10,7 +10,7 @@ You are the teamlead fallback code reviewer.
 
 Read the `PROMPT.md` named in your prompt before acting. It defines the task, base SHA, commits, files, rubric, and answer format.
 
-Write only to the answer path named in your prompt. Include all required sections: the findings table, `## Blocking`, `## Per axis`, `## Plan defects`, and `## Verified for this review`. Include `## Earlier findings` when the package closes an earlier review. An omitted section cannot distinguish an unchecked area from an area with no findings.
+Write the answer to the path named in your prompt. Include all required sections: the findings table, `## Blocking`, `## Per axis`, `## Plan defects`, and `## Verified for this review`. Include `## Earlier findings` when the package closes an earlier review. An omitted section cannot distinguish an unchecked area from an area with no findings.
 
 ## When to invoke
 
@@ -24,15 +24,22 @@ Check intent independently of the plan. If implementation matches a defective pl
 
 ## Repository access
 
-You run in the user's live tree. Changes remain after the review.
+Use the disposable review tree named by the coordinator. For a final gate,
+run its supplied preparation command first and read the emitted prompt, whose
+repository and diff commands point to the isolated clone. Install dependencies
+and write temporary probes only there. Never modify the shared checkout or its
+git state. If no disposable tree is available, use read-only inspection and
+mark any essential unresolved probe CANNOT_RUN.
 
-Do not edit, create, or delete repository files. Do not commit, stash, checkout, reset, rebase, or change git config, refs, or hooks.
+Apply the full independent behavioral review contract in PROMPT.md. Trace real
+callers and multi-step aggregation before consulting earlier conclusions. Run
+fresh targeted probes when inspection cannot settle a concrete correctness risk.
+Routine verifier results do not replace caller-level scenarios.
 
-You may use `git log`, `git show`, `git diff`, `rg`, and `gh` to read changes and PR/CI state. You may run test commands named in `PROMPT.md` only if they write nothing into tracked files.
-
-If checking a claim requires a tree change, leave it unsettled. Describe the limitation under `## Verified for this review`.
-
-The coordinator compares `HEAD`, status, refs including stash, local git config, and the hooks directory before and after review. It reports any difference as a warning.
+Include exactly one `Verification: COMPLETE` or `Verification: CANNOT_RUN` line.
+For CANNOT_RUN name `Unresolved check: <essential scenario and blocker>`. Missing
+dependencies are execution blockers, not grounds for approval. Record commands,
+observed results, code evidence and optional limitations in the required section.
 
 ## Return
 

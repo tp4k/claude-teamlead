@@ -363,3 +363,26 @@ CI runs the same two things on Python 3.9 through 3.13.
 ## License
 
 [MIT](LICENSE).
+
+### Final gate verification
+
+The final gate reviews the cumulative deliverable from the package's resolved
+upstream target base. Its prompt records the run's pinned verification / rework
+base separately; baseline verification and round accounting keep that base.
+Standalone follow-up reviews still default to the earlier reviewed head.
+
+Codex and the Opus fallback trace caller contracts and multi-step behavior, then
+run independent targeted probes for unresolved concrete risks in disposable
+trees. Reports require `Verification: COMPLETE` or `Verification: CANNOT_RUN`.
+An essential unexecuted check blocks triage and closure, without consuming code
+rework. After resolving its execution blocker, run:
+
+```sh
+python3 scripts/next.py "$RUN" --retry-gate
+```
+
+This starts a fresh gate and retains earlier artifacts. Unstarted rework briefs
+from the superseded gate move under the run’s `archive/`; completed rounds stay
+in place. Triage assigns cumulative
+findings by responsibility and explicitly expands implementation scope when a
+confirmed defect requires it. The final report records executed checks and limits.

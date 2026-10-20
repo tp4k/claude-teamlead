@@ -884,7 +884,15 @@ def prompt_for_review_tree(prompt: str, repo: Path) -> str:
     )
     # Match the complete -C argument in generated commands, not path prefixes.
     command = re.compile(rf"^git -C {re.escape(original)}(?=[ \t])", re.MULTILINE)
-    return command.sub(lambda _: f"git -C {shlex.quote(str(repo))}", rewritten)
+    rewritten = command.sub(lambda _: f"git -C {shlex.quote(str(repo))}", rewritten)
+    # The generated file-table guidance also contains the repository root and
+    # an absolute example. Match that sentence, keeping package/input paths intact.
+    guidance = re.compile(
+        rf"^Paths are relative to `{re.escape(original)}` — e\.g\. "
+        rf"`{re.escape(original)}(/[^`\n]*)`\.$", re.MULTILINE)
+    return guidance.sub(
+        lambda match: f"Paths are relative to `{repo}` — e.g. "
+                      f"`{repo}{match.group(1)}`.", rewritten)
 
 
 

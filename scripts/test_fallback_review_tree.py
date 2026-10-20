@@ -2,7 +2,10 @@
 """Exercise fallback probes against an independent clone, preserving the source."""
 from __future__ import annotations
 
+import os
+import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -22,6 +25,10 @@ def main() -> None:
         git(repo, "init", "-q")
         git(repo, "config", "user.name", "t")
         git(repo, "config", "user.email", "t@t")
+        (repo / "value").write_text("base")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "base")
+        base = git(repo, "rev-parse", "HEAD")
         (repo / "value").write_text("old")
         git(repo, "add", ".")
         git(repo, "commit", "-qm", "old")
@@ -30,18 +37,26 @@ def main() -> None:
         git(repo, "commit", "-qam", "new")
         package = root / "source-review"
         package.mkdir()
-        plan = package / "plan.md"
+        plan = root / "plan.md"
         plan.write_text("requirements")
-        prompt = root / "PROMPT.md"
-        prompt.write_text(f"- Repo / worktree: `{repo}`\n"
-                          f"- Head commit: `{old}`\n"
-                          f"git -C {repo} diff BASE..HEAD\n"
-                          f"Plan: `{plan}`\n")
+        subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("review_package.py")),
+             str(repo), "--base", base, "--head", old, "--plan", str(plan),
+             "--out", str(package), "--quiet"], check=True, capture_output=True,
+            env={**os.environ, "TEAMLEAD_HOME": str(root / "home")})
+        prompt = package / "PROMPT.md"
         tree = root / "opus-tree-r1"
         rewritten = prepare(prompt, tree)
         assert (tree / "value").read_text() == "old"
         assert f"Repo / worktree: `{tree}`" in rewritten.read_text()
-        assert f"Plan: `{plan}`" in rewritten.read_text()
+        assert f"`{package / 'plan.md'}`" in rewritten.read_text()
+        guidance = re.search(r"^Paths are relative to `([^`]+)` — e\.g\. `([^`]+)`\.$",
+                             rewritten.read_text(), re.MULTILINE)
+        assert guidance is not None
+        assert Path(guidance.group(1)) == tree
+        # Following the emitted file guidance must inspect the pinned snapshot,
+        # whose content deliberately differs from the shared checkout.
+        assert Path(guidance.group(2)).read_text() == "old"
         assert f"git -C {tree} diff" in rewritten.read_text()
         assert (tree / ".git").is_dir()
         assert not (tree / ".git/objects/info/alternates").exists()

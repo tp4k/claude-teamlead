@@ -494,10 +494,16 @@ def case_prompt_rewrite_preserves_package_paths(tmp: Path) -> None:
                f"git -C {package} status\n")
     prompt = (f"- Repo / worktree: `{old}`\n"
               f"git -C {old} diff base..head\n" + context)
+    guidance = f"Paths are relative to `{old}` — e.g. `{old}/src/app.py`.\n"
+    prompt += "## Files changed\n\n" + guidance
     rewritten = runner.prompt_for_review_tree(prompt, new)
     check("isolation redirects repository commands without corrupting package prefixes",
           rewritten == (f"- Repo / worktree: `{new}`\n"
-                        f"git -C {new} diff base..head\n" + context), rewritten)
+                        f"git -C {new} diff base..head\n" + context
+                        + "## Files changed\n\n"
+                        + f"Paths are relative to `{new}` — e.g. "
+                        f"`{new}/src/app.py`.\n"),
+          rewritten)
 
 
 def case_a_moved_remote_ref_has_its_own_warning(tmp: Path) -> None:

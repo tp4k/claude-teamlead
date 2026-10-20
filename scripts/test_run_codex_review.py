@@ -486,6 +486,20 @@ def case_prompt_rewrite_changes_only_the_repo_line(tmp: Path) -> None:
     )
 
 
+def case_prompt_rewrite_preserves_package_paths(tmp: Path) -> None:
+    old, new = tmp / "app", tmp / "review-tree"
+    package = tmp / "app-review"
+    context = (f"Plan: `{package}/plan.md`\n"
+               f"Input: `{old}/requirements.md`\n"
+               f"git -C {package} status\n")
+    prompt = (f"- Repo / worktree: `{old}`\n"
+              f"git -C {old} diff base..head\n" + context)
+    rewritten = runner.prompt_for_review_tree(prompt, new)
+    check("isolation redirects repository commands without corrupting package prefixes",
+          rewritten == (f"- Repo / worktree: `{new}`\n"
+                        f"git -C {new} diff base..head\n" + context), rewritten)
+
+
 def case_a_moved_remote_ref_has_its_own_warning(tmp: Path) -> None:
     """One `fetch` is two shared-state changes, and both are reported as such.
 
@@ -1533,6 +1547,7 @@ CASES = [
     case_a_renamed_file_is_hashed_at_its_destination,
     case_a_quoted_path_is_still_hashed,
     case_prompt_rewrite_changes_only_the_repo_line,
+    case_prompt_rewrite_preserves_package_paths,
     case_a_moved_remote_ref_has_its_own_warning,
     case_a_tag_made_inside_the_worktree_is_seen,
     case_config_written_from_a_linked_worktree_is_caught,

@@ -381,6 +381,8 @@ rework. After resolving its execution blocker, run:
 python3 scripts/next.py "$RUN" --retry-gate
 ```
 
-This starts a fresh gate and retains earlier artifacts. Triage assigns cumulative
+This starts a fresh gate and retains earlier artifacts. Unstarted rework briefs
+from the superseded gate move under the run’s `archive/`; completed rounds stay
+in place. Triage assigns cumulative
 findings by responsibility and explicitly expands implementation scope when a
 confirmed defect requires it. The final report records executed checks and limits.

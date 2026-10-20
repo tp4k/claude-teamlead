@@ -1008,6 +1008,39 @@ class Router:
                        "blocker, then run next.py <run> --retry-gate. This does not "
                        "consume a code-rework round.")
 
+    def archive_gate_briefs(self, g: int) -> Plan | None:
+        """Retire pending briefs from the superseded gate, preserving their text."""
+        started = as_int(self.gate_record(g).get("started_ns"))
+        pending: list[Path] = []
+        for brief in (self.run / "briefs").glob("*-ws*-r*.md"):
+            match = re.fullmatch(r"(impl|docs)-ws(\d+)-r(\d+)\.md", brief.name)
+            if not match or brief.stat().st_mtime_ns < started:
+                continue
+            kind, ws, rnd = match.group(1), int(match.group(2)), int(match.group(3))
+            if kind == "impl":
+                if rnd == 1 or self.r.report(ws, rnd) is not None:
+                    continue
+                output = self.run / f"implementer-{self.r.tag(ws, rnd)}.md"
+            else:
+                output = self.run / f"docs-fix-ws{ws}-r{rnd}.md"
+                if (output.exists()
+                        and output.stat().st_mtime_ns >= brief.stat().st_mtime_ns):
+                    continue
+            # A dispatched writer may still be working even without a report.
+            expects = as_dict(self.state.get("dispatch")).get("expects", [])
+            if str(output) in expects:
+                return Plan(
+                    halt=f"Cannot retry gate while {output.name} is pending; "
+                         "wait for the dispatched writer first", code=1,
+                    expects=[Path(str(path)) for path in expects])
+            pending.append(brief)
+        if pending:
+            archive = self.run / "archive" / f"gate-r{g}-retry-{time.time_ns()}"
+            archive.mkdir(parents=True)
+            for brief in pending:
+                brief.rename(archive / brief.name)
+        return None
+
     def gate_plan(self) -> Plan:
         opts = run_state.options(self.r)
         codex = str(opts.get("codexCodeReview", paths.DEFAULTS["codexCodeReview"]))
@@ -1021,7 +1054,10 @@ class Router:
             g = max(int(n) for n in gates)
             pkg = self.run / "codex-gate-package"
             log = pkg / "codex-gate-attempts.log"
-            # Keep artifacts and stream rounds; the new gate cannot reuse old triage.
+            blocked = self.archive_gate_briefs(g)
+            if blocked is not None:
+                return blocked
+            # Preserve evidence, but old triage and briefs cannot schedule new work.
             return self.gate_start(g + 1, pkg, log, len(terminals(log)), fresh=True)
         latest = max((int(n) for n in self.gates()), default=0)
         if latest > k:

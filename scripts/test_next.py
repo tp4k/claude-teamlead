@@ -1868,13 +1868,23 @@ def case_incomplete_gate_retry(tmp: Path) -> None:
         r = w.step()
         check(f"incomplete gate ({fallback}) cannot consume a code-rework round",
               r.code == 1 and not r.kinds(), r.detail())
-        (w.run / "briefs/impl-ws1-r2.md").unlink()
+        stale = w.read("briefs/impl-ws1-r2.md")
+        w.put("briefs/docs-ws1-r1.md", "superseded docs fix")
         before = w.read("base-sha.txt")
         r = w.step("--retry-gate")
         check(f"retry ({fallback}) preserves verifier base and rounds",
               any("review_package.py" in c for c in r.commands())
               and w.read("base-sha.txt") == before
               and not (w.run / "briefs/impl-ws1-r2.md").exists(), r.detail())
+        archived = list((w.run / "archive").glob("gate-r1-retry-*/impl-ws1-r2.md"))
+        check(f"retry ({fallback}) archives superseded brief without losing evidence",
+              len(archived) == 1 and archived[0].read_text() == stale, r.detail())
+        archived_docs = list((w.run / "archive").glob(
+            "gate-r1-retry-*/docs-ws1-r1.md"))
+        check(f"retry ({fallback}) also retires superseded docs work",
+              len(archived_docs) == 1
+              and archived_docs[0].read_text() == "superseded docs fix"
+              and not (w.run / "briefs/docs-ws1-r1.md").exists(), r.detail())
         w.codex_review(2)
         r = w.step()
         check(f"successful retry ({fallback}) permits normal triage",
@@ -1886,7 +1896,36 @@ def case_incomplete_gate_retry(tmp: Path) -> None:
               r.code == 0 and "final-report.md" in r.out, r.detail())
 
 
+def case_gate_retry_preserves_started_work(tmp: Path) -> None:
+    for reported in (False, True):
+        w = World(tmp / str(reported))
+        all_approved(w)
+        w.step()
+        w.codex_review(1)
+        w.step()
+        w.gate_triage(1, "NEEDS_REWORK")
+        w.rework_brief(1, 2)
+        w.step()  # dispatch the rework implementer
+        if reported:
+            w.gate_round(1, 2)
+        before = w.read("briefs/impl-ws1-r2.md")
+        r = w.step("--retry-gate")
+        check(f"retry preserves started work ({reported})",
+              w.read("briefs/impl-ws1-r2.md") == before, r.detail())
+        check("retry waits for a pending writer" if not reported else
+              "retry keeps the completed implementation round",
+              (r.code == 1 and "wait for the dispatched writer" in r.out)
+              if not reported else any("review_package.py" in c for c in r.commands()),
+              r.detail())
+        if not reported:
+            r = w.step("--retry-gate")
+            check("repeated retry still preserves the pending writer and brief",
+                  r.code == 1 and "wait for the dispatched writer" in r.out
+                  and w.read("briefs/impl-ws1-r2.md") == before, r.detail())
+
+
 CASES = [
+    case_gate_retry_preserves_started_work,
     case_incomplete_gate_retry,
     case_exit_codes,
     case_kickoff_prints_baseline_verifier,

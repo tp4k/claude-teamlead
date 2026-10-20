@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -873,17 +874,17 @@ def prepare_review_tree(repo: Path, dest: Path) -> tuple[Path | None, list[str]]
 
 
 def prompt_for_review_tree(prompt: str, repo: Path) -> str:
-    """Keep the reviewer from silently following the readable live-repo path.
-
-    Only the repository declaration changes; all task context remains byte-for-byte
-    identical so isolation cannot accidentally alter what the reviewer is grading.
-    """
+    """Redirect repository access while preserving package paths and task context."""
     match = REPO_RE.search(prompt)
     if match is None:
         raise Fail("PROMPT.md has no repository declaration")
     original = match.group(1)
-    # Preserve lexical paths too (for example /var versus /private/var on macOS).
-    return prompt.replace(original, str(repo))
+    rewritten = REPO_RE.sub(
+        lambda _: f"- Repo / worktree: `{repo}`", prompt, count=1
+    )
+    # Match the complete -C argument in generated commands, not path prefixes.
+    command = re.compile(rf"^git -C {re.escape(original)}(?=[ \t])", re.MULTILINE)
+    return command.sub(lambda _: f"git -C {shlex.quote(str(repo))}", rewritten)
 
 
 

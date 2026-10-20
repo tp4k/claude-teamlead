@@ -28,14 +28,20 @@ def main() -> None:
         old = git(repo, "rev-parse", "HEAD")
         (repo / "value").write_text("new")
         git(repo, "commit", "-qam", "new")
+        package = root / "source-review"
+        package.mkdir()
+        plan = package / "plan.md"
+        plan.write_text("requirements")
         prompt = root / "PROMPT.md"
         prompt.write_text(f"- Repo / worktree: `{repo}`\n"
                           f"- Head commit: `{old}`\n"
-                          f"git -C {repo} diff BASE..HEAD\n")
+                          f"git -C {repo} diff BASE..HEAD\n"
+                          f"Plan: `{plan}`\n")
         tree = root / "opus-tree-r1"
         rewritten = prepare(prompt, tree)
         assert (tree / "value").read_text() == "old"
-        assert str(repo) not in rewritten.read_text()
+        assert f"Repo / worktree: `{tree}`" in rewritten.read_text()
+        assert f"Plan: `{plan}`" in rewritten.read_text()
         assert f"git -C {tree} diff" in rewritten.read_text()
         assert (tree / ".git").is_dir()
         assert not (tree / ".git/objects/info/alternates").exists()

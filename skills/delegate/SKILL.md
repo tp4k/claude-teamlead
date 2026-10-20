@@ -122,7 +122,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     If fallback is configured, wait for its review and triage it.
     If no review ran, create no triage file.
     adr_conflict=yes → HALT. Quote the ADR clause and ask the user. Do not implement.
-6.  Relay: ONE QUESTION BATCH before implementation. Give a 3–5 sentence plan summary, review counts, and any human-plan path.
+6.  Relay: ONE QUESTION BATCH before implementation. Give a 3–5 sentence plan summary, review counts, and the absolute path of any $RUN/plan-human.md.
     Ask decisions as separate cards. Do not paraphrase the relay-ready source options.
     Order: design choices from CONFIRMED findings, then questions.md order, then the Scope card.
     A CONFIRMED finding requiring only a correction goes directly to 6b without a design card.
@@ -165,6 +165,8 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     A validator may upgrade no to yes. Ignore any attempted downgrade and retain yes.
 6d. HOLD GATE: ask before implementation when any condition applies:
     humanReadablePlan=pause → the user explicitly requested a pause.
+      The hold message prints the absolute path of $RUN/plan-human.md on its own line,
+      resolved, never `$RUN/…` or a bare filename. Regenerate it first if the plan changed.
     plan-triage.md contains CONFIRMED findings → show the corrected plan for confirmation.
     complex=yes with no design review → ask for confirmation of the unreviewed design.
     --autopilot skips these holds except an explicit humanReadablePlan=pause.

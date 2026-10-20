@@ -251,7 +251,8 @@ class World:
 
     def codex_review(self, n: int) -> None:
         self.pkg.mkdir(exist_ok=True)
-        (self.pkg / f"codex-gate-r{n}.md").write_text("| # | finding |\n")
+        (self.pkg / f"codex-gate-r{n}.md").write_text(
+            "| # | finding |\nVerification: COMPLETE\n")
         self.attempt(f"done: {self.pkg}/codex-gate-r{n}.md")
 
     def gate_triage(self, k: int, verdict: str, extra: str = "") -> None:
@@ -1239,7 +1240,8 @@ def case_approved_routes_to_codex_gate(tmp: Path) -> None:
     all_approved(w)
     r = w.step()
     cmds = r.commands()
-    pkg = (f"python3 {PLUGIN}/scripts/review_package.py {w.run} --base {w.base} "
+    pkg = (f"python3 {PLUGIN}/scripts/review_package.py {w.run} --final-gate "
+           f"--verification-base {w.base} "
            f"--out {w.pkg}")
     runner = (f"python3 {PLUGIN}/scripts/run_codex_review.py {w.pkg}/PROMPT.md "
               "--artifact-stem codex-gate")
@@ -1266,7 +1268,8 @@ def case_approved_routes_to_codex_gate(tmp: Path) -> None:
     check("a recorded Codex failure → the teamlead:code-reviewer fallback", ok,
           r.detail())
 
-    (w.pkg / "opus-review-r1.md").write_text("| # | finding |\n")
+    (w.pkg / "opus-review-r1.md").write_text(
+        "| # | finding |\nVerification: COMPLETE\n")
     r = w.step()
     gate = (r.prompts("teamlead:triage") or [""])[0]
     check("the fallback's review in → the gate triage",
@@ -1311,7 +1314,8 @@ def gate_loop(tmp: Path, fallback: bool) -> None:
     def review(k: int) -> None:
         if fallback:
             w.attempt("failed: codex is down")
-            (w.pkg / f"opus-review-r{k}.md").write_text("| # | finding |\n")
+            (w.pkg / f"opus-review-r{k}.md").write_text(
+                "| # | finding |\nVerification: COMPLETE\n")
         else:
             w.codex_review(k)
 
@@ -1830,7 +1834,60 @@ def case_baseline_absent_at_base_does_not_halt(tmp: Path) -> None:
           r.code == 1 and "halt:" in r.out and not r.kinds(), r.detail())
 
 
+def case_incomplete_gate_retry(tmp: Path) -> None:
+    for fallback in (False, True):
+        w = World(tmp / str(fallback))
+        all_approved(w)
+        w.step()
+        name = "opus-review-r1.md" if fallback else "codex-gate-r1.md"
+        report = w.pkg / name
+        w.pkg.mkdir(exist_ok=True)
+        report.write_text("Verification: CANNOT_RUN\n"
+                          "Unresolved check: multi-step caller probe needs "
+                          "dependencies\n")
+        w.attempt("failed: no login" if fallback else f"done: {report}")
+        r = w.step()
+        check(f"incomplete gate ({fallback}) blocks triage and closure",
+              r.code == 1 and "multi-step caller" in r.out
+              and not r.kinds() and "final-report.md" not in r.out, r.detail())
+        for status in ("", "Verification: COMPLETE\nVerification: CANNOT_RUN\n",
+                       "Verification: COMPLETE\nVerification: COMPLETE\n"):
+            report.write_text(status)
+            r = w.step()
+            check(f"missing or conflicting status ({fallback}) blocks routing",
+                  r.code == 1 and not r.kinds(), r.detail())
+        report.write_text("Verification: CANNOT_RUN\n"
+                          "Unresolved check: caller probe needs dependencies\n")
+        # A forged approval cannot bypass completion checking.
+        w.gate_triage(1, "APPROVED")
+        r = w.step()
+        check(f"incomplete gate ({fallback}) cannot approve via triage",
+              r.code == 1 and "final-report.md" not in r.out, r.detail())
+        w.gate_triage(1, "NEEDS_REWORK")
+        w.rework_brief(1, 2)
+        r = w.step()
+        check(f"incomplete gate ({fallback}) cannot consume a code-rework round",
+              r.code == 1 and not r.kinds(), r.detail())
+        (w.run / "briefs/impl-ws1-r2.md").unlink()
+        before = w.read("base-sha.txt")
+        r = w.step("--retry-gate")
+        check(f"retry ({fallback}) preserves verifier base and rounds",
+              any("review_package.py" in c for c in r.commands())
+              and w.read("base-sha.txt") == before
+              and not (w.run / "briefs/impl-ws1-r2.md").exists(), r.detail())
+        w.codex_review(2)
+        r = w.step()
+        check(f"successful retry ({fallback}) permits normal triage",
+              r.kinds() == ["teamlead:triage"]
+              and "triage-gate-r2.md" in r.out, r.detail())
+        w.gate_triage(2, "APPROVED")
+        r = w.step()
+        check(f"successful retry ({fallback}) permits closure",
+              r.code == 0 and "final-report.md" in r.out, r.detail())
+
+
 CASES = [
+    case_incomplete_gate_retry,
     case_exit_codes,
     case_kickoff_prints_baseline_verifier,
     case_dependent_stream_waits,

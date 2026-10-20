@@ -878,9 +878,13 @@ def prompt_for_review_tree(prompt: str, repo: Path) -> str:
     Only the repository declaration changes; all task context remains byte-for-byte
     identical so isolation cannot accidentally alter what the reviewer is grading.
     """
-    return REPO_RE.sub(
-        lambda match: f"- Repo / worktree: `{repo}`", prompt, count=1
-    )
+    match = REPO_RE.search(prompt)
+    if match is None:
+        raise Fail("PROMPT.md has no repository declaration")
+    original = match.group(1)
+    # Preserve lexical paths too (for example /var versus /private/var on macOS).
+    return prompt.replace(original, str(repo))
+
 
 
 def codex_command(codex: str, repo: Path, review: Path, network: bool) -> list[str]:

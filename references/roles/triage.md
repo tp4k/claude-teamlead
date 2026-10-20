@@ -91,6 +91,22 @@ For STOP, supply findings history and the possible root cause: ambiguous spec, i
 
 After every workstream is approved, the gate reviews the whole diff, with Codex or, when Codex cannot run, the bundled `code-reviewer`. Your prompt names the gate review, the gate number K and the reviewed HEAD. Triage it with this file's rules and write `$RUN/triage-gate-r<K>.md` in the same shape. A gate review row names a file, not a workstream: assign each row to the workstream whose scope holds the file. For each workstream with a row, write the rework brief your prompt names (`impl-ws<N>-r<M+1>.md`, or `docs-ws<N>-r<M>.md` when its rows are docs only). The verdict is the worst across workstreams, a gate with no blocking row is APPROVED or APPROVED_WITH_NOTES, and the rework count your prompt gives includes earlier gate rounds. A gate NEEDS_DECISION is taken as APPROVED_WITH_NOTES with its choices logged.
 
+For a cumulative gate, classify each row by responsibility: a newly exposed
+regression in the deliverable, a faulty plan assumption, untouched pre-existing
+behavior, or an optional improvement. Compare at the review base, not merely the
+run's verification base. A genuine caller-level defect is not optional merely
+because its file belongs to an earlier run. Assign it to an owning workstream;
+explicitly expand its complete scope fence when necessary. Record faulty plan
+assumptions and the corrected contract in the rework brief. Untouched pre-existing
+behavior and optional improvements go to Notes with evidence, unless the task
+requires their correction. Do not turn a speculative risk into a confirmed defect.
+
+A review with `Verification: CANNOT_RUN` or no verification status cannot be
+approved or routed into code rework. Resolve the named execution blocker and
+use `next.py <run> --retry-gate`. This reruns the gate without advancing a
+workstream round or consuming reworkCap. COMPLETE means essential verification
+is complete, not that the review has no findings.
+
 ## Output — the triage file
 
 Write `$RUN/triage-r<M>.md` (`$RUN/triage-ws<N>-r<M>.md` when your prompt says several workstreams share the run):

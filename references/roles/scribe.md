@@ -23,6 +23,7 @@ Write `$RUN/final-report.md`. It is 5–12 lines, for the user, and it contains:
 - **Delivered** — one line per workstream: what now works, in the user's terms.
 - **Commits** — the hashes from `git log --oneline`, with their subjects.
 - **Who did what** — agent roles and rounds, e.g. "2 rounds, 9 agents: planner, 2 implementers, verifier, 3 reviewers, triage, scribe".
+- **Review verification:** report the final gate’s review and verification bases, executed caller-level checks and observed results, and remaining limitations. Distinguish independently executed probes from inherited suite results.
 - **Manual checks:** always include this section. Identify UI, audio, feel, or runtime behavior requiring a human check. Use none only after establishing that no useful manual check remains.
 - **Notes:** relay the final triage's Notes. The user decides whether to accept or schedule them. Do not omit or summarize away individual items.
 - **Deferred / demoted / pre-existing:** cite the ledger path, appended count, and uncommitted status. Use none when there were no deferrals. Do not repeat ledger rows. Report pre-existing failures fully because the ledger excludes them.

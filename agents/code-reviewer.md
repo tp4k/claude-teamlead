@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: 'Reviews a change when Codex cannot run and opusCodeReview=fallback. Reads review-package/PROMPT.md (or the gate's codex-gate-package/PROMPT.md) and writes its required answer. Only codex-review and the delegate gate dispatch this agent. Never runs alongside Codex or repairs findings.'
+description: 'Reviews a change when Codex cannot run and opusCodeReview=fallback. Reads review-package/PROMPT.md (or the gate''s codex-gate-package/PROMPT.md) and writes its required answer. Only codex-review and the delegate gate dispatch this agent. Never runs alongside Codex or repairs findings.'
 model: opus
 color: magenta
 tools: ["Read", "Grep", "Glob", "Bash", "Write"]

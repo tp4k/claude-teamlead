@@ -135,6 +135,11 @@ def summary(out: str) -> tuple[str, dict[str, int]]:
     return m.group(1), dict(zip(FIELDS, map(int, m.groups()[1:])))
 
 
+def without_note(out: str) -> str:
+    """stdout minus the `NOTE:` line, which names exempt paths by design."""
+    return "\n".join(ln for ln in out.splitlines() if not ln.startswith("NOTE:"))
+
+
 def write_probes(repo: Repo, probes: list[dict[str, str]]) -> str:
     path = repo.root.parent / "probes.json"
     path.write_text(json.dumps(probes))
@@ -607,6 +612,148 @@ def case_prose_lines_not_mutated(tmp: Path) -> None:
           out + err)
 
 
+MUTATED = re.compile(r"^SURVIVED  (\S+):(\d+)  op=", re.M)
+LOCK_LINES = "peer: ^3.25.76 || ^4.1.8\nresolved: a == b\nflag: true\n"
+MANIFEST_BASE = """{
+  "name": "app",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ai": "^6.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "zod": "^3.0.0"
+    }
+  }
+}
+"""
+MANIFEST_BUMP = """{
+  "name": "app",
+  "version": "1.1.0",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "test": "vitest run && tsc --noEmit",
+    "gen": "node gen.js || true"
+  },
+  "dependencies": {
+    "ai": "^7.0.150",
+    "zod": "^3.25.76 || ^4.1.8"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "zod": "^3.25.76"
+    }
+  },
+  "engines": {
+    "node": ">=22 || >=20"
+  }
+}
+"""
+LOCKFILE_NAMES = ("pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json",
+                  "yarn.lock", "bun.lock", "Cargo.lock", "poetry.lock",
+                  "uv.lock", "Pipfile.lock", "Gemfile.lock", "go.sum",
+                  "composer.lock")
+
+
+def mutated_files(out: str) -> set[tuple[str, int]]:
+    return {(f, int(n)) for f, n in MUTATED.findall(out)}
+
+
+def case_lockfile_only_change_has_no_mutant(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    for name in LOCKFILE_NAMES:
+        repo.write(name, "old: 1\n")
+    repo.write("packages/ui/pnpm-lock.yaml", "old: 1\n")
+    repo.write("apps/server/package.json", MANIFEST_BASE)
+    repo.base = repo.commit("base locks")
+    for name in LOCKFILE_NAMES:
+        repo.write(name, LOCK_LINES)
+    repo.write("packages/ui/pnpm-lock.yaml", LOCK_LINES)
+    repo.write("apps/server/package.json", MANIFEST_BASE.replace(
+        '"ai": "^6.0.0"', '"ai": "^7.0.150"').replace(
+        '"version": "1.0.0"', '"version": "1.1.0"'))
+    commit = repo.commit("stream: bump deps")
+    report = tmp / "mutation.md"
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--max-generic", "1000", "--out", str(report))
+    verdict, n = summary(out)
+    notes = [ln for ln in out.splitlines() if ln.startswith("NOTE:")]
+    text = report.read_text() if report.exists() else ""
+    check("a lockfile and dependency-bump change yields no mutant: PASS with "
+          "every count 0, exit 0",
+          code == 0 and verdict == "PASS" and sum(n.values()) == 0
+          and not mutated_files(out) and repo.status() == "", out + err)
+    check("that PASS carries a NOTE naming each exempt file, on stdout and in "
+          "--out, with the MUTATION line still last",
+          len(notes) == 1 and "nothing mutable changed" in notes[0]
+          and "pnpm-lock.yaml (lockfile)" in notes[0]
+          and "apps/server/package.json (no mutable line)" in notes[0]
+          and notes[0] in text
+          and text.strip().splitlines()[-1].startswith("MUTATION: PASS"),
+          out + err + text)
+
+
+def case_code_beside_lockfile_still_mutated(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("pnpm-lock.yaml", "old: 1\n")
+    repo.base = repo.commit("base lock")
+    repo.write("pnpm-lock.yaml", LOCK_LINES)
+    repo.write("src/flag.ts", "export const on = a == b || c;\n")
+    commit = repo.commit("stream: code and lock")
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--max-generic", "1000")
+    hit = mutated_files(out)
+    check("a code file changed beside a lockfile still gets generic mutants; "
+          "the lockfile none, and no NOTE",
+          code == 1 and ("src/flag.ts", 1) in hit
+          and not any(f == "pnpm-lock.yaml" for f, _ in hit)
+          and "NOTE:" not in out and repo.status() == "", out + err)
+
+
+def case_manifest_scripts_mutated_dependency_data_not(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write("package.json", MANIFEST_BASE)
+    repo.base = repo.commit("base manifest")
+    repo.write("package.json", MANIFEST_BUMP)
+    commit = repo.commit("stream: manifest")
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--max-generic", "1000")
+    lines = {n for f, n in mutated_files(out) if f == "package.json"}
+    script_lines = {repo.line_of("package.json", '"test": "vitest run &&'),
+                    repo.line_of("package.json", '"gen":')}
+    data_needles = ('"version":', '"packageManager":', '"ai":', '"zod": "^3.25.76 ||',
+                    '"devDependencies":', '"vitest":', '"zod": "^3.25.76"',
+                    '"engines":', '"node":')
+    data_lines = {repo.line_of("package.json", needle) for needle in data_needles}
+    check("package.json `scripts` lines are mutated; dependency sections at "
+          "any depth, `engines`, and top-level version/packageManager are not",
+          script_lines <= lines and not lines & data_lines and code == 1
+          and repo.status() == "", f"{sorted(lines)} data={sorted(data_lines)}\n"
+          + out + err)
+
+
+def case_linguist_generated_not_mutated(tmp: Path) -> None:
+    repo = Repo(tmp / "repo")
+    repo.write(".gitattributes", "docs/contracts/*.json linguist-generated\n")
+    repo.base = repo.commit("base attributes")
+    repo.write("docs/contracts/api.json", '{\n  "ok": true\n}\n')
+    repo.write("docs/handwritten.json", '{\n  "ok": true\n}\n')
+    commit = repo.commit("stream: contracts")
+    code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
+                            "--max-generic", "1000")
+    hit = {f for f, _ in mutated_files(out)}
+    check("a file .gitattributes marks linguist-generated is never mutated; "
+          "an unmarked JSON file still is",
+          "docs/handwritten.json" in hit and "docs/contracts/api.json" not in hit
+          and repo.status() == "", out + err)
+
+
 def case_untracked_or_linked_targets_refused(tmp: Path) -> None:
     outside = tmp / "outside.txt"
     outside.write_text("secret == value\n")
@@ -631,7 +778,9 @@ def case_untracked_or_linked_targets_refused(tmp: Path) -> None:
     code, out, err = mutate(repo, "--cmd", "true", "--commits", commit,
                             "--max-generic", "1000")
     check("a generic run whose only changed path is a symlink mutates nothing",
-          outside.read_text() == "secret == value\n" and "link.txt" not in out
+          outside.read_text() == "secret == value\n"
+          and "link.txt" not in without_note(out)
+          and "link.txt (not a tracked regular file)" in out
           and repo.status() == "", f"{code} {out}{err}")
     repo = Repo(tmp / "repo3")
     repo.write("sub/a.py", "secret = 1\n")
@@ -769,7 +918,7 @@ def case_glob_named_symlink_refused(tmp: Path) -> None:
                             "--max-generic", "1000")
     check("a generic run does not reach real.py through a glob-named symlink",
           (repo.root / "real.py").read_bytes() == original and repo.status() == ""
-          and "a*.py" not in out, f"{code} {repo.status()} {out}{err}")
+          and "a*.py" not in without_note(out), f"{code} {repo.status()} {out}{err}")
 
 
 def case_glob_named_ignored_file_refused(tmp: Path) -> None:
@@ -1082,6 +1231,10 @@ CASES = [
     case_sampling_is_not_file_order,
     case_interrupt_exit_code,
     case_prose_lines_not_mutated,
+    case_lockfile_only_change_has_no_mutant,
+    case_code_beside_lockfile_still_mutated,
+    case_manifest_scripts_mutated_dependency_data_not,
+    case_linguist_generated_not_mutated,
     case_untracked_or_linked_targets_refused,
     case_deleted_file_in_stream,
     case_test_command_output_not_on_stdout,

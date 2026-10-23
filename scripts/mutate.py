@@ -26,9 +26,22 @@ Mutants, in run order:
     flip `==`/`!=`, `<`/`<=`, `&&`/`||`, `true`/`false`, drop `return`, drop
     `await`. Blank lines, comment-only lines, bare-string/docstring lines in `.py`
     files, files ending `.md`/`.markdown`/`.rst`, test files, and paths that are
-    not tracked regular files inside the repo are skipped. They are sampled by
+    not tracked regular files inside the repo are skipped. So is data no test
+    can pin: lockfiles (by basename: `pnpm-lock.yaml`, `package-lock.json`,
+    `yarn.lock`, `Cargo.lock`, `go.sum`, ... see LOCKFILES), files
+    `.gitattributes` marks `linguist-generated`, and the dependency data of a
+    `package.json`: every line inside a `dependencies`, `devDependencies`,
+    `peerDependencies`, `optionalDependencies`, `bundledDependencies`,
+    `peerDependenciesMeta`, `overrides`, `resolutions` or `engines` object at
+    any depth, and the top-level `version` and `packageManager` lines. Its
+    `scripts` and every other line stay mutable. Candidates are sampled by
     sha256 of `file:line` (stable across runs and machines), at most
     `--max-generic` of them.
+
+When there is nothing to mutate (no probe, and no changed line is a candidate),
+the gate still prints `MUTATION: PASS` with every count 0, preceded by a
+`NOTE: nothing mutable changed ...` line naming each changed file and why it
+is exempt. That PASS means "nothing to measure", not "the tests pin every line".
 
 Stream scope: parallel implementers share one tree, so candidates are the lines
 this stream changed, never the whole `<base>..HEAD` range. With `--commits`
@@ -81,6 +94,20 @@ DEFAULT_MAX_GENERIC = 20
 DEFAULT_TIME_BOX = 600.0
 COMMENT_PREFIXES = ("#", "//", "/*", "*", "--")
 PROSE_SUFFIXES = (".md", ".markdown", ".rst")
+LOCKFILES = frozenset((
+    "pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
+    "bun.lock", "bun.lockb", "Cargo.lock", "poetry.lock", "uv.lock",
+    "Pipfile.lock", "Gemfile.lock", "go.sum", "composer.lock",
+))
+MANIFEST = "package.json"
+# package.json objects that hold dependency data, not behaviour: a range there
+# is pinned by the lockfile and the install, never by a test.
+MANIFEST_DATA_SECTIONS = frozenset((
+    "dependencies", "devDependencies", "peerDependencies",
+    "optionalDependencies", "bundledDependencies", "bundleDependencies",
+    "peerDependenciesMeta", "overrides", "resolutions", "engines",
+))
+MANIFEST_DATA_KEYS = frozenset(("version", "packageManager"))
 REGULAR_FILE_MODES = ("100644", "100755")
 KILL_GRACE = 5.0
 # How often a running test command is checked for a recorded signal.
@@ -260,6 +287,61 @@ def stream_lines(repo: str, base: str, commits: list[str],
     return found
 
 
+JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+JSON_KEY = re.compile(r'^\s*"((?:[^"\\]|\\.)*)"\s*:')
+
+
+def manifest_data_lines(text: str) -> set[int]:
+    """Lines of a pretty-printed package.json that hold dependency data.
+
+    A line's path is the keys of the objects open at its start plus its own
+    key. It is data when that path passes through a MANIFEST_DATA_SECTIONS key,
+    or when it is a top-level MANIFEST_DATA_KEYS entry. A manifest not laid out
+    one entry per line (minified) stays mutable.
+    """
+    found: set[int] = set()
+    stack: list[Optional[str]] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        m = JSON_KEY.match(line)
+        key = m.group(1) if m else None
+        path = [k for k in stack if k] + ([key] if key else [])
+        top_level = len(stack) == 1 and key in MANIFEST_DATA_KEYS
+        if top_level or any(k in MANIFEST_DATA_SECTIONS for k in path):
+            found.add(number)
+        bare = JSON_STRING.sub('""', line)
+        opened = bare.count("{") + bare.count("[")
+        closed = bare.count("}") + bare.count("]")
+        for _ in range(closed - opened):
+            if stack:
+                stack.pop()
+        for i in range(opened - closed):
+            stack.append(key if i == 0 else None)
+    return found
+
+
+def generated(repo: str, path: str) -> bool:
+    """`.gitattributes` marks `path` linguist-generated."""
+    try:
+        out = git(repo, "check-attr", "-z", "linguist-generated", "--", path)
+    except GitError:
+        return False
+    fields = out.split("\0")
+    return len(fields) >= 3 and fields[2] in ("set", "true")
+
+
+def exempt_file(repo: str, path: str) -> Optional[str]:
+    """Why no line of `path` is a generic candidate, or None."""
+    if TEST_PATH.search(path):
+        return "test"
+    if path.endswith(PROSE_SUFFIXES):
+        return "prose"
+    if Path(path).name in LOCKFILES:
+        return "lockfile"
+    if generated(repo, path):
+        return "generated"
+    return None
+
+
 def sample_key(file: str, line: int) -> str:
     return hashlib.sha256(f"{file}:{line}".encode()).hexdigest()
 
@@ -268,21 +350,23 @@ def generic_mutants(repo: str, scope: dict[str, set[int]],
                     cap: int) -> list[Mutant]:
     keyed: list[tuple[str, str, int, int, Mutant]] = []
     for path, numbers in scope.items():
-        if TEST_PATH.search(path) or path.endswith(PROSE_SUFFIXES):
+        if exempt_file(repo, path):
             continue
         target = Path(repo) / path
         if not tracked_regular_file(repo, path) or not target.is_file():
             continue
         content = read_text(target)
         lines = content.splitlines(keepends=True)
-        prose = docstring_lines(content) if path.endswith(".py") else set()
+        skipped = docstring_lines(content) if path.endswith(".py") else set()
+        if Path(path).name == MANIFEST:
+            skipped = manifest_data_lines(content)
         for number in sorted(numbers):
             if not 1 <= number <= len(lines):
                 continue
             raw = lines[number - 1]
             body = raw.rstrip("\r\n")
             ending = raw[len(body):]
-            if number in prose or not is_candidate_line(body):
+            if number in skipped or not is_candidate_line(body):
                 continue
             for idx, (op, text) in enumerate(generic_mutations(body)):
                 replacement = "" if op == DELETE_LINE else text + ending
@@ -454,13 +538,30 @@ def describe(row: Row) -> str:
     return f"{row.result}  {where}  {kind}={one_line(m.label)}"
 
 
-def write_report(path: str, rows: list[Row], summary: str) -> None:
+def write_report(path: str, rows: list[Row], summary: str,
+                 note: str = "") -> None:
     lines = ["| file | line | op / probe | result |", "|---|---|---|---|"]
     for r in rows:
         m = r.mutant
         label = m.label.replace("|", "\\|").replace("\n", " ")
         lines.append(f"| {m.file} | {m.line or '-'} | {label} | {r.result} |")
-    Path(path).write_text("\n".join(lines) + f"\n\n{summary}\n")
+    tail = f"{note}\n\n{summary}" if note else summary
+    Path(path).write_text("\n".join(lines) + f"\n\n{tail}\n")
+
+
+def nothing_mutable_note(repo: str, scope: dict[str, set[int]]) -> str:
+    """The NOTE line for a run that has no mutant to try."""
+    if not scope:
+        return ("NOTE: nothing mutable changed: this stream changed no line, "
+                "so this PASS measured nothing")
+    files = []
+    for path in sorted(scope):
+        reason = exempt_file(repo, path)
+        if not reason and not tracked_regular_file(repo, path):
+            reason = "not a tracked regular file"
+        files.append(f"{one_line(path)} ({reason or 'no mutable line'})")
+    return ("NOTE: nothing mutable changed: every changed line is exempt, so "
+            "this PASS measured nothing: " + ", ".join(files))
 
 
 def summarize(rows: list[Row]) -> tuple[str, int]:
@@ -523,11 +624,13 @@ def run(args: argparse.Namespace) -> int:
         print(f"usage error: {exc}", file=sys.stderr)
         return EXIT_USAGE
     queue = probes + generic_mutants(repo, scope, args.max_generic)
+    nothing = not queue and not generic_mutants(repo, scope, 1)
+    note = nothing_mutable_note(repo, scope) if nothing else ""
     _signalled.clear()
     old_handlers = {s: signal.signal(s, on_signal)
                     for s in (signal.SIGTERM, signal.SIGINT)}
     try:
-        return run_queue(repo, queue, args)
+        return run_queue(repo, queue, args, note)
     finally:
         for s, handler in old_handlers.items():
             signal.signal(s, handler)
@@ -553,7 +656,8 @@ def unmutated_failure(repo: str, args: argparse.Namespace,
     return None
 
 
-def run_queue(repo: str, queue: list[Mutant], args: argparse.Namespace) -> int:
+def run_queue(repo: str, queue: list[Mutant], args: argparse.Namespace,
+              note: str = "") -> int:
     deadline = time.monotonic() + args.time_box
     rows: list[Row] = []
     try:
@@ -586,7 +690,9 @@ def run_queue(repo: str, queue: list[Mutant], args: argparse.Namespace) -> int:
             return EXIT_CANNOT_RUN
         summary, code = summarize(rows)
         if args.out:
-            write_report(args.out, rows, summary)
+            write_report(args.out, rows, summary, note)
+        if note:
+            print(note)
         print(summary)
         return code
     except Terminated as exc:

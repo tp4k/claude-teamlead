@@ -42,7 +42,7 @@ When your prompt says it is a baseline check at the base SHA, run the brief's co
 Run these after every brief command. Your prompt supplies each command line. They move HEAD or patch files in the shared checkout and put them back, so they run only in the verifier phase, while every repository writer is idle.
 
 1. **RED run** — only when this round has a RED commit. The command is `red_freeze.py` with its run option and this round's RED hash alone: an earlier RED predates this round's tests. It checks the RED commit out in place, runs the targeted tests there and restores the branch. Copy its `RED run <sha>: exit <n>` block, and any `RED_FROZEN`, `RED_CHANGED` or `RED_PASSES` line, verbatim under `## RED run`, with every pasted line prefixed `> ` (a quoted block). Exit 1 is a result to report, not a failure of yours: reviewers judge a changed or passing RED. Exit 2 (for example a dirty tree) is `CANNOT_RUN`.
-2. **Mutation gate** — `mutate.py --commits <the hashes from the implementer report's ## Commits>`, with `--check-cmd` taken from the brief's `check:` line when one exists and `--probes $RUN/probes-ws<N>-r<M>.json` when that file exists. Its test command is the brief's commands that are not pre-existing. Run it only when every such command passed. If one failed, skip it and write `not run — <command> failed` under `## Mutation`. The gate writes `$RUN/mutation-ws<N>-r<M>.md` itself (`mutation-r<M>.md` for one stream): never edit it. Copy its last line, `MUTATION: PASS|FAIL killed=<n> survived=<n> ...`, under `## Mutation`.
+2. **Mutation gate** — `mutate.py --commits <the hashes from the implementer report's ## Commits>`, with `--check-cmd` taken from the brief's `check:` line when one exists and `--probes $RUN/probes-ws<N>-r<M>.json` when that file exists. Its test command is the brief's commands that are not pre-existing. Run it only when every such command passed. If one failed, skip it and write `not run — <command> failed` under `## Mutation`. The gate writes `$RUN/mutation-ws<N>-r<M>.md` itself (`mutation-r<M>.md` for one stream): never edit it. Copy its last line, `MUTATION: PASS|FAIL killed=<n> survived=<n> ...`, under `## Mutation`. When a `NOTE: nothing mutable changed ...` line precedes it, copy that line too: the stream changed only lines the gate never mutates (lockfiles, `package.json` dependency data, files `.gitattributes` marks `linguist-generated`, tests, prose, comments), so that PASS measured nothing and reviewers must know it.
 
 Exit 0 is PASS and 1 is FAIL: a surviving mutant or an unapplied probe. Exit 2 (usage) and 3 (dirty tree, the test command failing or not finishing on the unmutated tree, interrupted, restore failed) are `CANNOT_RUN`. UNCLASSIFIED and NOT RUN rows are reported in the mutation file and do not fail the gate. Let the gate finish within its own time box; if you must stop it, send SIGTERM so it restores the file it is mutating. A `MUTATION: FAIL` makes `OUTCOME: FAIL`, even though every brief command passed. Never write the survivors up as a note beside `OUTCOME: PASS`: the next phase spawns reviewers on PASS, and a survivor is a test that pins nothing.
 
@@ -83,7 +83,7 @@ tree: CLEAN | DIRTY | CHANGED | UNCHECKED
 
 ## Mutation
 
-<the last `MUTATION:` line from the gate and the path of the mutation file; or `not run — <why>`; or `none — baseline check`>
+<the last `MUTATION:` line from the gate, preceded by its `NOTE:` line when it printed one, and the path of the mutation file; or `not run — <why>`; or `none — baseline check`>
 
 ## Pre-existing analysis
 

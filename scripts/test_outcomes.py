@@ -15,7 +15,7 @@ import review_briefs
 import run_config
 import run_metrics
 import workflow_profile
-from test_next import World, git
+from test_next import World, all_approved, git
 
 
 class Outcomes(unittest.TestCase):
@@ -107,6 +107,43 @@ class Outcomes(unittest.TestCase):
         w.put("config.json", json.dumps(config))
         w.rework_brief(1, 2)
         self.assertEqual(workflow_profile.selection(w.run)[0], "standard")
+
+    def test_gate_retry_records_completed_attempt(self) -> None:
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                w = World(self.root / str(failed))
+                all_approved(w)
+                self.assertIn("--final-gate", w.step().out)
+                phase = next(iter(run_metrics.read(w.run)["phases"]))
+                if failed:
+                    w.attempt("failed: no login")
+                else:
+                    w.pkg.mkdir(exist_ok=True)
+                    report = w.pkg / "codex-gate-r1.md"
+                    report.write_text("Verification: CANNOT_RUN\n"
+                                      "Unresolved check: dependencies unavailable\n")
+                    report.with_suffix(".jsonl").write_text(json.dumps({
+                        "type": "turn.completed", "usage": {
+                            "input_tokens": 100, "cached_input_tokens": 40,
+                            "output_tokens": 20,
+                        },
+                    }) + "\n")
+                    w.attempt(f"done: {report}")
+                retry = w.step("--retry-gate")
+                self.assertEqual(retry.code, 0, retry.detail())
+                self.assertIn("Codex gate 2", retry.out)
+                phases = run_metrics.read(w.run)["phases"]
+                self.assertIsNotNone(phases[phase]["durationSeconds"])
+                self.assertEqual(phases[phase]["tokens"],
+                                 {"cached": None, "uncached": None, "output": None}
+                                 if failed else
+                                 {"cached": 40, "uncached": 60, "output": 20})
+                self.assertEqual(len(phases), 2)
+                w.codex_review(2)
+                self.assertEqual(w.step().kinds(), ["teamlead:triage"])
+                w.gate_triage(2, "APPROVED")
+                self.assertIn("final-report.md", w.step().out)
+                self.assertIsNotNone(run_metrics.totals(w.run)["seconds"])
 
     def test_missing_mutation_and_stale_verifier_cannot_skip_to_gate(self) -> None:
         w = self.eligible()

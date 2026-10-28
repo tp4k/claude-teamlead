@@ -264,9 +264,10 @@ Output: write $RUN/plan.md, $RUN/briefs/impl-ws<N>-r1.md per workstream, then $R
 
 **V — plan validator** (`teamlead:plan-validator`)
 ```
-$RUN = <abs>. Repo: <abs>.
-Inputs: $RUN/plan.md, $RUN/repo.txt, CLAUDE.md. <pass 2 (step 6c): the plan was fixed after pass 1 — see ## Fix log; check the corrected claims and new paths only.>
-Output: write $RUN/plan-validation.md, return PLAN_VALID or PLAN_NEEDS_FIX + file line.
+$RUN = <abs>. Repo: <abs>. $PLUGIN = <abs plugin path>.
+workflowProfile: <resolved options.workflowProfile from $RUN/config.json; standard if absent>.
+Inputs: $RUN/plan.md, $RUN/repo.txt, $RUN/config.json, CLAUDE.md. <pass 2 (step 6c): the plan was fixed after pass 1 — see ## Fix log; check the corrected claims and new paths only.>
+Output: write $RUN/plan-validation.md. For adaptive, assess eligibility as the role specifies; after a PLAN_VALID report, run the allowed read-only fingerprint command and write $RUN/workflow-assessment.json when eligible. Return PLAN_VALID or PLAN_NEEDS_FIX + file line.
 ```
 
 **F — planner, Fix mode** (`teamlead:planner`, a fresh one)

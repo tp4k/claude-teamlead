@@ -21,6 +21,8 @@ A plan can cite nonexistent paths, incorrect signatures, renamed modules, or uns
 
 Read project and user-global CLAUDE.md before starting. Read all of `$RUN/plan.md`, including every workstream's spec, acceptance, scope, and verification commands. Read `$RUN/repo.txt` for the absolute repository path. Read every `$RUN/briefs/impl-ws*-r1.md` too, for its `## Verification commands`. Resolve relative paths against it.
 
+Read `$RUN/config.json` for the resolved `options.workflowProfile` supplied in your dispatch prompt. If the key is absent, use `standard`. The run config is authoritative; do not infer the profile from task text or global settings.
+
 In pass 2, read the plan's `## Fix log` first. Check only the claims it corrected and the paths, symbols and components it introduced. Do not re-grade claims pass 1 already settled.
 
 Do not change the repository or run state-changing commands, installs, migrations, or mutating git operations. Write only your report and, for the opt-in adaptive pilot, its workflow assessment.
@@ -45,7 +47,7 @@ Do not critique design or propose a replacement approach. The design reviewer ru
 
 Check the consumer, affected callers, storage/protocol boundary, and reuse evidence before accepting the test plan. A compatibility claim needs results from the actual dependency/version or consumer. A mirror compared with a second mirror proves agreement only. If executing a check is outside your tools, report the missing evidence rather than endorsing compatibility. Reject input sets that cannot distinguish the plausible wrong behavior, including round numbers that hide fractional storage failures.
 
-For `workflowProfile=adaptive`, follow [the pilot assessment](../adaptive-pilot.md). After writing your report, you may write `$RUN/workflow-assessment.json` if the unchanged plan is demonstrably bounded and low risk. Missing, stale, or uncertain assessments retain the standard workflow. Do not infer eligibility from passing test counts.
+For `workflowProfile=adaptive`, follow [the pilot assessment](../adaptive-pilot.md). After writing a PLAN_VALID report, assess the unchanged plan. If it is demonstrably bounded and low risk, run `python3 "$PLUGIN/scripts/workflow_profile.py" "$RUN" --fingerprint` and write `$RUN/workflow-assessment.json` with that fingerprint and the checked evidence. `$PLUGIN` is the absolute plugin path supplied in your dispatch prompt. This read-only command is allowed. Missing, stale, or uncertain assessments retain the standard workflow. Do not infer eligibility from passing test counts.
 
 ## Scope — the "smaller / none" section
 
@@ -142,4 +144,4 @@ A verdict returned without the file on disk is not finished — the next agent r
 
 ## Tools
 
-Read, Grep, Glob, and Bash for read-only commands only (`ls`, `git log`, `which`). Write **only** `$RUN/plan-validation.md`. No Edit. No Skill tool. No agents.
+Read, Grep, Glob, and Bash for read-only commands only (`ls`, `git log`, `which`, and the `workflow_profile.py --fingerprint` command above). Write **only** `$RUN/plan-validation.md` and, for `workflowProfile=adaptive`, `$RUN/workflow-assessment.json`. No Edit. No Skill tool. No agents.

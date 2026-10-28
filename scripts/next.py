@@ -1420,7 +1420,13 @@ def decide(run: Path, argv: list[str]) -> int:
     router = Router(run, args)
     print(f"RUN={run}")
     print(f"repo={router.repo}")
-    if not args.redo and not args.retry_gate:
+    pending_gate = as_dict(as_dict(router.state.get("dispatch")).get("gate"))
+    # A retry bypasses the normal wait, but must record an already completed
+    # attempt before remember() replaces its dispatch and metric phase.
+    retry_completed = (args.retry_gate and bool(pending_gate)
+                       and len(terminals(Path(str(pending_gate.get("log")))))
+                       > as_int(pending_gate.get("count")))
+    if (not args.redo and not args.retry_gate) or retry_completed:
         waited = wait_pending(router, args)
         if waited is not None:
             return waited

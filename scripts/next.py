@@ -80,6 +80,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import current_brief
+import run_metrics
+import workflow_profile
 import archive_reports
 import paths
 import review_briefs
@@ -296,10 +299,12 @@ class Router:
         else the user's binding answers, else none."""
         own = self.run / f"settled-{self.r.tag(ws, rnd)}.md"
         if own.exists():
-            return own.read_text(errors="replace")
+            return (own.read_text(errors="replace") + "\n"
+                    + current_brief.decision_text(self.run))
         m = re.search(r"^##\s+Answers\s*$(.*?)(?=^##\s|\Z)",
                       self.r.text("questions.md"), re.M | re.S)
-        return m.group(1).strip() if m else ""
+        answers = m.group(1).strip() if m else ""
+        return answers + "\n" + current_brief.decision_text(self.run)
 
     @staticmethod
     def section_commands(brief: Path, text: str, sec: re.Match[str]) -> list[BriefCmd]:
@@ -619,7 +624,11 @@ class Router:
                        "did not run, and a pass without it measures nothing")
         if self.gate_driven(ws, rnd):
             return None
-        if self.stale(ws, rnd, ver):
+        adaptive = workflow_profile.selection(self.run)[0] == "adaptive"
+        snapshot = SNAPSHOT_HEAD.search(ver.read_text(errors="replace"))
+        adaptive_stale = (adaptive and snapshot is not None
+                          and self.resolve(snapshot.group(1)) != self.head())
+        if adaptive_stale or self.stale(ws, rnd, ver):
             # Another stream's rework moved HEAD after this report: reviewers
             # would stop on its `head:`, so verify the new HEAD first.
             try:
@@ -628,6 +637,10 @@ class Router:
                 raise Halt(f"{ver.name} names an earlier HEAD and could not be "
                            f"archived: {exc}") from exc
             return Need("verify", ws, rnd)
+        if adaptive:
+            if outcome != "PASS" or not snapshot:
+                return self.review_need(ws, rnd)
+            return None
         return self.review_need(ws, rnd)
 
     def stale(self, ws: int, rnd: int, ver: Path) -> bool:
@@ -661,8 +674,13 @@ class Router:
                 "APPLIED row is a test that pins nothing)\n\n"
                 "## What to fix\n\n"
                 "Make every command in the verifier report pass and kill every "
-                "surviving mutant: strengthen the test, not the production code, "
-                "unless the failure is in the production code.\n\n" + section + "\n")
+                "non-equivalent mutant with an observable requirement. Investigate "
+                "invalid or equivalent mutations before prescribing tests. Do not "
+                "change assertions merely to match a suggested fix.\n\n"
+                + section + "\n")
+        cause = "mutation" if self.mutation(ws, rnd) == "FAIL" else "verification"
+        run_metrics.event(self.run, "rework", f"ws{ws}-r{rnd + 1}",
+                          cause, ver.name)
         return self.analyse(ws)
 
     def review_need(self, ws: int, rnd: int) -> Need:
@@ -686,10 +704,22 @@ class Router:
 
     def implementer(self, ws: int, rnd: int) -> Spawn:
         out = self.run / f"implementer-{self.r.tag(ws, rnd)}.md"
+        view = current_brief.write(self.run, ws, rnd)
+        if rnd > 1 and not any(
+                e["kind"] == "rework" and e["id"] == f"ws{ws}-r{rnd}"
+                for e in run_metrics.read(self.run)["events"]):
+            cause = re.search(r"^rework cause:\s*(.+)$",
+                              self.r.brief(ws, rnd).read_text(), re.M)
+            run_metrics.event(self.run, "rework", f"ws{ws}-r{rnd}",
+                              cause.group(1) if cause else
+                              "review finding; detailed attribution unavailable",
+                              self.r.brief(ws, rnd).name)
         lines = [
             self.head_line(),
             f"Workstream: WS-{ws} ({review_briefs.ws_name(self.r, ws)}). Round: "
-            f"{rnd}. Your brief: {self.r.brief(ws, rnd)} — read it in full first.",
+            f"{rnd}. Your brief: {self.r.brief(ws, rnd)}. "
+            f"Read the current view {view} first; it includes inherited constraints "
+            "and current decisions. Earlier files remain the audit trail.",
         ]
         if rnd >= 2:
             lines.append("This is a rework round — follow \"## Rework rounds\"; the "
@@ -780,8 +810,8 @@ class Router:
             label,
             f"Expected HEAD: {self.head()}. Base: {base}.",
             inputs,
-            f"Baseline at the base: {baseline} — a failure it already shows is "
-            "pre-existing.",
+            f"Baseline at the base: {baseline}. Compare the failure and affected "
+            "callers; old code newly exposed by this change is still a regression.",
             *self.label_lines(labels),
             "After the brief's commands, run these in order, from the repo, while "
             "no writer is active (they move HEAD and restore it):",
@@ -840,6 +870,8 @@ class Router:
             f"Workstream: WS-{ws}. Round: {rnd}. {self.infix_line()}",
             "Reviews: " + ", ".join(str(p) for p in reviews if p) + ". Previous "
             f"triage: {prev if prev else 'none in round 1'}.",
+            f"Current decisions: {current_brief.write_decisions(self.run)}. "
+            "Preserve fix/decline/defer decisions unless new evidence changes them.",
             f"Rework count before this round: {rnd - 1}. reworkCap: {self.r.cap}.",
             f"Output: write {out} and, on NEEDS_REWORK, {nxt}; return the "
             "two-line VERDICT block.",
@@ -879,7 +911,11 @@ class Router:
                        "lines in questions.md form a cycle")
         low = min(n.rank for n in active)
         batch = [n for n in active if n.rank == low]
-        if batch[0].kind == "verify":
+        shared_database = batch[0].kind == "baseline" and any(
+            "verification resource: shared-database" in
+            self.r.brief(n.ws, n.rnd).read_text()
+            for n in batch)
+        if batch[0].kind == "verify" or shared_database:
             batch = batch[:1]
         plan = Plan(step=f"{batch[0].kind} — " + ", ".join(
             f"WS-{n.ws} round {n.rnd}" for n in batch))
@@ -1119,8 +1155,9 @@ class Router:
             self.head_line(),
             f"Gate review: {review}. Gate: {g}. Reviewed HEAD: {self.head()}. "
             f"Verification / rework base: {self.base()}. Review base: see PROMPT.md.",
-            "This is the independent review of the whole diff after every "
-            "workstream was approved. Triage it with your role file.",
+            "This is the independent review of the whole diff after verification "
+            "and any required stream reviews. Triage it with your role file.",
+            f"Current decisions: {current_brief.write_decisions(self.run)}.",
             f"Rework briefs, per workstream, if any row needs one: {rows}.",
             f"Rework count before this round: {max(rounds.values()) - 1}. "
             f"reworkCap: {self.r.cap}.",
@@ -1224,6 +1261,7 @@ class Router:
     # --- close ---------------------------------------------------------------
 
     def close(self) -> Plan:
+        current_brief.write_decisions(self.run)
         plan = Plan(step="11 — every workstream approved, nothing left to review")
         if (self.run / "deferred-rows.md").exists():
             plan.cmds.append(("run", f"{self.script('ledger.py')} apply "
@@ -1321,6 +1359,16 @@ def wait_pending(router: Router, args: argparse.Namespace) -> int | None:
             return 3
         if code == 1:
             print("\n".join(f"note: {ln}" for ln in lines))
+    phase = sent.get("metricPhase")
+    if isinstance(phase, str):
+        run_metrics.finish(router.run, phase)
+        if gate:
+            attempts = terminals(Path(str(gate.get("log"))))
+            recent = attempts[as_int(gate.get("count")):]
+            if recent and all(status == "done" for status, _ in recent):
+                run_metrics.codex_usage(router.run, phase,
+                                        [Path(p).with_suffix(".jsonl")
+                                         for _, p in recent])
     router.state.pop("dispatch", None)
     router.save_state()
     return None
@@ -1337,6 +1385,13 @@ def remember(router: Router, plan: Plan) -> None:
     if plan.gate_log:
         dispatch["gate"] = {"log": plan.gate_log, "count": plan.gate_seen}
     if dispatch:
+        previous = as_dict(router.state.get("dispatch"))
+        same = {k: v for k, v in previous.items() if k != "metricPhase"} == dispatch
+        phase = previous.get("metricPhase") if same else None
+        if not isinstance(phase, str):
+            phase = f"{plan.step} [{time.time_ns()}]"
+        run_metrics.start(router.run, phase)
+        dispatch["metricPhase"] = phase
         router.state["dispatch"] = dispatch
     else:
         router.state.pop("dispatch", None)
@@ -1371,8 +1426,10 @@ def decide(run: Path, argv: list[str]) -> int:
             return waited
     try:
         plan = router.plan()
-    except Halt as exc:
+    except (Halt, ValueError) as exc:
         plan = Plan(halt=str(exc), code=1)
+    profile, reason = workflow_profile.selection(run)
+    print(f"workflow: {profile} — {reason}")
     print("\n".join(render(plan)))
     remember(router, plan)
     return plan.code

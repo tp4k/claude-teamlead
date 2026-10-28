@@ -2,7 +2,7 @@
 name: delegate
 description: "Coordinates a task through planning, independent checks, implementation, review, and triage. Delegates implementation to specialist agents. Use for \"delegate\", \"act as teamlead\", \"coordinate this\", or \"use agents to do X\". Supports features, fixes, refactors, audits, research, documentation, and migrations."
 metadata:
-  argument-hint: "[task] [--codex-plan-review=off|hard|always] [--opus-plan-review=off|fallback|always] [--with-human-readable-plan=off|generate|pause] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--codex-code-review=off|on] [--adr] [--use-config-options] [--autopilot] | --review [target]"
+  argument-hint: "[task] [--workflow-profile=standard|adaptive] [--codex-plan-review=off|hard|always] [--opus-plan-review=off|fallback|always] [--with-human-readable-plan=off|generate|pause] [--security-review=off|when-needed|on] [--perf-review=off|when-needed|on] [--codex-code-review=off|on] [--adr] [--use-config-options] [--autopilot] | --review [target]"
 allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/*), AskUserQuestion
 ---
 
@@ -43,6 +43,8 @@ Pass the whole task text verbatim. The script recognizes its flags and ignores o
 
 | option | values | what it does |
 |---|---|---|
+| `workflowProfile` | `standard` · `adaptive` | default `standard`; opt-in small-task pilot described in [adaptive-pilot.md](../../references/adaptive-pilot.md) |
+
 | `codexPlanReview` | `off` · `hard` · `always` | Codex reviews the plan's design before implementation. `hard` means only when the planner returned `complex=yes` |
 | `opusPlanReview` | `off` · `fallback` · `always` | the same review by `teamlead:plan-reviewer`. `fallback` runs it only when a wanted Codex review could not happen |
 | `humanReadablePlan` | `off` · `generate` · `pause` | write `$RUN/plan-human.md`. `pause` also holds dispatch until the user answers |
@@ -52,11 +54,13 @@ Pass the whole task text verbatim. The script recognizes its flags and ignores o
 | `opusCodeReview` | `off` · `fallback` | default `fallback`. When Codex cannot run, `teamlead:code-reviewer` reviews the same package in its place. `off` halts the run there |
 | `adr` | `off` · `on` | write an ADR for qualifying decisions. Without it the skill still *reads* ADRs — that is always on |
 
-Defaults, with no config and no flag: `codexPlanReview=always`, `securityReview` and `perfReview=when-needed`, `codexCodeReview=on`, `opusCodeReview=fallback`, the rest `off`. Existing user configs are not migrated and win. Per-stream code review is mandatory. `--use-config-options` skips the options card and accepts resolved values. `--autopilot` skips the card and other skippable stops. An explicit `--with-human-readable-plan=pause` still requires a pause.
+Defaults, with no config and no flag: `workflowProfile=standard`, `codexPlanReview=always`, `securityReview` and `perfReview=when-needed`, `codexCodeReview=on`, `opusCodeReview=fallback`, the rest `off`. Existing user configs are not migrated and win. Per-stream code review is mandatory in the standard workflow. Adaptive routing may omit it only after the conservative pilot assessment; independent cumulative final review remains mandatory. `--use-config-options` skips the options card and accepts resolved values. `--autopilot` skips the card and other skippable stops. An explicit `--with-human-readable-plan=pause` still requires a pause.
 
 Remove flags from the task before writing `task.md`. Record them on `flags:`. Use `$RUN/config.json` for every later routing decision. The file survives compaction and resume.
 
 `--review [target]` packages completed work without starting the coordination loop. Run `python3 $PLUGIN/scripts/review_package.py <target>`. Target may be a run directory, repository/worktree path, or omitted for cwd. Report the output path and every WARNING, then stop. Do not create a run directory. `/teamlead:codex-review` also runs the independent review and triages its findings.
+
+For `--workflow-profile=adaptive`, read [adaptive-pilot.md](../../references/adaptive-pilot.md). Existing defaults remain unchanged. The router records phase durations and unavailable token measurements in private `$RUN/metrics.json`; use the measurement commands in that reference for planning, provider usage, rework attribution, and later confirmed PR findings.
 
 ## The coordination loop
 
@@ -181,7 +185,8 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     Exit 3 → run the printed `RETRY:` line. `--redo` reprints a dispatch you never carried out.
     The first call pins the base SHA. Stages run one at a time, as a barrier:
     baseline — one teamlead:verifier per stream at the base SHA, writing baseline-ws<N>.md. Later
-      rounds treat a command that failed the same way there as pre-existing.
+      rounds compare matching failures and affected callers; newly exposed defects still belong to the change.
+      A baseline batch tagged verification resource: shared-database runs one verifier at a time.
     implement — a fresh teamlead:implementer per ready workstream (brief I, printed). Wave in one message.
     Then verify (8a), review (9), triage (10), the Codex gate (10a), and close (11).
     done → verify. partial/blocked → Synthesis. A refactor request → references/refactor-workflow.md.
@@ -189,14 +194,14 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
     It runs the brief's commands, then the RED run (`red_freeze.py --run`, this round's RED only),
     then the mutation gate (`mutate.py`, report at $RUN/mutation-ws<N>-r<M>.md), while every repository
     writer is idle. Probes the implementer wrote to probes-ws<N>-r<M>.json run first.
-      PASS with MUTATION: PASS → reviewers
+      PASS with MUTATION: PASS → reviewers, or directly to 10a for an eligible adaptive run with current snapshot evidence
       FAIL with touched=yes/unclear, or MUTATION: FAIL → next.py writes the rework brief and spawns a
         fresh implementer for round M+1. It counts toward the cap. No reviewer runs.
       FAIL with every failure touched=no → pre-existing: reported, then reviewers
       CANNOT_RUN → halt. Correct the command or environment. Never commit or stash unrelated user changes.
     Do not call CANNOT_RUN an implementer test failure.
 9.  Reviewers: next.py prints one spawn per axis from review_briefs.py (full|sanity, type, model);
-    a skipped axis prints no spawn. Code review always runs. Axes follow config.json and the validator's tags:
+    a skipped axis prints no spawn. Standard runs always receive code review; eligible adaptive runs go to 10a. Axes follow config.json and the validator's tags:
       setting       tag=yes                 tag=no
       on            opus full review        sonnet sanity pass
       when-needed   opus full review        do not dispatch
@@ -217,7 +222,7 @@ Remove flags from the task before writing `task.md`. Record them on `flags:`. Us
       STOP → it hit reworkCap or found a plan/spec defect. Relay its findings history to the user.
     reworkCap counts reworks: cap 3 allows rework rounds 2–4. A NEEDS_REWORK after round 4 halts.
     Dispatch dependent streams when their dependencies are approved. Do not loop indefinitely.
-10a. CODEX GATE (codexCodeReview=on; `off` goes to 11). After every stream is approved and any
+10a. CODEX GATE (codexCodeReview=on; `off` goes to 11). After every stream is approved (or eligible adaptive verification passes) and any
     `coordinator-fix:` commits have passed their own verifier (verifier-fix-<k>.md), next.py prints:
       review_package.py $RUN --final-gate --verification-base <pinned base> --out $RUN/codex-gate-package, then run_codex_review.py <abs PROMPT.md> --artifact-stem codex-gate
     in background Bash. The gate reviews the cumulative target-branch diff; verifier and rework accounting keep the pinned base.

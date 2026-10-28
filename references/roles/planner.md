@@ -30,7 +30,7 @@ You have Read, Grep, Glob, Bash (read-only: `ls`, `git log`, `which`), Write/Edi
 ## Method
 
 1. Restate the goal in one or two sentences.
-2. Define workstreams with names, goals, affected files, dependencies, S/M/L complexity, and required expertise. Put the spec, acceptance, tests, probes, reuse guidance, justification, and review axes inside each workstream block.
+2. Consolidate compatible small changes that serve the same consumer and share verification into one workstream. Split only for a real ownership, dependency, or risk boundary; an extra file alone does not justify another stream. Define workstreams with names, goals, affected files, dependencies, S/M/L complexity, and required expertise. Put the spec, acceptance, tests, probes, reuse guidance, justification, and review axes inside each workstream block.
 3. Check every existing path with `ls` or Glob. Mark each file to be created as **NEW**. Do not cite paths from memory.
 4. Select spec sources in this order: user-provided document, relevant ADRs, repository design/spec documents, PLAN.md, then the verbatim task. Label a task excerpt as such.
 5. Build the dependency DAG and waves. Wave 1 contains independent streams. Later waves depend on earlier waves. Parallel streams must have disjoint file scopes. Serialize streams that share a dependency manifest or lockfile. Examples include Cargo, npm, Python, and Go manifests and locks.
@@ -51,7 +51,11 @@ Keep connective prose concise. Aim for at most 800 words of your own prose, excl
 
 **Observable acceptance:** identify behavior that a person or agent can observe. Prefer a test that fails before the change and passes afterwards, plus a runnable scenario and expected output. Internal changes also require behavioral evidence. A class name alone proves no behavior. For example, sending 100 requests in 10 seconds should make request 101 receive 429 when that is the spec.
 
+**Consumer and boundary evidence:** before prescribing tests, name the real consumer, affected callers, and the storage or protocol boundary the result crosses. Identify the installed library or existing helper that already owns the behavior. Include this evidence in `### Reuse and scope` and the brief. A compatibility claim needs an executable check against the actual supported dependency/version or real consumer; copies of types, constants, or schema prose do not prove compatibility. If the dependency is unavailable, label the claim unverified and plan the missing check. For persistence, choose inputs that challenge the stored representation, not just the arithmetic in memory.
+
 **Test plan:** provide `existing:` and `new:` lists. Name relevant existing tests or state `none relevant`. For each new obligation, give `<test file>::<test name> — <behavior it proves>`. Every acceptance criterion needs a new obligation or existing coverage. Define minimum observable behavior, such as request rejection or recovery after window expiration. Do not prescribe helper calls such as Redis `INCR`, constructors, assertions, fixtures, or mocks. The implementer owns those details and chooses inputs that isolate the clause.
+
+For each test obligation, name a plausible wrong behavior and inputs that distinguish it. Avoid duplicated constants, mirrored schemas, copied prose, and helper-call assertions without an observable requirement. Trace the real caller through serialization, persistence, and recovery when those paths matter. For resource-heavy database commands sharing a resource, put `verification resource: shared-database` in the brief. The router serializes those baseline batches and all post-change verification. Implementer self-checks must use isolated databases or run serially when sharing a database.
 
 **Probe list:** add `probe: <spec clause> — <smallest wrong implementation>` for each significant clause. A probe line is an intent in words. Do not write the patch and do not quote old and new text: the implementer reads the finished code and turns each line into a concrete patch (file, exact old text, new text) in `probes-ws<N>-r<M>.json`, and the verifier's mutation gate applies it. Write the intent so one single-site patch could realize it, and so that surviving it would mean the tests do not pin the clause. Include bounds, tie-breaks, ordering, specified empty/zero/absent inputs, and refusals. State whether the code should accept the boundary itself. For example: `probe: weights tie on remainder — the remainder unit goes to the later index instead of the earlier`. Seed only spec clauses. The implementer adds clauses introduced by production code. Both sides use this shared list to avoid probing different subsets.
 
@@ -166,6 +170,8 @@ WS-1 | <name> | <S/M/L> | deps: <none|WS-x> | input: <yes|no> | hot: <yes|no> | 
 Use `complex=yes` for three or more workstreams or any L-rated stream. This triggers living ExecPlan sections. The coordinator's step 6d rules determine whether to request user confirmation. Complexity alone does not require a pause after a clean design review.
 
 The coordinator parses each workstream line. `deps:` and `wave` schedule work. `input:`, `hot:`, and `public:` govern review selection after the coordinator applies settings. Copy the plan's review tags exactly. These routing lines take precedence if their tags conflict with the plan body. Avoid that conflict.
+
+For review-follow-up tasks, record explicit fix, decline, and defer choices with stable IDs using the `decision-records` format in `references/roles/triage.md`. Carry the user’s excluded cleanup as declined or deferred; later rounds must not silently adopt it.
 
 ## Fix mode
 

@@ -287,35 +287,55 @@ def stream_lines(repo: str, base: str, commits: list[str],
     return found
 
 
-JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
-JSON_KEY = re.compile(r'^\s*"((?:[^"\\]|\\.)*)"\s*:')
-
-
 def manifest_data_lines(text: str) -> set[int]:
-    """Lines of a pretty-printed package.json that hold dependency data.
+    """Exempt lines wholly inside dependency properties, never shared script lines.
 
-    A line's path is the keys of the objects open at its start plus its own
-    key. It is data when that path passes through a MANIFEST_DATA_SECTIONS key,
-    or when it is a top-level MANIFEST_DATA_KEYS entry. A manifest not laid out
-    one entry per line (minified) stays mutable.
+    Use the JSON decoder to locate values in source order. Brace counts lose
+    a close/open transition on one line; key names alone mistake a script named
+    'dependencies' for a dependency table. Invalid JSON stays mutable.
     """
+    decoder = json.JSONDecoder()
+    try:
+        if not isinstance(json.loads(text), dict):
+            return set()
+    except ValueError:
+        return set()
+    spans: list[tuple[int, int]] = []
+
+    def whitespace(offset: int) -> int:
+        while offset < len(text) and text[offset].isspace():
+            offset += 1
+        return offset
+
+    def properties(offset: int, parent: tuple[str, ...]) -> None:
+        offset = whitespace(offset + 1)
+        while text[offset] != "}":
+            start = offset
+            key, offset = decoder.raw_decode(text, offset)
+            offset = whitespace(whitespace(offset) + 1)  # colon
+            value_start = offset
+            value, end = decoder.raw_decode(text, offset)
+            data = (not parent and key in MANIFEST_DATA_KEYS) or (
+                key in MANIFEST_DATA_SECTIONS and isinstance(value, (dict, list))
+                and "scripts" not in parent)
+            if data:
+                spans.append((start, end))
+            elif isinstance(value, dict) and key != "scripts":
+                properties(value_start, parent + (key,))
+            offset = whitespace(end)
+            if text[offset] == ",":
+                offset = whitespace(offset + 1)
+
+    properties(whitespace(0), ())
     found: set[int] = set()
-    stack: list[Optional[str]] = []
-    for number, line in enumerate(text.splitlines(), 1):
-        m = JSON_KEY.match(line)
-        key = m.group(1) if m else None
-        path = [k for k in stack if k] + ([key] if key else [])
-        top_level = len(stack) == 1 and key in MANIFEST_DATA_KEYS
-        if top_level or any(k in MANIFEST_DATA_SECTIONS for k in path):
+    offset = 0
+    for number, line in enumerate(text.splitlines(keepends=True), 1):
+        content = line.strip().rstrip(",").rstrip()
+        start = offset + len(line) - len(line.lstrip())
+        end = start + len(content)
+        if content and any(left <= start and end <= right for left, right in spans):
             found.add(number)
-        bare = JSON_STRING.sub('""', line)
-        opened = bare.count("{") + bare.count("[")
-        closed = bare.count("}") + bare.count("]")
-        for _ in range(closed - opened):
-            if stack:
-                stack.pop()
-        for i in range(opened - closed):
-            stack.append(key if i == 0 else None)
+        offset += len(line)
     return found
 
 

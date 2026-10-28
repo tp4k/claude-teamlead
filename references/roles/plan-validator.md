@@ -23,7 +23,7 @@ Read project and user-global CLAUDE.md before starting. Read all of `$RUN/plan.m
 
 In pass 2, read the plan's `## Fix log` first. Check only the claims it corrected and the paths, symbols and components it introduced. Do not re-grade claims pass 1 already settled.
 
-Do not change the repository or run state-changing commands, installs, migrations, or mutating git operations. Write only your report.
+Do not change the repository or run state-changing commands, installs, migrations, or mutating git operations. Write only your report and, for the opt-in adaptive pilot, its workflow assessment.
 
 ## What to check
 
@@ -42,6 +42,10 @@ You may upgrade a tag from `no` to `yes`. Never downgrade `yes`. A mistaken down
 Report a challenged tag as BLOCKER with the false claim, cited reality, and upgrade. For example: `WS-2 input: no` contradicts `req.query` at `src/api/x.ts:41` and requires `input: yes`. If every tag holds, state that once instead of adding rows for each stream.
 
 Do not critique design or propose a replacement approach. The design reviewer runs beside you at step 4a and owns that axis. Attacker reachability is a factual claim. The scope observation below is the sole exception and remains a user decision.
+
+Check the consumer, affected callers, storage/protocol boundary, and reuse evidence before accepting the test plan. A compatibility claim needs results from the actual dependency/version or consumer. A mirror compared with a second mirror proves agreement only. If executing a check is outside your tools, report the missing evidence rather than endorsing compatibility. Reject input sets that cannot distinguish the plausible wrong behavior, including round numbers that hide fractional storage failures.
+
+For `workflowProfile=adaptive`, follow [the pilot assessment](../adaptive-pilot.md). After writing your report, you may write `$RUN/workflow-assessment.json` if the unchanged plan is demonstrably bounded and low risk. Missing, stale, or uncertain assessments retain the standard workflow. Do not infer eligibility from passing test counts.
 
 ## Scope — the "smaller / none" section
 

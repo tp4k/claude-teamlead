@@ -43,7 +43,7 @@ For example, one read-path `setdefault` produced performance HIGH, security MEDI
 
 Move scope-expanding proposals to Notes with reasons. Examples include rejecting unspecified input types or ranges, extra argument hardening, and microbenchmarks on non-hot paths. The user decides additions to the spec.
 
-Preserve genuine defects in requested behavior as findings. If you demote all rows, use APPROVED_WITH_NOTES.
+Preserve genuine defects in requested behavior as findings. A defect newly exposed by the requested change cannot be dismissed solely because its underlying code predates this run. Compare affected callers at the review base and at HEAD. If you demote all rows, use APPROVED_WITH_NOTES.
 
 Write each demotion as `<what would change> — <why it was demoted> (<location>)`. A demoted row is never dropped: the writer turns each line into a row in `$RUN/deferred-rows.md`, which `ledger.py apply` puts into `docs/deferred-work.md` at close, or the final report carries it as a line. The Codex gate also receives every `## Demoted to Notes` and `## Notes for the user` line of every triage file and re-judges it against the final HEAD, so keep those two headings exactly. A decision preserved only in chat can repeat in later runs.
 
@@ -52,6 +52,18 @@ Preserve `LIST_GAP` when merging a row. It identifies a surviving mutation absen
 ## Adopt a reviewer's suggested fix
 
 A reviewer's Fix column is a suggestion. When you adopt it, the rework brief must state the behaviour that changes in one sentence (what a caller or the run now does differently) and name the test that pins it: an existing `file::test_name` that changes or the new test the row requires. A fix with no stated behaviour and no pinning test leaves the next implementer to guess what the reviewer meant. If you cannot name the test, the row is not ready: write what the test must assert, or demote the row.
+
+Before adopting a fix, trace affected callers and the intended meaning of changed assertions. Record the authorized behavior change and executable evidence. If the suggestion merely changes tests to match a regression, correct the suggestion. Verify every route named by a finding, including fallback and recovery paths; fixing only the primary path is incomplete.
+
+### Preserve decisions across rounds
+
+Read `$RUN/current-decisions.md` when supplied and preserve explicit fix, decline, and defer decisions. Optional cleanup does not block completion. New evidence can reopen a factual decision, but cannot silently override the user’s scope choice. Retain stable IDs; a changed decision needs a higher revision, the new evidence, and the reason it supersedes the earlier choice. A missing row in a later round does not rescind it. Write explicit decisions in the plan or triage file in this machine-readable block (use concrete evidence, not the example values):
+
+```decision-records
+[{"id":"finding-1","revision":1,"action":"defer","reason":"Optional cleanup outside the requested behavior","evidence":"Caller probe shows the requested path passes; owner deferred cleanup"}]
+```
+
+Actions are `fix`, `decline`, and `defer`. Keep the same revision and record unchanged when repeating it. Record fix completion as evidence in a higher revision; do not turn a completed fix into a decline. The router includes the latest decisions in implementer, reviewer, and triage inputs and in the cumulative final review package. The full source files retain the history.
 
 ## Spec calls — NEEDS_DECISION
 
@@ -142,9 +154,10 @@ Only when the verdict is `NEEDS_REWORK` and `docs_only=no`. Write `$RUN/briefs/i
 ```
 # Implementer brief — WS-<N> — round <M+1> (rework)
 
-Read first: $RUN/briefs/impl-ws<N>-r<M>.md (your scope, spec, forbiddens and verification
-commands are unchanged), then $RUN/implementer-ws<N>-r<M>.md (what the previous coder
-did and why). Your generic rules come with your agent type — they are not repeated here.
+Inherited source: $RUN/briefs/impl-ws<N>-r<M>.md (scope, spec, forbiddens and verification
+commands). The router generates a current view; read that first, then
+$RUN/implementer-ws<N>-r<M>.md for what the previous coder did and why.
+Your generic rules come with your agent type.
 
 ## Findings to fix
 <the merged rows verbatim — each is a defect with the fix named. Fix exactly these, nothing else. For an adopted fix: the behaviour that changes and the test that pins it.>
@@ -170,6 +183,8 @@ Before dispatch, check that the active fence allows every file required by the f
 <the added file>
 ```
 ````
+
+Include `rework cause: <planning assumption | incomplete fix | weak test | reviewer-induced regression | implementation defect>` and supporting evidence in the rework brief. Use the best supported cause; say unavailable when attribution is uncertain. Approval and test totals are not quality measurements.
 
 Check findings together before dispatch. Describe the state after all fixes, rather than each row's isolated starting state. In one five-row brief, a documentation row requested "three checks" while another added a fourth guard. The resulting false count consumed the stream's final rework round.
 

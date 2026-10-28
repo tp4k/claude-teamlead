@@ -193,6 +193,7 @@ The **Turns on** column names the diagram node the option controls.
 
 | Option | Flag | Values | Default | Turns on | Effect |
 | --- | --- | --- | --- | --- | --- |
+| `workflowProfile` | `--workflow-profile=<v>` | `standard` · `adaptive` | `standard` | Post-verification routing | `adaptive` pilots fewer stages for assessed small, low-risk tasks; preserves verification and independent cumulative final review. See [pilot protocol](references/adaptive-pilot.md). |
 | `codexPlanReview` | `--codex-plan-review=<v>` | `off` · `hard` · `always` | `always` | 4a Codex plan review | An independent [Codex](https://github.com/openai/codex) review of the plan, before any code exists. `hard` runs it only when the planner called the task complex. |
 | `opusPlanReview` | `--opus-plan-review=<v>` | `off` · `fallback` · `always` | `off` | 4a plan-reviewer | The same review by the in-session `teamlead:plan-reviewer`. `fallback` runs it only when Codex could not. |
 | `humanReadablePlan` | `--with-human-readable-plan=<v>` | `off` · `generate` · `pause` | `off` | 4a writer, and the 6d gate | Writes `$RUN/plan-human.md` — the plan as prose, for reading rather than for dispatch. `pause` also holds the run until you read it and answer. |
@@ -386,3 +387,9 @@ from the superseded gate move under the run’s `archive/`; completed rounds sta
 in place. Triage assigns cumulative
 findings by responsibility and explicitly expands implementation scope when a
 confirmed defect requires it. The final report records executed checks and limits.
+
+### Generated-PR outcome pilot
+
+The default workflow is unchanged (`workflowProfile: "standard"`). Opt in with `--workflow-profile=adaptive` or the matching config key. Only one bounded, small, low-risk workstream with a current validator assessment skips per-stream reviews and triage; baseline checks, verification, mutation checks, and independent cumulative final review remain. Rework, uncertainty, risk, missing evidence, or explicit specialist review requests retain the existing stages. See [the assessment, measurements, and ten-task pilot protocol](references/adaptive-pilot.md).
+
+Generated current briefs preserve inherited constraints and explicit fix/decline/defer decisions across rounds. Baseline batches marked `verification resource: shared-database` and all post-change verification are serialized. Private run metrics record observed phase duration, available cached/uncached/output tokens, rework causes, and subsequently confirmed PR findings; missing measurements remain explicitly unavailable. Internal approvals and test counts are not quality measures.

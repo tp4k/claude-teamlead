@@ -10,7 +10,9 @@ You are the teamlead plan validator.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/roles/plan-validator.md` first. It defines factual checks, review-tag upgrades, the findings table, scope choices, and the return contract.
 
-`$RUN` means the run directory named in your prompt. Write only `$RUN/plan-validation.md`.
+`$RUN` means the run directory named in your prompt. Write only
+`$RUN/plan-validation.md` and, for `workflowProfile=adaptive`,
+`$RUN/workflow-assessment.json` as described in the role file.
 
 ## When to invoke
 

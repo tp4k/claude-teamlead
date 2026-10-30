@@ -29,6 +29,7 @@ from typing import cast
 
 import paths
 import run_config
+import workflow_profile
 # routing_line already solves "which line of this file is the verdict", including
 # the search-from-the-end rule that keeps a quoted spec excerpt from outranking the
 # real one. Reimplementing it here would be the duplication this skill tells
@@ -295,6 +296,10 @@ def stream_next(r: Run, ws: int) -> tuple[int, str, str, bool] | None:
             return (8, "verifier FAIL", f"read {ver.name}: every failure touched=no "
                     f"is pre-existing → report and review anyway; otherwise write "
                     f"briefs/impl-ws{ws}-r{rnd + 1}.md and rerun the round", False)
+        if workflow_profile.selection(r.run)[0] == "adaptive":
+            return ("10a", "adaptive verification and final review",
+                    f"run next.py {r.run}: it checks mutation, snapshot freshness "
+                    "and the independent cumulative final gate", False)
         missing = [a for a in r.axes(ws, rnd)
                    if not r.phase_file("review", ws, rnd, f"-{a}")]
         if missing:

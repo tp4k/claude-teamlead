@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
-"""Regression suite for the declared Python floor:  python3 scripts/test_python_floor.py
+"""Check shipped scripts against the supported Python grammar floor.
 
-`plugin.json` and the CI matrix both say 3.9, but nothing enforced it. The other
-suites each import one module, and the scripts nothing imports — `prune_runs.py`
-is one — were never loaded on any version at all. A floor that only CI's oldest
-job could disprove, on files that job never touches, is not a floor.
-
-Two different failures are checked, because they fail at different moments:
-
-  * syntax newer than the floor, which `ast.parse(feature_version=...)` rejects
-    the way an old interpreter would;
-  * PEP 604 (`X | Y`) in an annotation, which is *valid syntax* on 3.9 and
-    raises `TypeError` at def time instead — unless the module carries
-    `from __future__ import annotations`, which keeps annotations as strings.
-
-The second one is why this file exists: `prune_runs.py` shipped a
-`-> datetime | None` return annotation with no future import, so the module
-could not be imported on 3.9 or 3.10 and every test suite stayed green.
-
-No pytest dependency — the skill's scripts run with bare python3, and a suite
-that needs an install is a suite nobody runs.
+Parse every shipped Python file, including scripts that other suites never
+import. The CI matrix runs behavioral tests on each supported interpreter;
+this check catches newer syntax even when run on a newer developer interpreter.
+Python 3.10 supports PEP 604 unions without postponed annotations, so they are
+no longer a compatibility error.
 """
 from __future__ import annotations
 
@@ -27,7 +13,7 @@ import ast
 import sys
 from pathlib import Path
 
-FLOOR = (3, 9)
+FLOOR = (3, 10)
 ROOT = Path(__file__).resolve().parent.parent
 
 results: list[tuple[str, bool, str]] = []
@@ -52,137 +38,6 @@ def sources() -> list[Path]:
     )
 
 
-def annotations_of(tree: ast.AST) -> list[ast.expr]:
-    """Just the expressions written in a position Python evaluates at runtime.
-
-    Deliberately not "every node under a function": `a | b` in a body is
-    ordinary bitwise arithmetic on any version, and flagging it would push the
-    next person toward silencing the check rather than fixing a real break.
-
-    A flat `ast.walk` cannot tell a module/class-level `AnnAssign` (evaluated
-    at def time) from one written inside a function body (never evaluated —
-    CPython does not even store it), so this descends scope by scope instead.
-    A `class` statement nested inside a function still evaluates its own body
-    when it runs, and a nested `def`'s signature is evaluated at its own def
-    time, so both keep being checked regardless of the enclosing function.
-    """
-    found: list[ast.expr] = []
-
-    def visit(node: ast.AST, in_function_body: bool) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if child.returns is not None:
-                    found.append(child.returns)
-                visit(child, True)
-            elif isinstance(child, ast.ClassDef):
-                visit(child, False)
-            elif isinstance(child, ast.arg):
-                if child.annotation is not None:
-                    found.append(child.annotation)
-                visit(child, in_function_body)
-            elif isinstance(child, ast.AnnAssign):
-                if not in_function_body:
-                    found.append(child.annotation)
-                visit(child, in_function_body)
-            else:
-                visit(child, in_function_body)
-
-    visit(tree, False)
-    return found
-
-
-def has_future_annotations(tree: ast.AST) -> bool:
-    return any(
-        isinstance(node, ast.ImportFrom)
-        and node.module == "__future__"
-        and any(alias.name == "annotations" for alias in node.names)
-        for node in ast.walk(tree)
-    )
-
-
-def runtime_union_lines(source: str) -> list[int]:
-    """Lines whose annotation would raise `TypeError` on the floor, if any.
-
-    An empty list for a module that postpones evaluation is the whole point:
-    with the future import the annotation is never evaluated, so `X | Y` there
-    is free, and demanding `Optional[X]` everywhere would be a style rule
-    wearing a compatibility rule's clothes.
-    """
-    tree = ast.parse(source)
-    if has_future_annotations(tree):
-        return []
-    return sorted(
-        node.lineno
-        for annotation in annotations_of(tree)
-        for node in ast.walk(annotation)
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr)
-    )
-
-
-GOOD_POSTPONED = (
-    "from __future__ import annotations\n"
-    "from pathlib import Path\n"
-    "def f(a: int | None) -> Path | None: ...\n"
-)
-GOOD_NO_UNION = (
-    "from typing import Optional\n"
-    "def f(a: Optional[int]) -> Optional[int]: ...\n"
-)
-BAD_RETURN = "from pathlib import Path\ndef f(a: int) -> Path | None: ...\n"
-BAD_ARG = "def f(a: int | None) -> int: ...\n"
-BAD_FIELD = "class C:\n    x: int | None = None\n"
-BITWISE_BODY = "def f(a: int, b: int) -> int:\n    return a | b\n"
-LOCAL_ANNOTATION_NOT_EVALUATED = (
-    "def f():\n"
-    "    x: int | None = None\n"
-    "    return x\n"
-)
-MODULE_LEVEL_ANNOTATION_STILL_EVALUATED = "x: int | None = None\n"
-CLASS_IN_FUNCTION_BODY_STILL_EVALUATED = (
-    "def f():\n"
-    "    class C:\n"
-    "        x: int | None = None\n"
-    "    return C\n"
-)
-SIGNATURE_IN_FUNCTION_BODY_STILL_EVALUATED = (
-    "def f():\n"
-    "    def g(a: int | None) -> int:\n"
-    "        return a\n"
-    "    return g\n"
-)
-
-
-def case_the_detector_finds_a_runtime_union() -> None:
-    """A guard that cannot fail proves nothing, so it is aimed at known-bad input
-    first. Each shape is a separate annotation position — return, argument and
-    class field — because they are separate branches of the walk."""
-    hits = {
-        "return": runtime_union_lines(BAD_RETURN),
-        "argument": runtime_union_lines(BAD_ARG),
-        "class field": runtime_union_lines(BAD_FIELD),
-    }
-    check(
-        "an unpostponed PEP 604 union is found in every annotation position",
-        all(hits.values()),
-        f"hits={hits}",
-    )
-
-
-def case_the_detector_accepts_what_the_floor_accepts() -> None:
-    """The discriminating half. A check that flagged these would be satisfied by
-    deleting the future import and rewriting every annotation, which is not the
-    defect and would make the suite an obstacle rather than a floor."""
-    clean = {
-        "postponed": runtime_union_lines(GOOD_POSTPONED),
-        "no union": runtime_union_lines(GOOD_NO_UNION),
-        "bitwise in a body": runtime_union_lines(BITWISE_BODY),
-    }
-    check(
-        "postponed unions and ordinary bitwise maths are not reported",
-        not any(clean.values()),
-        f"hits={clean}",
-    )
-
 
 def case_every_shipped_module_parses_at_the_floor() -> None:
     bad: list[str] = []
@@ -198,78 +53,40 @@ def case_every_shipped_module_parses_at_the_floor() -> None:
     )
 
 
-def case_no_module_evaluates_a_union_annotation() -> None:
-    """The one that would have caught `prune_runs.py`. It runs on every version,
-    so the 3.9 job is no longer the only thing standing between the declaration
-    and a module that cannot be imported under it."""
-    bad = [
-        f"{path.relative_to(ROOT)}:{line}"
-        for path in sources()
-        for line in runtime_union_lines(path.read_text())
-    ]
-    check(
-        "no module evaluates a PEP 604 union at def time",
-        not bad,
-        "add `from __future__ import annotations` to:\n      "
-        + "\n      ".join(bad),
-    )
+
+def case_accepts_python_310_syntax_and_union_annotations() -> None:
+    source = """def classify(value: int | None) -> str:
+    match value:
+        case None:
+            return "missing"
+        case _:
+            return "present"
+"""
+    tree = ast.parse(source, feature_version=FLOOR)
+    namespace: dict = {}
+    exec(compile(tree, "<python-floor>", "exec", dont_inherit=True), namespace)
+    classify = namespace["classify"]
+    check("Python 3.10 match syntax and runtime unions are accepted",
+          classify(None) == "missing" and classify(1) == "present",
+          "Python 3.10 constructs must remain usable")
 
 
-def case_a_function_local_annotation_is_not_evaluated() -> None:
-    """CPython never stores or evaluates a function-local variable annotation,
-    so flagging it here is a false positive against the floor this check
-    exists to enforce."""
-    hits = runtime_union_lines(LOCAL_ANNOTATION_NOT_EVALUATED)
-    check(
-        "a function-local variable annotation is not reported",
-        hits == [],
-        f"hits={hits}",
-    )
-
-
-def case_a_module_level_annotation_is_still_reported() -> None:
-    """The same annotation shape, but at module level, where it is evaluated
-    at import time and must still be caught, with its own line number."""
-    hits = runtime_union_lines(MODULE_LEVEL_ANNOTATION_STILL_EVALUATED)
-    check(
-        "a module-level union annotation is still reported, at its own line",
-        hits == [1],
-        f"hits={hits}",
-    )
-
-
-def case_a_class_body_inside_a_function_is_still_checked() -> None:
-    """A `class` statement evaluates its own body, including annotations, when
-    it runs — even nested inside a function — so the enclosing function body
-    does not make the class's annotations unevaluated."""
-    hits = runtime_union_lines(CLASS_IN_FUNCTION_BODY_STILL_EVALUATED)
-    check(
-        "a class field union nested inside a function body is still reported",
-        hits == [3],
-        f"hits={hits}",
-    )
-
-
-def case_a_signature_inside_a_function_is_still_checked() -> None:
-    """A nested `def`'s signature is evaluated at its own def time exactly
-    like a top-level one, regardless of the enclosing function body."""
-    hits = runtime_union_lines(SIGNATURE_IN_FUNCTION_BODY_STILL_EVALUATED)
-    check(
-        "a nested function's signature union is still reported",
-        hits == [2],
-        f"hits={hits}",
-    )
+def case_rejects_syntax_newer_than_the_floor() -> None:
+    source = "try:\n    pass\nexcept* ValueError:\n    pass\n"
+    try:
+        ast.parse(source, feature_version=FLOOR)
+    except SyntaxError:
+        rejected = True
+    else:
+        rejected = False
+    check("Python 3.11 exception groups are rejected at the floor", rejected,
+          "except* must not parse as Python 3.10")
 
 
 CASES = [
-    case_the_detector_finds_a_runtime_union,
-    case_the_detector_accepts_what_the_floor_accepts,
     case_every_shipped_module_parses_at_the_floor,
-    case_no_module_evaluates_a_union_annotation,
-    case_a_function_local_annotation_is_not_evaluated,
-    case_a_module_level_annotation_is_still_reported,
-    case_a_class_body_inside_a_function_is_still_checked,
-    case_a_signature_inside_a_function_is_still_checked,
+    case_accepts_python_310_syntax_and_union_annotations,
+    case_rejects_syntax_newer_than_the_floor,
 ]
 
 

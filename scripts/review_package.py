@@ -40,6 +40,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import current_brief
 import paths
 import run_config
 
@@ -952,6 +953,15 @@ def build_prompt(ctx: dict) -> str:
         "pre-existing "
         "behavior and optional improvements, comparing against the review base."
     )
+    add(
+        "Compatibility claims need executable evidence from the actual supported "
+        "dependency/version or real consumer. Two copied constants, schemas or "
+        "prose blocks prove only agreement. Exercise storage/protocol boundaries "
+        "with discriminating inputs, including fallback and recovery routes. "
+        "Treat suggested fixes as hypotheses: check affected callers and original "
+        "test intent. A changed assertion must identify the authorized behavior "
+        "change, not merely make the suite agree with a regression."
+    )
     add("")
     add("## What to check")
     add("")
@@ -1007,7 +1017,9 @@ def build_prompt(ctx: dict) -> str:
         "way to get the same behaviour? Does the change copy logic the "
         "repo already has, or add a second place a bug fix must land? Are "
         "there tests beyond the few that each reject a named wrong "
-        "implementation?"
+        "implementation? Optional structural cleanup is nonblocking. Preserve "
+        "explicit fix/decline/defer choices; reopening a factual conclusion needs "
+        "new evidence and cannot silently override the user's scope decision."
     )
     add(
         "6. **Docs, deferred-work rows and PR body against the final HEAD.** "
@@ -1243,6 +1255,15 @@ def main(argv: list[str]) -> int:
         (out / "answers.md").write_text(answers, encoding="utf-8")
 
     package_files: list[tuple[Path, str]] = []
+    if run_dir is not None:
+        decisions_file = out / "current-decisions.md"
+        try:
+            decisions_file.write_text(current_brief.decision_text(run_dir))
+        except ValueError as exc:
+            raise Fail(f"Invalid review decisions: {exc}") from exc
+        package_files.append((decisions_file,
+                              "explicit fix/decline/defer decisions across rounds; "
+                              "reopen only with new evidence, preserving user scope"))
     if plan_copied:
         package_files.append(
             (

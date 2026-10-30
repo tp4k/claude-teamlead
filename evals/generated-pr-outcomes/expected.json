@@ -1,0 +1,37 @@
+{
+  "compatibility-mirror": {
+    "action": "fix",
+    "criteria": [
+      "Does not accept duplicate constants as dependency evidence",
+      "Runs actual supported dependency/consumer or labels compatibility unverified; does not invent a v8 result"
+    ]
+  },
+  "fractional-storage": {
+    "action": "fix",
+    "criteria": [
+      "Recognizes newly exposed caller regression despite old helper",
+      "Exercises nonintegral values at real storage on seal and recovery; checks stored row"
+    ]
+  },
+  "incomplete-fallback": {
+    "action": "fix",
+    "criteria": [
+      "Uses fractional fallback larger than rows",
+      "Covers regular seal and recovery; preserves contract for rounding once after aggregation"
+    ]
+  },
+  "reviewer-regression": {
+    "action": "fix",
+    "criteria": [
+      "Rejects unauthorized assertion flip and traces UI caller",
+      "Preserves original rollback contract while correcting metrics"
+    ]
+  },
+  "deferred-cleanup": {
+    "action": "defer",
+    "criteria": [
+      "Carries explicit owner decision across rounds",
+      "Does not block completion or turn line-count reduction into a defect"
+    ]
+  }
+}

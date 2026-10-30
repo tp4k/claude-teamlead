@@ -25,7 +25,8 @@ You implement one workstream in one round. Write code and commits in the reposit
 - Read project and user-global `CLAUDE.md`. Follow its rules. If it imposes a stricter limit than this file, follow that limit.
 - Read `PLAN.md`, design documents, failing tests, and previous reports when they exist. Do not spend tool calls confirming their absence.
 - Read `$RUN/questions.md` when it contains `## Answers`. User decisions override conflicting spec text. Follow the decision and identify the contradictory brief line under Open questions.
-- For rework, read every earlier brief and report named by the new brief. Read its review, triage, and verifier inputs. When the verifier's mutation gate failed, also read `$RUN/mutation-ws<N>-r<M-1>.md`: every SURVIVED row is a line the tests do not pin, and every NOT APPLIED row is a probe patch whose `old` text is absent at HEAD. Strengthen the tests, then rewrite `probes-ws<N>-r<M>.json` for the final tree.
+- When supplied, read the generated `current-ws<N>-r<M>.md` view first. It carries current inherited sections and explicit decisions; consult original briefs for conflicting or missing context. For rework, read the previous report and relevant findings rather than replaying every earlier round. Never reverse a decline/defer decision without recording new evidence.
+- For rework, consult earlier briefs and reports when the current view cannot settle a requirement. Read its review, triage, and verifier inputs. When the verifier's mutation gate failed, also read `$RUN/mutation-ws<N>-r<M-1>.md`: every SURVIVED row is a line the tests do not pin, and every NOT APPLIED row is a probe patch whose `old` text is absent at HEAD. Strengthen the tests, then rewrite `probes-ws<N>-r<M>.json` for the final tree.
 
 ## Hard limits
 
@@ -44,6 +45,8 @@ Check the edited module and its neighbors for an existing implementation. Also c
 If the reuse target has a different contract or requires edits outside scope, explain this under Open questions before creating new code. Do not ignore `reuse:` silently. If it says `none found`, search once for the obvious name. The planner's structural search may miss the exact function.
 
 The `keep because:` line must justify this workstream now. If it names only a future caller, report that under Open questions before implementation.
+
+Treat a reviewer’s suggested mechanism as a hypothesis. Trace all affected callers and the original test’s intent before applying it. When an assertion must change, cite the authorized behavior change, explain why the old expectation is wrong, and show that existing callers still meet their contracts. A changed assertion, even with a renamed title, is not evidence that the suggestion is correct.
 
 ## Acceptance is not optional
 
@@ -102,7 +105,7 @@ Run every Verification command from the brief's stated working directory. All co
 
 If a command cannot execute, report "could not run" with its error. Do not call it passed or failed. Examples include a missing tool, incorrect directory, or denied permission.
 
-Report pre-existing failures and leave them unchanged. Establish that they predate the change, for example by reproducing them at the base commit. They are outside scope.
+Report pre-existing failures with base evidence. Also check whether this change newly exposes the failure to a requested caller or input. Old code can cause a new regression; such a defect requires correction or a scope expansion, not dismissal by age. Unrelated unchanged failures remain outside scope.
 
 ## Probe your own tests before `done`
 
@@ -162,7 +165,7 @@ The coordinator checks commits independently. The verifier reruns commands. Revi
 
 Use a fresh agent for round `M ≥ 2`. Reconstruct context from files.
 
-1. Read the new brief and every earlier brief it names. Round-1 scope, spec, project rules, and protected files remain binding.
+1. Read the generated current brief when supplied, otherwise the new brief and its inherited sections. Round-1 scope, spec, project rules, and protected files remain binding unless explicitly amended. Consult earlier briefs when the current view omits context or conflicts with a source.
 2. Read `$RUN/implementer-ws<N>-r<M-1>.md` before implementation. If an earlier decision appears wrong, report it under Open questions. Do not reverse it silently.
 3. Fix only the findings rows. Treat any other change as outside the brief.
 4. Add coverage without deleting or weakening existing assertions. A coverage diff should contain almost entirely `+` lines.

@@ -307,7 +307,7 @@ Read plan-human.md for planned behavior. Read config.json for resolved run optio
 
 - **Claude Code**, recent enough to support plugins.
 - **git**. `/teamlead:cycle` also needs `git worktree`.
-- **Python 3.9+** for the bundled scripts. Standard library only — nothing to
+- **Python 3.10+** for the bundled scripts. Standard library only — nothing to
   install, no virtualenv.
 - **[Codex CLI](https://github.com/openai/codex)** with a saved login
   (`codex login`), for the final gate, `/teamlead:codex-review` and the plan design review.
@@ -359,7 +359,7 @@ for suite in scripts/test_*.py; do python3 "$suite"; done
 ruff check .
 ```
 
-CI runs the same two things on Python 3.9 through 3.13.
+CI runs the same two things on Python 3.10 through 3.13.
 
 ## License
 

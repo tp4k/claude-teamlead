@@ -21,7 +21,8 @@ jobs:
       - run: ruff check .
 
   test:
-    runs-on: ubuntu-latest
+    # Python 3.9 builds exist for 24.04, but not for 26.04 (ubuntu-latest).
+    runs-on: ubuntu-24.04
     strategy:
       # Every version is worth a separate answer: a failure on 3.9 alone is the
       # floor moving, which is a different problem from a failure everywhere.

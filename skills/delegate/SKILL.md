@@ -175,6 +175,13 @@ For `--workflow-profile=adaptive`, read [adaptive-pilot.md](../../references/ada
     complex=yes with no design review → ask for confirmation of the unreviewed design.
     --autopilot skips these holds except an explicit humanReadablePlan=pause.
     Complexity alone does not hold a plan with a clean design review.
+6e. FINAL ADAPTIVE ASSESSMENT, after answers, fixes, validation and holds:
+    Run `python3 $PLUGIN/scripts/workflow_profile.py $RUN --preflight`.
+    candidate=false → state the reason and continue with standard routing.
+    candidate=true → dispatch teamlead:plan-validator with brief V, mode: final-assessment.
+    Wait for agent completion (not existing plan-validation.md); this mode writes only the assessment.
+    Run `python3 $PLUGIN/scripts/workflow_profile.py $RUN` and state the effective profile/reason.
+    Repeat after later planning edits; never refresh the fingerprint alone. Unavailable → standard.
 7.  ROUTE EVERY LATER PHASE THROUGH next.py, one call per phase:
       python3 $PLUGIN/scripts/next.py $RUN
     It waits for what its last call dispatched (default 480s), reads the run directory and git,
@@ -183,6 +190,7 @@ For `--workflow-profile=adaptive`, read [adaptive-pilot.md](../../references/ada
     and judge no cap. Spawn each block of one call in a single message with its prompt verbatim.
     Exit 0 → carry it out and call again. Exit 1 → the `halt:` or `next:` line needs the user.
     Exit 3 → run the printed `RETRY:` line. `--redo` reprints a dispatch you never carried out.
+    On resume before initial implementation, complete step 6e if final assessment is still owed.
     The first call pins the base SHA. Stages run one at a time, as a barrier:
     baseline — one teamlead:verifier per stream at the base SHA, writing baseline-ws<N>.md. Later
       rounds compare matching failures and affected callers; newly exposed defects still belong to the change.
@@ -267,7 +275,8 @@ Output: write $RUN/plan.md, $RUN/briefs/impl-ws<N>-r1.md per workstream, then $R
 $RUN = <abs>. Repo: <abs>. $PLUGIN = <abs plugin path>.
 workflowProfile: <resolved options.workflowProfile from $RUN/config.json; standard if absent>.
 Inputs: $RUN/plan.md, $RUN/repo.txt, $RUN/config.json, CLAUDE.md. <pass 2 (step 6c): the plan was fixed after pass 1 — see ## Fix log; check the corrected claims and new paths only.>
-Output: write $RUN/plan-validation.md. For adaptive, assess eligibility as the role specifies; after a PLAN_VALID report, run the allowed read-only fingerprint command and write $RUN/workflow-assessment.json when eligible. Return PLAN_VALID or PLAN_NEEDS_FIX + file line.
+Mode: <validation (pass 1 or 2) | final-assessment (step 6e)>.
+Follow the role's mode: validation writes only plan-validation.md and returns PLAN_VALID or PLAN_NEEDS_FIX + file line; final-assessment checks final inputs, writes only workflow-assessment.json and returns profile/reason + file line.
 ```
 
 **F — planner, Fix mode** (`teamlead:planner`, a fresh one)

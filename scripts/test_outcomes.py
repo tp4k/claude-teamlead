@@ -83,6 +83,67 @@ class Outcomes(unittest.TestCase):
         self.assertTrue(any(p["durationSeconds"] is not None for p in phases.values()))
         self.assertTrue(all(p["tokens"]["cached"] is None for p in phases.values()))
 
+    def test_final_assessment_after_relay_and_same_path_fix(self) -> None:
+        w = self.eligible()
+        # Step 6a can record an answer without causing a planner Fix round.
+        w.put("questions.md", w.read("questions.md")
+              + "\n## Answers\n1. recommendation accepted.\n")
+        self.assertIn("stale", workflow_profile.selection(w.run)[1])
+        self.assertIsNone(workflow_profile.preflight(w.run))
+        # A correction within existing paths also need not cause pass 2.
+        w.put("briefs/impl-ws1-r1.md", w.read("briefs/impl-ws1-r1.md")
+              + "\n## Observable acceptance\nPreserve the internal caller.\n")
+        validation = w.read("plan-validation.md")
+        self.assess(w)  # Separate final assessment after all planning edits.
+        self.assertEqual(w.read("plan-validation.md"), validation)
+        self.assertEqual(workflow_profile.selection(w.run)[0], "adaptive")
+        self.assertIn("baseline-ws1.md", w.step().out)
+        w.put("baseline-ws1.md", "OUTCOME: PASS\n")
+        self.assertEqual(w.step().kinds(), ["teamlead:implementer"])
+        sha = w.commit("implement final plan")
+        w.report(1, 1, [sha])
+        self.assertEqual(w.step().kinds(), ["teamlead:verifier"])
+        w.verifier(1, 1)
+        w.put("verifier-r1.md", f"head: {sha}\n" + w.read("verifier-r1.md"))
+        w.mutation(1, 1)
+        gate = w.step()
+        self.assertIn("--final-gate", gate.out)
+        self.assertNotIn("review-r1-code", gate.out)
+        # A later answer edit still invalidates the assessment.
+        w.put("questions.md", w.read("questions.md") + "design: changed requirement\n")
+        self.assertIn("stale", workflow_profile.selection(w.run)[1])
+
+    def test_preflight_explains_exclusions_without_an_assessment(self) -> None:
+        w = self.eligible()
+        (w.run / "workflow-assessment.json").unlink()
+        self.assertIn("missing", workflow_profile.selection(w.run)[1])
+        check = subprocess.run([sys.executable, str(Path(__file__).with_name(
+            "workflow_profile.py")), str(w.run), "--preflight"],
+            capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(check.stdout), {"candidate": True, "reason": None})
+        original = w.read("plan.md")
+        w.put("plan.md", original + "\n## WS-2: Another stream\n")
+        self.assertEqual(workflow_profile.selection(w.run),
+                         ("standard", "pilot requires one consolidated workstream"))
+        w.put("plan.md", original)
+        questions = w.read("questions.md")
+        w.put("questions.md", questions.replace("public: no", "public: yes"))
+        self.assertIn("review axis", workflow_profile.selection(w.run)[1])
+        w.put("questions.md", questions)
+        w.put("plan-validation.md", "Verdict: PLAN_NEEDS_FIX\n")
+        self.assertIn("PLAN_VALID", workflow_profile.selection(w.run)[1])
+        (w.run / "plan-validation.md").unlink()
+        self.assertIn("incomplete", workflow_profile.selection(w.run)[1])
+
+    def test_final_assessment_can_reject_an_earlier_candidate(self) -> None:
+        w = self.eligible()
+        w.put("workflow-assessment.json", json.dumps({
+            "fingerprint": workflow_profile.fingerprint(w.run),
+            "bounded": False, "reason": "caller behavior could not be established",
+        }))
+        self.assertEqual(workflow_profile.selection(w.run),
+                         ("standard", "caller behavior could not be established"))
+
     def test_risks_staleness_explicit_reviews_and_rework_keep_standard(self) -> None:
         w = self.eligible()
         original = w.read("workflow-assessment.json")

@@ -12,8 +12,14 @@ existing library, and executable acceptance before prescribing tests. Consolidat
 compatible small work into one stream. Planning, configured design review,
 validation, user decisions, and explicit holds keep their current behavior.
 
-After writing a valid plan-validation report, the validator can record this
-assessment in `$RUN/workflow-assessment.json`. Replace the evidence placeholders
+After answers, planner fixes, validation and holds are complete, step 6e runs
+`workflow_profile.py RUN --preflight`. A structural exclusion reports its reason
+and uses standard routing without another agent. A candidate gets a separate
+validator final-assessment invocation, even when `new_paths=no`. The coordinator
+waits for that agent to finish, not for the existing validation report.
+
+The validator checks the final inputs and records this assessment in
+`$RUN/workflow-assessment.json`. Replace the evidence placeholders
 with actual paths, caller traces, commands, and results. Every risk needs an
 explicit false; absent or uncertain facts retain the standard workflow.
 
@@ -49,9 +55,14 @@ Only one S-sized stream with explicit file scope, all three review-axis tags
 `no`, an enabled scope fence, and an enabled independent final review qualifies.
 Explicit `securityReview=on` or `perfReview=on` retains standard stages. The
 fingerprint covers the plan, questions, validator report, and initial briefs.
-Edits invalidate the assessment; do not refresh it without rechecking the facts.
-Every rework round uses standard stages. Missing assessments require no extra
-approval or waiting: run the standard workflow.
+Edits (including recording an accepted recommendation in Answers) invalidate the
+assessment. Repeat step 6e after any later planning edits; never refresh the
+fingerprint without rechecking the facts. Validation passes 1 and 2 do not write
+assessments. Final-assessment mode writes only the assessment and leaves the
+validation report unchanged. A rejected assessment records the current
+fingerprint, `bounded: false`, and a specific `reason`.
+Every rework round uses standard stages. If final assessment is unavailable after
+step 6e, use standard routing without an extra user approval or indefinite wait.
 
 For an eligible first round, `next.py` still runs the baseline, implementation,
 verification, RED/freeze and mutation checks. It checks snapshot freshness before

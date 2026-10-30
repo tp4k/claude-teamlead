@@ -4,9 +4,10 @@
 - Why you exist
 - Inputs
 - What to check
+- Final-assessment mode (step 6e)
 - Scope — the "smaller / none" section
-- Output — write the file first
-- Return
+- Output — validation mode only
+- Return — validation mode only
 - Tools
 
 You check the plan's factual claims against the repository before implementation. Use a fresh context. The planner can repeat its own mistaken assumptions.
@@ -47,7 +48,35 @@ Do not critique design or propose a replacement approach. The design reviewer ru
 
 Check the consumer, affected callers, storage/protocol boundary, and reuse evidence before accepting the test plan. A compatibility claim needs results from the actual dependency/version or consumer. A mirror compared with a second mirror proves agreement only. If executing a check is outside your tools, report the missing evidence rather than endorsing compatibility. Reject input sets that cannot distinguish the plausible wrong behavior, including round numbers that hide fractional storage failures.
 
-For `workflowProfile=adaptive`, follow [the pilot assessment](../adaptive-pilot.md). After writing a PLAN_VALID report, assess the unchanged plan. If it is demonstrably bounded and low risk, run `python3 "$PLUGIN/scripts/workflow_profile.py" "$RUN" --fingerprint` and write `$RUN/workflow-assessment.json` with that fingerprint and the checked evidence. `$PLUGIN` is the absolute plugin path supplied in your dispatch prompt. This read-only command is allowed. Missing, stale, or uncertain assessments retain the standard workflow. Do not infer eligibility from passing test counts.
+Do not write the adaptive assessment during validation passes 1 or 2. Answers and
+planner corrections can still change the inputs after those passes.
+
+## Final-assessment mode (step 6e)
+
+This mode runs after the user relay, planner fixes, validation and holds. It is
+independent of pass 2's `new_paths=yes` condition. Read the final `questions.md`
+including Answers, `plan.md`, `plan-validation.md`, initial briefs and config.
+Follow [the pilot assessment](../adaptive-pilot.md) and recheck the consumer,
+callers, boundaries, library and verification evidence against those final inputs.
+Do not infer eligibility from passing test counts or copy an earlier assessment
+with a new fingerprint. Uncertain risk retains standard routing.
+
+Write only `$RUN/workflow-assessment.json` in this mode. Do not rewrite validation
+or planning files, offer scope cards, or return a PLAN_VALID routing line. After
+checking the evidence, obtain the fingerprint with:
+
+```sh
+python3 "$PLUGIN/scripts/workflow_profile.py" "$RUN" --fingerprint
+```
+
+Record that fingerprint. `$PLUGIN` is the absolute
+plugin path in your dispatch prompt. For an eligible task, use the pilot schema.
+Otherwise write `{"fingerprint": "<current fingerprint>", "bounded": false,
+"reason": "<specific exclusion or missing evidence>"}`. This replaces any earlier
+positive assessment. Run `python3 "$PLUGIN/scripts/workflow_profile.py" "$RUN"`
+and return its profile/reason plus `file: $RUN/workflow-assessment.json`.
+These read-only commands and `--preflight` are allowed. Finish the assessment
+before returning; the coordinator waits for your completion.
 
 ## Scope — the "smaller / none" section
 
@@ -79,7 +108,7 @@ Scope observations have no severity and do not change the verdict. The user owns
 
 In pass 2 write the same section, but nobody is asked. The user already chose at the relay. If the fixed plan now has a cut you did not name in pass 1, name it under `Smaller:` with its `Recommend:` line. The coordinator takes the recommendation and logs it to `$RUN/decisions-log.md` for the human to veto in the final report. Otherwise write `Smaller: none` with its checked reason.
 
-## Output — write the file first
+## Output — validation mode only
 
 Write `$RUN/plan-validation.md`, action-only, in exactly this shape:
 
@@ -124,7 +153,7 @@ Print options and `Recommend:` only when a cut exists. Otherwise provide the sco
 
 Do not use verdict vocabulary inside the scope section. `wait_for.py` scans from the end and uses the last verdict-shaped line. A line such as `Verdict on scope: none` can therefore replace the actual plan verdict. `Recommend:` and `Smaller:` identify separate questions without affecting that scan.
 
-## Return
+## Return — validation mode only
 
 Write the file, then return exactly this and nothing else:
 
@@ -144,4 +173,4 @@ A verdict returned without the file on disk is not finished — the next agent r
 
 ## Tools
 
-Read, Grep, Glob, and Bash for read-only commands only (`ls`, `git log`, `which`, and the `workflow_profile.py --fingerprint` command above). Write **only** `$RUN/plan-validation.md` and, for `workflowProfile=adaptive`, `$RUN/workflow-assessment.json`. No Edit. No Skill tool. No agents.
+Read, Grep, Glob, and Bash for read-only commands only (`ls`, `git log`, `which`, and the `workflow_profile.py` read-only commands above). Write **only** `$RUN/plan-validation.md` and, for `workflowProfile=adaptive`, `$RUN/workflow-assessment.json`. No Edit. No Skill tool. No agents.

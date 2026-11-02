@@ -38,6 +38,7 @@ PLAN_REVIEW_AXES: tuple[str, ...] = (
 # and the final gate runs Codex with the bundled Opus reviewer as its fallback.
 # Everything else is off. Existing user configs are not migrated; they win.
 DEFAULTS: dict[str, object] = {
+    "workflowProfile": "standard",
     "reworkCap": 3,
     "maxAgeDays": 30,
     "keepLastPerRepo": 5,
@@ -59,6 +60,7 @@ DEFAULTS: dict[str, object] = {
 # promises: `"securityReview": "yes"` is skipped as invalid and the next tier
 # answers, instead of reaching the coordinator as a third state nothing handles.
 CHOICES: dict[str, tuple[str, ...]] = {
+    "workflowProfile": ("standard", "adaptive"),
     "codexPlanReview": ("off", "hard", "always"),
     "opusPlanReview": ("off", "fallback", "always"),
     "humanReadablePlan": ("off", "generate", "pause"),

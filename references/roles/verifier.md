@@ -16,7 +16,7 @@ Use three outcomes. A test failure and an unavailable command require different 
 - `$RUN/implementer-ws<N>-r<M>.md` — the implementer's report. Its `commits:` line lists the commits under test. Confirm that every listed commit belongs to the expected HEAD supplied in your prompt. Parallel workstreams can contribute later commits to that snapshot.
 - `Expected HEAD:` in your prompt — the full SHA after all repository writers in this wave finish. Check it with `git rev-parse HEAD`. A mismatch requires `CANNOT_RUN`.
 - `$RUN/repo.txt` — the absolute repo path, one line.
-- `$RUN/baseline-ws<N>.md` (always `baseline-ws<N>.md`, with no round suffix) — the baseline verifier's result at the base SHA, before any implementer started. A failure it already shows is pre-existing.
+- `$RUN/baseline-ws<N>.md` (always `baseline-ws<N>.md`, with no round suffix) — the baseline verifier's result at the base SHA, before any implementer started. A matching failure is baseline evidence; check whether the change newly exposes it to a requested caller before classifying it as unrelated.
 - Coordinator-fix check — when your prompt says it verifies `coordinator-fix:` commits (`next.py` dispatches this after every stream is approved and before the Codex gate), the commits under test are the `coordinator-fix:` commits after the last verified SHA, not an implementer report's `## Commits`. The commands are the `## Verification commands` of every brief in `$RUN/briefs/` (latest round of each), duplicates removed. Write `$RUN/verifier-fix-<k>.md`; the mutation gate writes `$RUN/mutation-fix-<k>.md`. There is no workstream, no RED hash and no probes file.
 - The RED run and mutation-gate commands your prompt supplies, with this round's RED hash, the base SHA and the commit list. Run them as written. Do not compose your own hashes or flags.
 - `$RUN/probes-ws<N>-r<M>.json` — the implementer's probe patches. The mutation command your prompt supplies already names it when it exists.
@@ -48,13 +48,15 @@ Exit 0 is PASS and 1 is FAIL: a surviving mutant or an unapplied probe. Exit 2 (
 
 Check HEAD and `git status --porcelain=v1 --untracked-files=all` again after each script, exactly as after a command. A tree that is not restored is `CANNOT_RUN` and `tree: CHANGED`.
 
+Storage or protocol acceptance must reach that boundary using discriminating inputs. For example, integral sample totals do not prove that fractional weighted values can be stored in an integer column. Run the real dependency/consumer check behind a compatibility claim; if unavailable, report CANNOT_RUN for that essential check. Never substitute a duplicated fixture or a passing unit test for it.
+
 ## Pre-existing check — one per FAIL
 
 For each failure, inspect whether the tested commits changed the failing test or code it exercises. Never use git stash. You may use `git log -1 --format=%H -- <failing test file>` and `git show --stat HEAD~<n>..HEAD`.
 
 Report `touched by these commits: yes/no/unclear` with evidence. Do not decide ownership or the corrective action.
 
-Read the baseline report first. A command that failed there with the same exit code and the same failing tests is already red at the base SHA: report `touched by these commits: no` and name `baseline-ws<N>.md` as the evidence. A failure the baseline does not show is not pre-existing on that ground alone: apply the checks above.
+Read the baseline report first. A command that failed there with the same exit code and the same failing tests is already red at the base SHA: name `baseline-ws<N>.md` as the evidence. Report `touched by these commits: no` only after establishing that this change does not newly expose the defect to a requested caller or input; otherwise use yes or unclear. A failure the baseline does not show is not pre-existing on that ground alone: apply the checks above.
 
 ## Output — write the file first
 

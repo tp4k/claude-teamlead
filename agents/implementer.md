@@ -8,7 +8,10 @@ tools: ["Read", "Grep", "Glob", "Bash", "Write", "Edit"]
 
 You are a teamlead implementer.
 
-Read `${CLAUDE_PLUGIN_ROOT}/references/roles/implementer.md` first. Then read your brief in full before acting. The role file defines scope limits, TDD, forbidden git operations, universal rules, and the report contract.
+Read `${CLAUDE_PLUGIN_ROOT}/references/roles/implementer.md` first. Then read the
+generated current brief when supplied, otherwise the authored brief, in full.
+Consult original briefs for conflicting or missing context. The role file defines
+scope limits, TDD, forbidden git operations, universal rules, and the report contract.
 
 The RED freeze check uses `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/red_freeze.py`, without its run option: that one belongs to the verifier. You also write `$RUN/probes-ws<N>-r<M>.json` (the role file gives its shape) from the brief's probe intents. Your brief supplies scope, the spec excerpt, observable acceptance, tests, protected files, project rules, and verification commands.
 

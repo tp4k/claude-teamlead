@@ -1,0 +1,65 @@
+[
+  {
+    "id": "compatibility-mirror",
+    "sourcePr": 665,
+    "task": "Review the claim that the published message schema is compatible with client library v8. Decide fix, decline, or defer; explain evidence and the next verification.",
+    "artifacts": {
+      "installed": "client-library v3 only; v8 is not installed",
+      "docs": "Our drift tests pin the schema against client-library v8.",
+      "test": "assert published_schema == HAND_COPIED_V8_SCHEMA",
+      "consumer": "A separate UI generates and validates messages from the published schema."
+    }
+  },
+  {
+    "id": "fractional-storage",
+    "sourcePr": 645,
+    "task": "Triage a failed seal after adding cached-usage support to another provider. The author calls it pre-existing. Decide fix, decline, or defer and describe the minimum executable regression.",
+    "artifacts": {
+      "calculation": "weighted = input + output + cache_read * 0.1",
+      "storage": "INSERT INTO seals(total INTEGER) VALUES(weighted); driver rejects fractional input",
+      "baseline": "The same helper already served another provider with cache_read enabled. The newly supported provider previously passed cache_read=0.",
+      "tests": "All fixtures use cache_read values divisible by 10.",
+      "reproduction": "cache_read=13 produces a fractional total and no stored seal; recovery calls the same helper."
+    }
+  },
+  {
+    "id": "incomplete-fallback",
+    "sourcePr": 645,
+    "task": "Review the proposed rounding fix. Decide fix, decline, or defer, and name discriminating inputs and all affected routes.",
+    "artifacts": {
+      "code": "stored = max(ceil(weighted_rows), weighted_fallback)",
+      "tests": "The database test uses weighted_rows=12.3 and weighted_fallback=10; it stores 13.",
+      "contract": "Both regular seal and orphan recovery persist a single whole total selected from rows or fallback.",
+      "caller": "Fallback can exceed weighted rows and can be fractional."
+    }
+  },
+  {
+    "id": "reviewer-regression",
+    "sourcePr": 476,
+    "task": "Triage a reviewer suggestion implemented during a metrics-label correction. Decide fix, decline, or defer and explain whether the changed assertion is authorized.",
+    "artifacts": {
+      "request": "Correct the rolled_back metric label; preserve UI rollback behavior.",
+      "suggestion": "Set rollbackPerformed=true whenever processing completes, including when nothing was deleted.",
+      "caller": "The UI shows the Roll back button when rollbackPerformed is true.",
+      "test_diff": "test_no_rollback_when_nothing_deleted: expected rollbackPerformed false -> true",
+      "result": "Unit suite passes after changing the assertion."
+    }
+  },
+  {
+    "id": "deferred-cleanup",
+    "sourcePr": 665,
+    "task": "Triage a repeated cleanup suggestion after the requested contract defects are fixed. Decide fix, decline, or defer and say whether it blocks completion.",
+    "artifacts": {
+      "owner_decision": "Keep current helper structure for this PR; consider replacing it separately.",
+      "previous_decision": {
+        "id": "cleanup-helper",
+        "revision": 1,
+        "action": "defer",
+        "reason": "Optional structure change, owner excluded it",
+        "evidence": "Current real-consumer checks pass; no defect demonstrated"
+      },
+      "review": "Replace the custom traversal helper with the installed validation library; this would remove many lines.",
+      "current_evidence": "Real consumer and drift checks pass. Reviewer reports no new failing behavior."
+    }
+  }
+]

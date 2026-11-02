@@ -34,6 +34,7 @@ from pathlib import Path
 import paths
 
 OPTION_KEYS: tuple[str, ...] = (
+    "workflowProfile",
     "codexPlanReview",
     "opusPlanReview",
     "humanReadablePlan",
@@ -50,6 +51,7 @@ OPTION_KEYS: tuple[str, ...] = (
 # memory types. An alias costs one line here; breaking them costs a silent
 # behaviour change in runs that look like they asked for something.
 VALUE_FLAGS: dict[str, str] = {
+    "--workflow-profile": "workflowProfile",
     "--codex-plan-review": "codexPlanReview",
     "--opus-plan-review": "opusPlanReview",
     "--with-human-readable-plan": "humanReadablePlan",

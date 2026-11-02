@@ -1,4 +1,6 @@
 {
+  "workflowProfile": "standard",
+  "_workflowProfile": "Opt-in adaptive pilot: bounded low-risk tasks retain verification and independent final review. See references/adaptive-pilot.md.",
   "_comment": "Copy to $TEAMLEAD_HOME/config.json (default ~/.teamlead/config.json). Every key is optional; scripts/paths.py holds the defaults, so no config file at all is a supported state. Per-repo overrides go in <repo>/.teamlead.json (same shape) and win. A value of the wrong type — or one an option does not admit — is skipped, not fatal: the next tier, then the default, answers instead. The same value passed as a FLAG is fatal, because someone typed it seconds ago and is watching.",
   "_run_options": "The eight keys below are the run options. `scripts/run_config.py` resolves them per run (card answer > flag > repo config > this file > default) and writes the result to $RUN/config.json. The in-code defaults are codexPlanReview always, securityReview and perfReview when-needed, codexCodeReview on, opusCodeReview fallback, everything else off; the first run on a machine seeds this file with only a comment, so a config you already have is never migrated and wins over these defaults.",
 

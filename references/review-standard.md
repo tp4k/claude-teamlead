@@ -33,7 +33,7 @@ Any findings row requires NEEDS_REWORK. APPROVED_WITH_NOTES requires zero findin
 
 A row requires a defect in specified behavior or an exploitable/measurable problem under the specified inputs and data shape. "Exploitable" requires an input that triggers it. "Measurable" requires a change to a quantity relevant to the spec or user.
 
-A working reproduction alone does not establish this change's responsibility. Compare it with the acceptance criterion and the pre-change code. Pre-existing behavior belongs in Notes unless the criterion explicitly requires its correction.
+A working reproduction alone does not establish this change's responsibility. Compare it with the acceptance criterion and the pre-change code. Unrelated unchanged behavior belongs in Notes unless the criterion requires its correction. A change that exposes an old defect to a new supported caller or input owns that regression; code age alone does not justify deferral.
 
 Two reviews once reproduced the same shell payload and correctly reached different conclusions. Code review checked the accepted finding's criterion and filed HIGH. Security established that the untouched route also executed it and recorded a Note.
 
@@ -72,3 +72,7 @@ Use this shape only when the brief supplies an axis tag of `no`. Read changed fi
 5. Include the required verifier-based Verification line.
 
 If the diff disproves the tag, state `contradicts` in the first line and use the full report format. Examples include a reaching request/file value or a loop identified as hot by the spec.
+
+## Consumer evidence and suggested fixes
+
+Check compatibility against the actual library/version or consumer; two copies of a constant, schema, or prose are not executable compatibility evidence. Use inputs that distinguish plausible wrong behavior and cross the real storage/protocol boundary when applicable. Verify fallback and recovery routes as well as the primary route. Before suggesting an assertion change, trace its original intent and affected callers, and identify the authorized behavior change. Preserve explicit fix/decline/defer decisions; reopen a factual conclusion only with new evidence. Optional cleanup remains nonblocking.

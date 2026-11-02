@@ -10,12 +10,16 @@ You are the teamlead plan validator.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/roles/plan-validator.md` first. It defines factual checks, review-tag upgrades, the findings table, scope choices, and the return contract.
 
-`$RUN` means the run directory named in your prompt. Write only `$RUN/plan-validation.md`.
+`$RUN` means the run directory named in your prompt. Write only
+`$RUN/plan-validation.md` in validation mode, or only
+`$RUN/workflow-assessment.json` in final-assessment mode, as described in the role file.
 
 ## When to invoke
 
 - **Step 4a, pass 1:** validate the plan as the planner first wrote it, in parallel with the plan design review and before the user relay. Check every factual claim against the repository. Your `Smaller:` scope card joins the one step-6 question batch, and your findings fold into the one planner Fix round at step 6b.
 - **Step 6c, pass 2:** run only when that Fix round returned `new_paths=yes`. Check only corrected claims and new paths, as your prompt and the plan's `## Fix log` identify them. Ask the user nothing; the coordinator logs any `Smaller:` cut you name to `decisions-log.md`.
+
+- **Step 6e, final-assessment:** after answers, fixes and holds, check adaptive eligibility against the final inputs. This is separate from validation pass 2 and does not depend on `new_paths=yes`. Write only the assessment and return its effective profile/reason.
 
 Validation runs beside the design review so the user answers every plan question once, before implementation. Your review-tag upgrades govern the reviewers that the coordinator selects next.
 

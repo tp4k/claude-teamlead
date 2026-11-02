@@ -12,6 +12,8 @@ Write the final user report after the last round. Gather facts from `$RUN`. Do n
 - **Every `$RUN/triage-*.md`** — the verdict per round, the demoted rows and, from the **last** one, the Notes for the user.
 - **`$RUN/refactor-decisions.md`** — if it exists: the coordinator's reject/defer/approve line per refactor request.
 - **`$RUN/decisions-log.md`** — if it exists: each `recommended:` call and `Smaller:` cut taken without stopping to ask.
+- **`$RUN/current-decisions.md`** — explicit fix/decline/defer choices across rounds, including settled scope exclusions.
+- **`$RUN/metrics.json`** — recorded phase durations, token availability, rework causes, and later confirmed PR findings.
 - **`$RUN/repo.txt`** — the absolute repository path. Read its commit list with `git log --oneline`.
 
 Count agents and rounds from the actual report files. Each workstream has an implementer, verifier, and triage report per applicable round. Count review files by axis and workstream. Do not assume one verifier or triage file for an entire parallel wave.
@@ -22,6 +24,7 @@ Write `$RUN/final-report.md`. It is 5–12 lines, for the user, and it contains:
 
 - **Delivered** — one line per workstream: what now works, in the user's terms.
 - **Commits** — the hashes from `git log --oneline`, with their subjects.
+- **Measurements** — report recorded phase duration, available cached/uncached/output tokens, rework causes, and unavailable fields. Post-run defects are unknown until an explicit review observation. Internal approval and test counts are not quality measures.
 - **Who did what** — agent roles and rounds, e.g. "2 rounds, 9 agents: planner, 2 implementers, verifier, 3 reviewers, triage, scribe".
 - **Review verification:** report the final gate’s review and verification bases, executed caller-level checks and observed results, and remaining limitations. Distinguish independently executed probes from inherited suite results.
 - **Manual checks:** always include this section. Identify UI, audio, feel, or runtime behavior requiring a human check. Use none only after establishing that no useful manual check remains.

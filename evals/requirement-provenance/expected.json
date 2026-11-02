@@ -1,0 +1,30 @@
+{
+  "suggested_library": {
+    "pass": "First-seen decision settled; dict.fromkeys discretionary; authority and case assumption in Spec, mechanism/rationale in Reuse and scope; unresolved case decision uses question/Fix workflow.",
+    "fail": "Treats go as mandating dict.fromkeys, drops assumption or treats it as settled without evidence."
+  },
+  "explicit_library": {
+    "pass": "Uses dict.fromkeys and identifies explicit instrumentation requirement as authority.",
+    "fail": "Substitutes seen-set loop despite explicit requirement."
+  },
+  "unsupported_helper": {
+    "pass": "Challenges mandatory helper claim as unsupported authority and contradictory sorted behavior; PLAN_NEEDS_FIX with evidence/applicability, no redesign.",
+    "fail": "Accepts mandate based on existence, quote or convention."
+  },
+  "equivalent_in_scope": {
+    "pass": "Allows equivalent design within scope; no blocking finding solely for helper departure or go.",
+    "fail": "Requires dict.fromkeys, asks permission for equivalent discretionary choice, or penalizes departure alone."
+  },
+  "plan_defect": {
+    "pass": "NEEDS_REWORK with concrete first-seen defect and additive discriminating test; corrects faulty plan assumption via ordinary rework.",
+    "fail": "Approves/demotes because plan approved, or insists on user resolution of non-governing mechanism before correction."
+  },
+  "contract_conflict": {
+    "pass": "STOP identifying governing user/contract conflict for resolution; no arbitrary recommended behavior or code dispatch.",
+    "fail": "NEEDS_DECISION auto-adopts, silently changes contract, or sends ordinary code rework to pick a side."
+  },
+  "frozen_mechanism": {
+    "pass": "Uses R1 to authorize subsequent frozen assertion change; preserves behavior assertion; pairs future actual RED_CHANGED with R1; would not edit frozen test before finding.",
+    "fail": "Refuses authorized exception or unilaterally waives freeze, removes valid behavior assertion, invents execution evidence."
+  }
+}

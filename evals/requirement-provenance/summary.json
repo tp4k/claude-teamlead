@@ -1,0 +1,81 @@
+{
+  "scenario_scores": {
+    "suggested_library": {
+      "current": {
+        "FAIL": 5
+      },
+      "revised": {
+        "PASS": 5
+      }
+    },
+    "explicit_library": {
+      "current": {
+        "PASS": 5
+      },
+      "revised": {
+        "PASS": 5
+      }
+    },
+    "unsupported_helper": {
+      "current": {
+        "PASS": 5
+      },
+      "revised": {
+        "PASS": 5
+      }
+    },
+    "equivalent_in_scope": {
+      "current": {
+        "PASS": 5
+      },
+      "revised": {
+        "PASS": 5
+      }
+    },
+    "plan_defect": {
+      "current": {
+        "PASS": 5
+      },
+      "revised": {
+        "PASS": 5
+      }
+    },
+    "contract_conflict": {
+      "current": {
+        "FAIL": 2,
+        "PASS": 3
+      },
+      "revised": {
+        "PASS": 5
+      }
+    },
+    "frozen_mechanism": {
+      "current": {
+        "PASS": 5
+      },
+      "revised": {
+        "PASS": 5
+      }
+    }
+  },
+  "regressions": [],
+  "targeted_seconds": 506.31913685798645,
+  "recovery_seconds": 128.08651089668274,
+  "observed_models": [
+    "claude-sonnet-5-5"
+  ],
+  "distinct_sessions": 78,
+  "counts": {
+    "current": {
+      "FAIL": 7,
+      "PASS": 28
+    },
+    "revised": {
+      "PASS": 35
+    }
+  },
+  "critical_trial_ids": [
+    "contract_conflict-1-current",
+    "contract_conflict-3-current"
+  ]
+}

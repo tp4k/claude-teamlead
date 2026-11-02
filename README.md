@@ -177,6 +177,10 @@ Worktree collisions and ambiguous bootstrap setup can require additional decisio
 
 In this workflow, planning defines the work. Design review assesses the approach. Validation checks plan facts against the repository. Verification executes commands and reports outcomes. Code and specialist reviews assess the implementation. Triage assigns findings their dispositions. User confirmation approves a plan or decision.
 
+Plan approval with `go`, or adoption through configured autopilot, settles the offered behavioral and scope decisions without making every suggested mechanism mandatory. Binding constraints need applicable authority: explicit user instructions, governing project rules or ADRs, or established external contracts. A quotation, existing helper, or convention alone is insufficient. Spec sections preserve requirement provenance and unresolved assumptions; Reuse and scope carries recommended mechanisms and rationale through initial briefs, Fix, rework, and review packages. Validation checks the cited evidence and applicability; design review checks unnecessary restrictions on valid solutions.
+
+Implementers may document alternatives satisfying behavior, contracts, scope fences, and frozen-test protections. Plan conformance cannot excuse an observable defect: in-scope corrections use ordinary rework, while unresolved governing conflicts use `STOP`. The existing frozen-test exception requires a finding identifying the erroneous test before a subsequent attempt changes its frozen lines and reports matching `RED_CHANGED` evidence. The questions/Fix workflow, autopilot handling, routing tokens, and review stages remain unchanged.
+
 | Command | What it does |
 | --- | --- |
 | `/teamlead:delegate <task>` | Plans, reviews the plan, validates, implements, verifies (tests, RED run, mutation gate), reviews code and selected specialist axes, triages, then gates the whole diff with Codex. Uses the current tree. Presents required decisions and stops if rework reaches its cap. |

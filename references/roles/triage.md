@@ -45,6 +45,8 @@ Move scope-expanding proposals to Notes with reasons. Examples include rejecting
 
 Preserve genuine defects in requested behavior as findings. A defect newly exposed by the requested change cannot be dismissed solely because its underlying code predates this run. Compare affected callers at the review base and at HEAD. If you demote all rows, use APPROVED_WITH_NOTES.
 
+Plan conformance cannot excuse an observable defect. Use ordinary rework for in-scope corrections to requested behavior, recording the faulty plan assumption. A binding constraint needs applicable authority: explicit user instructions, governing project rules/ADRs, or established external contracts. A quote, helper, convention, `go`, or autopilot adoption alone cannot make every recommended mechanism mandatory. Demote demands based solely on discretionary mechanisms, retaining their evidence; accept documented alternatives that satisfy behavior, contracts, scope fences, and frozen-test protections. Use STOP for unresolved conflicts between governing requirements, with the conflicting sources and decision needed. Do not use NEEDS_DECISION recommendations to override such a conflict.
+
 Write each demotion as `<what would change> — <why it was demoted> (<location>)`. A demoted row is never dropped: the writer turns each line into a row in `$RUN/deferred-rows.md`, which `ledger.py apply` puts into `docs/deferred-work.md` at close, or the final report carries it as a line. The Codex gate also receives every `## Demoted to Notes` and `## Notes for the user` line of every triage file and re-judges it against the final HEAD, so keep those two headings exactly. A decision preserved only in chat can repeat in later runs.
 
 Preserve `LIST_GAP` when merging a row. It identifies a surviving mutation absent from the planner's or implementer's probe list. Include these survivors in the return line's `list_gap=` count.
@@ -54,6 +56,8 @@ Preserve `LIST_GAP` when merging a row. It identifies a surviving mutation absen
 A reviewer's Fix column is a suggestion. When you adopt it, the rework brief must state the behaviour that changes in one sentence (what a caller or the run now does differently) and name the test that pins it: an existing `file::test_name` that changes or the new test the row requires. A fix with no stated behaviour and no pinning test leaves the next implementer to guess what the reviewer meant. If you cannot name the test, the row is not ready: write what the test must assert, or demote the row.
 
 Before adopting a fix, trace affected callers and the intended meaning of changed assertions. Record the authorized behavior change and executable evidence. If the suggestion merely changes tests to match a regression, correct the suggestion. Verify every route named by a finding, including fallback and recovery paths; fixing only the primary path is incomplete.
+
+A frozen mechanism assertion can be wrong without its behavioral requirement being wrong. Use the existing exception: a finding must identify the exact erroneous test and assertion, why no governing authority requires it, and valid coverage to preserve before a subsequent attempt changes its frozen lines. Carry that finding into rework and require each corresponding `RED_CHANGED` line beside it. Do not authorize an unrestricted test rewrite.
 
 ### Preserve decisions across rounds
 
@@ -70,6 +74,8 @@ Actions are `fix`, `decline`, and `defer`. Keep the same revision and record unc
 Some rows are not defects. The code does something the spec leaves open and a person must choose: round half-up or half-even, reject or clamp. Do not send these to rework, and do not demote them. Mark each such row `recommended: <the choice you would take> — <why>`. If every open row is a spec call, the verdict is NEEDS_DECISION and the return line counts them in `decisions=<n>`.
 
 The run takes the recommendation without stopping and `next.py` appends each `recommended:` line to `$RUN/decisions-log.md`. The scribe copies that log into the final report for the human to veto. A NEEDS_DECISION triage routes as follows: with an implementer rework brief for the next round it is NEEDS_REWORK, with a docs brief (below) the writer applies it, and with neither it is APPROVED_WITH_NOTES. So when the recommended choice needs a code change, write the rework brief and state the choice as the behaviour that changes. If the round also has a defect row, the verdict is NEEDS_REWORK: put the spec call into the rework brief the same way and list its `recommended:` line in the Notes for the user.
+
+Record the adopted behavioral decision and its source separately from discretionary implementation advice. Keep provenance and remaining assumptions in Spec, mechanisms and rationale in Reuse and scope. Preserve the existing configured question/Fix and autopilot handling; a mechanism choice within settled behavior does not itself require a spec call.
 
 ## Docs-only rounds
 
@@ -173,6 +179,8 @@ $RUN/implementer-ws<N>-r<M+1>.md
 ```
 
 Inherit scope, spec, project rules, and verification commands by pointer. Do not repeat the round-1 scope fence. The hook finds the nearest earlier fence.
+
+The inherited Spec includes authority, applicability, and unresolved assumptions; Reuse and scope includes discretionary mechanisms and rationale. Preserve both through rework and review packages. If either section changes, write its complete replacement, retaining still-applicable provenance and assumptions: the current-brief generator replaces sections rather than merging them. Record adopted behavioral decisions in Spec and the decision history without promoting suggested fixes into mandatory mechanisms.
 
 Before dispatch, check that the active fence allows every file required by the fixes. If the fixes require expansion, add a `## Scope` section with a complete replacement fence. Copy every entry from the active fence and add the required path. Do not narrow the list. The nearest fence replaces earlier fences without merging. A blocked-file report commonly identifies the required expansion.
 

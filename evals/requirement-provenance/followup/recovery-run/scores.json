@@ -1,0 +1,45 @@
+{
+  "calls": 8,
+  "unique_sessions": 8,
+  "observed_models": [
+    "claude-sonnet-5-5"
+  ],
+  "seconds": 130.85570788383484,
+  "effort": "high",
+  "scoring": "Manual parent-agent review against pre-run expected.json; all eight responses and tool transcripts inspected. Not blinded.",
+  "scores": {
+    "current": {
+      "recovery_decision": "FAIL",
+      "workflow_closure": "PASS",
+      "explicit_constraints": "PASS",
+      "scope": "PASS",
+      "freeze": "PASS",
+      "provenance_carried": "PASS",
+      "mechanism_discretion": "FAIL",
+      "final_verdict": "APPROVED_WITH_NOTES",
+      "evidence": "Initial reviewer calls dict.fromkeys a requirement despite reading recommended because concise; triage mandates the call and implementation replaces correct production code. No frozen line is changed. Final reviewer approves after actual verification."
+    },
+    "followup": {
+      "recovery_decision": "PASS",
+      "workflow_closure": "PASS",
+      "explicit_constraints": "PASS",
+      "scope": "PASS",
+      "freeze": "PASS",
+      "provenance_carried": "PASS",
+      "mechanism_discretion": "PASS",
+      "final_verdict": "APPROVED_WITH_NOTES",
+      "evidence": "Initial finding names erroneous test and unused patch import before rework. Only test_labels.py changes. Six removed frozen lines match that finding; seven remain including test_first_seen. Three named probes are killed. Final reviewer checks HEAD and clean status and approves."
+    }
+  },
+  "critical_explicit_scope_freeze_violations": 0,
+  "collateral": [
+    "Follow-up initial reviewer said no probes file was supplied although the supplied empty list existed; final reviewer read the actual files and corrected the bookkeeping.",
+    "One compound read command was denied in each version. Successful Read fallbacks and independent successful HEAD/status commands supplied the needed evidence.",
+    "The follow-up triage requested the finding ID in the commit message. The generic harness message omitted it; the report and triage retained traceable authority. Final reviewer treated this as a note."
+  ],
+  "limits": [
+    "One paired recovery only; does not remeasure all original scenarios or prove all collateral errors fixed.",
+    "All roles use the same Sonnet model rather than production Opus/Sonnet routing.",
+    "Read-only agents propose writes; harness applies and commits them. Initial failing-suite review is explicitly dispatched, not a full production-router simulation."
+  ]
+}

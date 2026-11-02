@@ -1,0 +1,26 @@
+{
+  "task": "Return unique string labels in first-seen order. Keep labels(values), no new dependencies. Only labels.py and test_labels.py may change.",
+  "spec": "Authority: task.md explicit user instruction, applies to labels(values). Return unique labels in first-seen order. Assumption: handling non-string inputs unresolved; this work only covers strings.",
+  "reuse": "reuse: dict.fromkeys \u2014 recommended because concise. General go approved the behavioral plan. keep because: task.md requires unique labels.",
+  "red_source": "def labels(values):\n    return list(values)\n",
+  "source": "def labels(values):\n    seen = set()\n    result = []\n    for value in values:\n        if value not in seen:\n            seen.add(value)\n            result.append(value)\n    return result\n",
+  "tests": "import unittest\nfrom unittest.mock import patch\nfrom labels import labels\n\n\nclass LabelTests(unittest.TestCase):\n    def test_uses_dict_fromkeys(self):\n        with patch('labels.dict', wraps=dict, create=True) as wrapper:\n            spy = wrapper.fromkeys\n            labels(['b', 'a', 'b'])\n            assert spy.call_count == 1\n\n    def test_first_seen(self):\n        assert labels(['b', 'a', 'b']) == ['b', 'a']\n\n\nif __name__ == '__main__':\n    unittest.main()\n",
+  "stages": [
+    {
+      "role": "reviewer",
+      "request": "Review this implementation and the actual verifier evidence. Produce the review report with precise findings and next actions. No prior findings exist."
+    },
+    {
+      "role": "triage",
+      "request": "Triage the preceding review. Rework count is 0 of 3. Produce the triage report and any round-2 rework brief. Include complete Spec and Reuse and scope sections in that brief so it can be delivered independently; preserve their meaning and relevant provenance."
+    },
+    {
+      "role": "implementer",
+      "request": "Carry out the preceding triage's round-2 brief as a proposed edit. Return each changed repository file in a fenced Python block preceded by exactly labels.py or test_labels.py on its own line. Return probes-ws1-r2.json as a fenced JSON list of objects with probe, file, old, new strings; patches must match the final code exactly. Include your implementer report and reference any finding relied on. The harness applies these proposed files, commits them on your behalf, and executes tests, freeze checks, and the probe patches before the next reviewer. If blocked, state why and supply no edits. Do not claim those future actions have happened."
+    },
+    {
+      "role": "reviewer",
+      "request": "Review the round-2 changes against earlier findings and the supplied brief. Inspect the actual checkout, verifier-r2.md, mutation-ws1-r2.md, probes-ws1-r2.json, and recorded commit attribution. State whether recovery is complete, whether provenance is preserved, and any unresolved defects or constraint violations. The harness applied and committed the proposed files on the implementer's behalf and then ran verification. The quoted implementer report predates those actions; use the actual commit and verifier artifacts as execution evidence and the original report as proposal provenance. Do not require the earlier proposal to claim actions it had not yet performed."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "current": {
+    "output": "/var/folders/lv/7tkpk3bd09jdc9j_0n97fy780000gq/T/teamlead-provenance-followup-k66kngy3/current",
+    "outcome": "PASS",
+    "tree": "CLEAN",
+    "probes": 2,
+    "probe_provenance": "Exact old/new expressions transcribed from original current implementer report; no new probe intent.",
+    "freeze": "RED_FROZEN \u2014 1 RED commit(s), 13 frozen lines, all present at HEAD\n",
+    "mutation": "KILLED  labels.py:2  probe=added: dict.fromkeys call\nKILLED  labels.py:2  probe=added: first-seen order\nMUTATION: PASS killed=2 survived=0 invalid=0 unclassified=0 not_run=0 not_applied=0\n"
+  },
+  "revised": {
+    "output": "/var/folders/lv/7tkpk3bd09jdc9j_0n97fy780000gq/T/teamlead-provenance-followup-k66kngy3/revised",
+    "outcome": "PASS",
+    "tree": "CLEAN",
+    "probes": 1,
+    "probe_provenance": "Exact JSON probe from original revised implementer report.",
+    "freeze": "RED_CHANGED \u2014 5 of 13 frozen lines missing at HEAD\nb56ad06b5 test_labels.py: def test_uses_dict_fromkeys(self):\nb56ad06b5 test_labels.py: with patch('labels.dict', wraps=dict, create=True) as wrapper:\nb56ad06b5 test_labels.py: spy = wrapper.fromkeys\nb56ad06b5 test_labels.py: labels(['b', 'a', 'b'])\nb56ad06b5 test_labels.py: assert spy.call_count == 1\n",
+    "mutation": "KILLED  labels.py:5  probe=added: dedupe guard (delete `if value not in seen`)\nMUTATION: PASS killed=1 survived=0 invalid=0 unclassified=0 not_run=0 not_applied=0\n"
+  }
+}

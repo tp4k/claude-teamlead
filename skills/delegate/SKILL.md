@@ -9,9 +9,7 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/*), AskUserQuestion
 # Teamlead Coordination Workflow
 
 You coordinate the run. Do not implement code, run verification, or perform the initial reviews. You edit repository files only when the user asks (hard rule 1). Decompose the task and delegate independent work in parallel. Consolidate the resulting reports.
-
 Each run uses `$RUN`, defined in `references/run-directory.md`. Agents write reports there and read earlier reports by path. This skill controls routing. Plugin agents load their own role files from `references/roles/`.
-
 `$PLUGIN` is the plugin root, two levels above `skills/delegate/`. Derive it before kickoff. Afterwards, use the printed `PLUGIN_ROOT=` value. Resolve every command and reference path against that root. Do not resolve references against the repository or the skill directory. Substitute absolute paths yourself. Literal `${...}` placeholders can reach Bash or an agent prompt without expansion.
 
 ## Hard rules
@@ -26,7 +24,7 @@ Each run uses `$RUN`, defined in `references/run-directory.md`. Agents write rep
 8. **Preserve git history.** Implementer instructions forbid `reset --hard`, `rebase`, `commit --amend`, `push --force`, `stash drop`, `checkout -- <path>`, and deletion of commits.
 9. **Enforce scope.** The implementer role, write-denial hook, and triage all enforce the brief. Edits outside the brief require `NEEDS_REWORK` and a revert. Rework normally inherits the earlier scope fence. To expand it, include a complete replacement fence with all earlier entries and the added file. Never narrow it. Either permit a blocked required file or decline that part of the finding explicitly. Decide refactor requests through `references/refactor-workflow.md`.
 9a. **Respect spawn gates.** The hook checks required earlier steps before planner, validator, or implementer dispatch. Complete the named missing step after a refusal. Never change the dispatch to bypass it. A configured Codex plan review must be attempted. Its failure does not block implementation.
-10. **Preserve the spec.** The planner quotes it in each workstream block and round-1 brief. Code review checks conformance. Specialists use it as context. Do not paraphrase it into a prompt. Point to `plan.md` and its `## WS-<N>` block.
+10. **Preserve the spec.** The planner quotes it in each workstream block and round-1 brief, retaining requirement authority, applicability, and unresolved assumptions in Spec. Recommended mechanisms and rationale stay in Reuse and scope through Fix, rework, and review packaging. Code review checks governing requirements. Specialists use them as context. Do not paraphrase the spec into a prompt. Point to `plan.md` and its `## WS-<N>` block.
 11. **Wait while children run.** Do not end the turn with a running subagent. Three of six evaluation runs stalled after doing so. Use one wait call per phase, not repeated sleeps: they consumed 14–19 of 83–104 coordinator turns in two runs.
     Steps 4–6 use `python3 $PLUGIN/scripts/wait_for.py --timeout <s> <output files>`: 120-second chunks for sanity passes, 240 for validation, 480 for planning. Exit 1 identifies blocked, partial, or CANNOT_RUN output: read that file immediately. Exit 2 prints a `RETRY:` command: run it verbatim. After two empty chunks, read the child's task-output path and report the stall. Start Codex plan review in background Bash and let its completion notification supply the result. From step 7 on, `next.py` does the waiting (step 7).
 12. **Minimize routing delay.** Aim to dispatch the next ready agent within one minute. Write the answers or final report required by the phase. Avoid composing redundant narration between phases.
@@ -293,7 +291,7 @@ Output: correct only the listed claims in plan.md and the affected briefs, fold 
 **D — plan design reviewer** (`teamlead:plan-reviewer`)
 ```
 $RUN = <abs>. Repo: <abs>.
-Inputs: $RUN/task.md, $RUN/questions.md (## Answers — binding), $RUN/plan.md, $RUN/briefs/impl-ws*-r1.md, $RUN/repo.txt, CLAUDE.md.
+Inputs: $RUN/task.md, $RUN/questions.md (## Answers — adopted behavioral/scope decisions and explicit constraints), $RUN/plan.md, $RUN/briefs/impl-ws*-r1.md, $RUN/repo.txt, CLAUDE.md.
 Axes: <all five | the subset, comma-separated>.
 <fallback only: The Codex plan review could not run (<reason>), so this is the run's only design review.>
 Output: write $RUN/plan-design-review.md, return PLAN_REVIEWED blockers= majors= minors= axes=.
@@ -341,6 +339,8 @@ Route on `status:`, `OUTCOME:`, `MUTATION:`, and `VERDICT:`. Open reports only f
 ## Docs as the spec — extract, carry, conform
 
 The planner quotes each workstream's governing spec in `plan.md` and the round-1 brief. This prevents a clean implementation of incorrect behavior. Select sources using `references/roles/planner.md`, including relevant ADRs. Code review checks conformance requirement by requirement. Specialists inspect their own axes using the same context. An implementer reports ambiguous requirements as `status: blocked`.
+Binding constraints need applicable authority: explicit user instructions, governing project rules/ADRs, or established external contracts. Quoting a recommendation, finding an existing helper, or following a convention does not establish authority. Approval with `go` and configured autopilot adoption settle the offered behavioral or scope decisions without making every suggested mechanism mandatory. Keep provisional assumptions and adopted behavioral decisions with their provenance in Spec; keep discretionary mechanisms in Reuse and scope. Preserve the existing questions/Fix workflow and autopilot handling.
+Allow documented alternatives within behavior, contracts, scope fences, and frozen-test protections. Plan-conforming observable defects use ordinary in-scope rework. Unresolved governing-requirement conflicts use STOP. For a faulty frozen mechanism assertion, a finding must identify the erroneous test before a subsequent attempt changes its frozen lines and reports the corresponding RED_CHANGED evidence. These distinctions apply to initial briefs, inherited rework sections, and review packages without adding a stage or changing routing tokens.
 
 Review reports target the next implementer. Use the findings table and verdict contract from `references/review-standard.md`. The coordinator writes the human summary.
 

@@ -37,6 +37,8 @@ The next implementer uses your report directly. Report required changes. Do not 
 
 **1a. ADR conformance — code axis only.** Check every supplied clause. Report each violation with ADR filename and clause. Use `NEEDS_REWORK` and HIGH or CRITICAL severity according to impact.
 
+For conformance, distinguish behavioral requirements and applicable constraints from recommended mechanisms. Require authority from an explicit user instruction, governing project rule/ADR, or established external contract; a quotation, helper, or convention alone is insufficient. Check the Spec provenance and unresolved assumptions. `go` or autopilot adoption does not promote every recommendation. Accept documented alternatives within behavior, contracts, scope fences, and frozen-test protections. Do not file a finding solely for departing from discretionary reuse guidance. Plan conformance cannot excuse an observable defect: report the reproduction and faulty plan assumption for ordinary in-scope rework. Identify unresolved governing-requirement conflicts explicitly for triage to STOP.
+
 **1b. Observable acceptance.** Confirm that the named test exercises the behavior and distinguishes the before and after states. For scenarios, check that they are runnable and their expected output matches. Compilation or claimed spec coverage alone is insufficient. Missing observable acceptance requires `NEEDS_REWORK`.
 
 **1c. Test plan — code axis only.** Locate each `new:` test and check its observable assertion. A named test that asserts weaker behavior remains a gap. Confirm that `existing:` tests still run and retain their assertions. Report missing, deleted, skipped, or weakened coverage. List the resume, retry, and skip paths in the diff yourself, and report each one that no test reaches. Emit gaps only.
@@ -50,6 +52,7 @@ The next implementer uses your report directly. Report required changes. Do not 
 - On `RED_FROZEN`, confirm assertions remain inside tests that execute. The checker matches lines per file. Moving an assertion into an unused helper can therefore evade the check.
 - Accept rework coverage marked `red: n/a — behaviour already present` when the requested mutation now fails that test.
 - Report `RED_CHANGED` when no finding authorized that test's change. Restore the assertion additively in a new commit.
+- If a frozen test wrongly requires a discretionary mechanism, identify the exact test, erroneous assertion, missing authority, and behavioral coverage to preserve in a finding. Only a subsequent implementation attempt may change those frozen lines and pair its `RED_CHANGED` evidence with that finding. Do not waive the freeze merely because an alternative implementation is valid.
 - Reject RED based only on import, syntax, or fixture errors. An `extra:` test without a named wrong implementation is a Note.
 
 Reject `tdd: NOT_APPLICABLE` only if you can identify reasonably testable user- or system-visible behavior. Otherwise accept it.
@@ -89,7 +92,7 @@ The verifier's mutation gate already ran every probe patch and the generic mutan
 
 The planner seeds the spec clauses as `probe:` intents. The implementer turns each into a concrete patch in `$RUN/probes-ws<N>-r<M>.json` and adds patches for clauses its own code introduces. Read the mutation report beside that file. A SURVIVED or NOT APPLIED row fails the gate before you start, so a report you receive normally has none. Grade the shared list in round 1:
 
-1. Match each new comparison, guard, early return, else-arm, and tie-break in the diff to a probe patch. An omitted clause is a `LIST_GAP` finding when you can name a realistic wrong implementation that every test would pass. A killed probe with missing bookkeeping is a Note.
+1. Match each new comparison, guard, early return, else-arm, and tie-break in the diff to a probe patch. An omitted clause is a `LIST_GAP` finding when you can name a realistic wrong implementation that every test would pass. Establish the omission from the actual shared list and patches; a reproduced defect or summary-only mutation result does not prove a list entry is missing. If those artifacts are unavailable, report the defect with its evidence and request the missing probe evidence without inventing list counts. A killed probe with missing bookkeeping is a Note.
 2. Check that each patch violates the criterion its `probe:` line names, not a nearby line. A patch that mutates comment text, an unreachable branch, or a different clause proves nothing. Report it as a finding that asks for a replacement patch.
 3. Check the fixture reaches the clause. Prefer a patch that deletes a guard or side-effecting call when an operator swap can leave it unreachable. For example, zero-sum weights may fail before a negative-weight guard.
 4. Name the expected failing test for each missing clause and acceptance criterion without a patch. If none exists, report the gap without a mutation.

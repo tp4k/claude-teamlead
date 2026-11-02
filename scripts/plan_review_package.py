@@ -64,7 +64,12 @@ AXIS_TEXT: dict[str, tuple[str, str]] = {
         "approach match how this codebase already does this kind of thing, or "
         "does it introduce a second way of doing it? Flag a new abstraction "
         "where an existing one fits, a layering the tree does not use, and any "
-        "place the plan's assumption about existing code is wrong.",
+        "place the plan's assumption about existing code is wrong. Assess "
+        "whether recommended mechanisms unnecessarily restrict valid solutions "
+        "or encode mechanism-only acceptance tests, giving concrete consequences. "
+        "Preserve constraints backed by applicable user instructions, project "
+        "rules/ADRs, or external contracts; quotes, helpers and conventions alone "
+        "do not establish authority. The validator checks that evidence.",
     ),
     "failure-modes": (
         "Failure modes and semantics",
@@ -146,8 +151,10 @@ def build_prompt(
     if has_answers:
         add(
             "- `answers.md` — decisions the user has already taken on this run's "
-            "open questions. These are binding amendments to the task; a finding "
-            "that re-opens one of them is wrong before it is written."
+            "open questions. Preserve the behavioral and scope decisions they "
+            "settle and any explicit mechanism requirement. General go or "
+            "autopilot adoption does not make every recommendation binding. "
+            "Surface unresolved governing conflicts rather than overriding them."
         )
     for name in inputs:
         add(

@@ -1,0 +1,16 @@
+{
+  "collector-snapshot.py": "c0f079f03a0919d4a268486e3035b36864d68a81c97b6cb0e6f2093523f732d7",
+  "expected.json": "89db5209fd6bc1de7fcfa366ca2f7296c90fd784fe7d092afecb29b2df5f0b32",
+  "fixture.json": "6443cad5caf7f9ff4d5d4583cc9081d64f667fb6bffc75fb053fdbed4fc9e5af",
+  "instructions/current/references/review-standard.md": "4544f84e7bd6a46f5db9782b87357bc9b0518933c41f0439fda02592cb7824fb",
+  "instructions/current/references/roles/implementer.md": "a73b7551629cca151dd9d33a874e0c31a5fe9393b47cce6188cc581503cb81ea",
+  "instructions/current/references/roles/reviewer.md": "b6d6b022a459bf7442045e8c404ba082a88664e75f02635dfb5068b06f12cd7e",
+  "instructions/current/references/roles/triage.md": "d6c23a003531c7a6471d6530cf0d19c4678062bb6924bd1f8b47306490deac2a",
+  "instructions/followup/references/review-standard.md": "c796b78cdf19991d2ce27c2b9be6e6a5f2cd465e5d8524df3308b4033cad5de9",
+  "instructions/followup/references/roles/implementer.md": "3074139fa5ee40823db718100f9cfa0e84f4ba16f21adc6dcf5ffd53d2a2bf2f",
+  "instructions/followup/references/roles/reviewer.md": "c325f37328ce70b2ffa89b9732d8c4ea65bdc0217cb3494d3408817f9e380bc6",
+  "instructions/followup/references/roles/triage.md": "803d2a1e6897ed57217cf9c55b77a96e5e5eb859ed5067d1a6a37d5a96c2b6e7",
+  "prepare.py": "2b3040d31947e1ef3c6f349a1575dbf63819390dab4f045eb359232508eb756b",
+  "protocol.json": "6b4ef3d81f2ba9c292dd9554cff06c56f5cca891fc1c624af582e04def46dc4b",
+  "run.py": "2caab56f4d862db446a8954a72b31408fe36e6d00d3dba0dd12586534b43e022"
+}

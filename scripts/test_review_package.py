@@ -1161,6 +1161,31 @@ def case_gate_lenses_in_rubric(tmp: Path) -> None:
     )
 
 
+def case_requirement_authority_reaches_both_rubrics(tmp: Path) -> None:
+    for name, plan in (("structured", STRUCTURED_PLAN), ("plain", "# Plan\nDedup.")):
+        folder = tmp / name
+        folder.mkdir()
+        _, run, base = scaffold(folder, None)
+        (run / "plan.md").write_text(plan)
+        out, proc = package(folder, run, base)
+        prompt = (out / "PROMPT.md").read_text()
+        check(
+            f"{name} review receives authority, discretion and recovery rules",
+            proc.returncode == 0
+            and (out / "plan.md").read_text() == plan
+            and all(text in prompt for text in (
+                "constraint needs applicable authority",
+                "does not make every suggestion binding",
+                "verify that interaction as well as its output",
+                "Plan conformance cannot excuse an observable defect",
+                "conflicts for triage to STOP",
+                "subsequent attempt changes its frozen lines",
+                "RED_CHANGED evidence beside that finding"))
+            and "the parts the plan calls out as binding decisions" not in prompt,
+            proc.stdout + proc.stderr,
+        )
+
+
 def case_notes_to_rejudge(tmp: Path) -> None:
     _, run, base = scaffold(tmp, None)
     (run / "triage-r1.md").write_text(TRIAGE_R1)
@@ -1300,6 +1325,7 @@ def case_cumulative_two_runs(tmp: Path) -> None:
 CASES = [
     case_cumulative_two_runs,
     case_gate_lenses_in_rubric,
+    case_requirement_authority_reaches_both_rubrics,
     case_notes_to_rejudge,
     case_no_triage_no_section,
     case_a_repo_without_a_run_builds_without_the_section,

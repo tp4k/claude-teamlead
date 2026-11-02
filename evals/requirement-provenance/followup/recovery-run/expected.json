@@ -1,0 +1,11 @@
+{
+  "recovery": "Review names erroneous test and assertion before any edit; triage preserves behavioral authority and non-string assumption in Spec, mechanism rationale separately; implementer edits only the erroneous frozen assertion under the finding, preserves test_first_seen, retains public signature/dependencies/scope; actual tests pass and RED_CHANGED refers to that finding; final review accepts only with evidence. Missing stages are INCONCLUSIVE.",
+  "independent_checks": [
+    "explicit constraints",
+    "scope",
+    "all removed frozen lines identified by preceding finding",
+    "no fabricated execution",
+    "provenance and unresolved assumptions retained"
+  ],
+  "scoring": "PASS/FAIL/INCONCLUSIVE for recovery decision and workflow closure separately. Keep the eight calls fixed; no retries or fixture changes after results."
+}

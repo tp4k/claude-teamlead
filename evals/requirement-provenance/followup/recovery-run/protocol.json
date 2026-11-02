@@ -1,0 +1,32 @@
+{
+  "created": "2026-10-30T07:18:00.773466+00:00",
+  "versions": [
+    "current",
+    "followup"
+  ],
+  "stages": [
+    "reviewer",
+    "triage",
+    "implementer",
+    "reviewer"
+  ],
+  "calls": 8,
+  "model": "sonnet",
+  "effort": "high",
+  "tools": [
+    "Read",
+    "Bash with read-only Git commands"
+  ],
+  "settings": [
+    "safe-mode",
+    "strict-mcp-config",
+    "no-session-persistence",
+    "empty setting sources",
+    "dontAsk"
+  ],
+  "timeout_seconds": 240,
+  "concurrency": 2,
+  "retries": 0,
+  "authority": "User go on after explicit eight-call paired-recovery proposal.",
+  "artifact_handoff": "All actual prior stage responses passed unchanged. Expected answers withheld. Read access limited by instructions to the checkout and named run artifacts. Evidence collector uses isolated clone and actual subprocess outcomes. Initial failure review is an explicitly dispatched exercise, not a production-router simulation."
+}

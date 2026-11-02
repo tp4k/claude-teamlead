@@ -189,9 +189,10 @@ def case_the_answers_ship_and_are_announced(tmp: Path) -> None:
     out, _ = package(tmp, run)
     shipped = (out / "answers.md").read_text()
     check(
-        "answers.md ships and the prompt calls it binding",
+        "answers.md ships with behavioral decisions and mechanism discretion",
         "size — the age variant needs a clock we do not have" in shipped
-        and "binding amendments to the task" in prompt_of(out),
+        and "behavioral and scope decisions" in prompt_of(out)
+        and "does not make every recommendation binding" in prompt_of(out),
         shipped[:200],
     )
 

@@ -15,7 +15,7 @@ scope limits, TDD, forbidden git operations, universal rules, and the report con
 
 The RED freeze check uses `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/red_freeze.py`, without its run option: that one belongs to the verifier. You also write `$RUN/probes-ws<N>-r<M>.json` (the role file gives its shape) from the brief's probe intents. Your brief supplies scope, the spec excerpt, observable acceptance, tests, protected files, project rules, and verification commands.
 
-`$RUN` means the run directory named in your prompt. If `$RUN/questions.md` contains `## Answers`, those user decisions override conflicting spec text.
+`$RUN` means the run directory named in your prompt. If `$RUN/questions.md` contains `## Answers`, apply those decisions to the behavior or scope they settle. A general `go` or autopilot adoption does not make every recommended mechanism binding. Preserve explicit mechanism requirements and surface unresolved conflicts with governing rules or contracts.
 
 ## When to invoke
 

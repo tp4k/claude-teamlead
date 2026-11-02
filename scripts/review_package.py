@@ -965,26 +965,47 @@ def build_prompt(ctx: dict) -> str:
     add("")
     add("## What to check")
     add("")
+    add(
+        "Distinguish requirements from recommended mechanisms. A binding "
+        "constraint needs applicable authority: an explicit user instruction, "
+        "governing project rule/ADR, or established external contract. A quotation, "
+        "helper, or convention alone is insufficient. Check Spec provenance and "
+        "unresolved assumptions; retain discretionary mechanisms and rationale "
+        "in Reuse and scope. General approval such as go, or autopilot adoption, "
+        "does not make every suggestion binding. Accept documented alternatives "
+        "within behavior, contracts, scope fences, and frozen-test protections. "
+        "When applicable authority explicitly requires a mechanism, verify "
+        "that interaction as well as its output; do not reject its test merely "
+        "because it checks a helper call. "
+        "Plan conformance cannot excuse an observable defect: report in-scope "
+        "corrections for ordinary rework and unresolved governing-requirement "
+        "conflicts for triage to STOP. An erroneous frozen mechanism assertion "
+        "needs a finding identifying the exact test and assertion before a "
+        "subsequent attempt changes its frozen lines; require corresponding "
+        "RED_CHANGED evidence beside that finding and preserve valid coverage."
+    )
+    add("")
     if ctx["plan_structured"]:
         add(
             "1. **Spec / plan conformance.** Compare the diff against the "
             "verbatim spec excerpt for each workstream. Does the code do what "
-            "the excerpt says, including the parts the plan calls out as "
-            "binding decisions?"
+            "the governing requirements say? Verify the authority and "
+            "applicability of claimed binding decisions."
         )
         add(
             "2. **Scope.** Anything changed outside the files the workstream "
             "declared? Any new *public* symbol the spec never names? Any "
             "drive-by refactor? Anything the `## Anti-scope` or "
-            "`## Project forbiddens` sections rule out? A `do not reuse:` "
-            "line that was reused anyway?"
+            "`## Project forbiddens` sections rule out? Assess departures from "
+            "`reuse:` or `do not reuse:` against their evidence and applicable "
+            "constraints, not as automatic scope violations."
         )
     else:
         add(
             "1. **Intent conformance.** Compare the diff against the intent "
             "this package states — the plan document above, or the task if "
-            "that is all there is. Does the code do what it says, including "
-            "anything it states as a settled decision?"
+            "that is all there is. Does the code satisfy the behavioral "
+            "requirements and constraints with applicable authority?"
         )
         add(
             "2. **Scope.** Anything changed that the stated intent does not "
@@ -1037,7 +1058,8 @@ def build_prompt(ctx: dict) -> str:
         "table first with nothing before it. "
         "Each part is triaged differently on the way back, which is why they "
         "are separate: a line-anchored defect gets verified against the diff, "
-        "a plan defect gets escalated to the person who approved the plan, and "
+        "a plan defect carries its provenance into triage for correction or "
+        "resolution of a governing conflict, and "
         "a merge blocker is acted on before either. Prose folded into the "
         "table loses that routing."
     )
@@ -1088,9 +1110,10 @@ def build_prompt(ctx: dict) -> str:
     add(
         "**4. `## Plan defects`** — where the **plan** is wrong, not the code. "
         "Say what the plan asks for, why it is wrong, and what it should have "
-        "asked for. Do not fold these into the table: a plan defect that "
-        "arrives as a code finding gets checked against the plan and dismissed "
-        "as intended behaviour, which is exactly the wrong outcome. If the "
+        "asked for. Do not fold these into the table: a plan defect "
+        "must not be dismissed as intended behaviour. Cross-reference any "
+        "observable defect in the findings table: in-scope corrections use "
+        "ordinary rework; unresolved governing conflicts require STOP. If the "
         "plan is sound, one line saying so is worth writing."
     )
     add("")

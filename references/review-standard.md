@@ -25,6 +25,8 @@ Cite the mutated line as the mutation report prints it. For a kill, name an exis
 
 Include killed probes as well as survivors. Without this section, a reader cannot distinguish a clean review from one that never probed. Every SURVIVED record needs a corresponding findings row (the gate normally refuses a report with a survivor, so one signals a gate or evidence defect). Use LIST_GAP for an off-list survivor. All-killed outcomes are normal.
 
+Establish off-list status from the actual shared list and patches. A reproduced defect establishes a behavior failure, not an omitted probe. If only a summary is supplied, mark list counts unverified and request the missing artifacts; retain the independently supported defect finding.
+
 Follow `roles/reviewer.md` for grading the mutation report and for fixture reachability.
 
 ## Verdict and findings
@@ -32,6 +34,8 @@ Follow `roles/reviewer.md` for grading the mutation report and for fixture reach
 Any findings row requires NEEDS_REWORK. APPROVED_WITH_NOTES requires zero findings. Put optional improvements in Notes instead of accidentally making them gates.
 
 A row requires a defect in specified behavior or an exploitable/measurable problem under the specified inputs and data shape. "Exploitable" requires an input that triggers it. "Measurable" requires a change to a quantity relevant to the spec or user.
+
+Conformance means behavioral requirements and constraints backed by applicable user instructions, project rules/ADRs, or external contracts. Quoted recommendations and reuse conventions alone do not bind an implementation, including after `go` or autopilot adoption. Accept documented alternatives within scope and frozen-test protections. Plan-conforming observable defects still require correction; identify unresolved governing conflicts for triage to STOP. For an erroneous frozen mechanism assertion, name the test and assertion in a finding before a subsequent attempt changes them, and require the corresponding `RED_CHANGED` evidence without losing valid behavioral coverage.
 
 A working reproduction alone does not establish this change's responsibility. Compare it with the acceptance criterion and the pre-change code. Unrelated unchanged behavior belongs in Notes unless the criterion requires its correction. A change that exposes an old defect to a new supported caller or input owns that regression; code age alone does not justify deferral.
 

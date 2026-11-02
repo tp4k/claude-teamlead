@@ -32,6 +32,8 @@ Do not change the repository or run state-changing commands, installs, migration
 
 Check every concrete claim through reading or searching:
 
+Distinguish inspected files from supplied excerpts. An excerpt that omits a symbol, docstring, or test does not establish its absence from the file; inspect the source or report that claim as unverified.
+
 1. **Existence:** locate each named path, directory, symbol, module, endpoint, table, queue, and config key. Use Read, Grep, and Glob. Flag claims you cannot establish. A path explicitly marked NEW need not exist yet.
 2. **Shape:** compare stated signatures, types, fields, and contracts with existing code. Flag differences such as `foo(a, b)` versus `foo(a, b, c)`.
 3. **Current behavior:** check each claim about present behavior. Flag unsupported claims, unmarked inferences, and contradictions.
@@ -39,6 +41,7 @@ Check every concrete claim through reading or searching:
 5. **Scope reachability:** check that the listed scope contains the code requiring changes.
 6. **Reuse claims:** check `reuse:` and `do not reuse:` under `### Reuse and scope`. Read the named symbol and callers. Verify its actual meaning. Incorrect rejection can cause duplication. Incorrect reuse can break existing callers. Judge factual meaning, without deciding whether the design distinction is worthwhile.
 7. **Review axes:** check each `no` in the three review tags and their routing copies. Trace whether inputs originate outside the process. Check whether the spec, benchmarks, or performance tests identify a hot path. Check whether outside callers rely on the changed surface.
+8. **Requirement provenance:** read the cited evidence for each claimed constraint in the plan and briefs. Verify both what it says and why it governs this workstream. A quote, helper's existence, or convention does not itself make a mechanism mandatory. Flag unsupported mandates, missing applicability, and assumptions presented as settled requirements. Check that `go` or autopilot adoption has not promoted discretionary mechanisms into requirements. Whether a supported recommendation unnecessarily restricts the solution belongs to design review.
 
 You may upgrade a tag from `no` to `yes`. Never downgrade `yes`. A mistaken downgrade can disable a required check. Under `when-needed`, input and hot-path tags determine whether specialists run at all.
 

@@ -1,0 +1,8 @@
+{
+  "references/roles/planner.md": "bce9c5f3ef8b096ce349cfaa3e002bccce88450c919fb87d07afa3b052c7f9b7",
+  "references/roles/implementer.md": "3074139fa5ee40823db718100f9cfa0e84f4ba16f21adc6dcf5ffd53d2a2bf2f",
+  "references/roles/plan-validator.md": "77801d857a00fa4d0bc47519618fd23f2e12579a6cc488cb9d4bfcd7cf957ddb",
+  "references/roles/reviewer.md": "c325f37328ce70b2ffa89b9732d8c4ea65bdc0217cb3494d3408817f9e380bc6",
+  "references/review-standard.md": "c796b78cdf19991d2ce27c2b9be6e6a5f2cd465e5d8524df3308b4033cad5de9",
+  "scripts/review_package.py": "df629611481b86e66178513598f85f2fe661cba628cdf3565fd485c12bcbece7"
+}

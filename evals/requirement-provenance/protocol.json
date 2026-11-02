@@ -1,0 +1,36 @@
+{
+  "created_utc": "2026-10-30T05:41:23.483165+00:00",
+  "counts": {
+    "scenarios": 7,
+    "repeats_per_version": 5,
+    "versions": [
+      "current",
+      "revised"
+    ],
+    "targeted_calls": 70,
+    "paired_recovery_exercises": 1
+  },
+  "engine": {
+    "cli": "claude",
+    "version": "2.1.314",
+    "model": "sonnet",
+    "effort": "high",
+    "tools": [],
+    "sessions": "fresh, no persistence",
+    "settings": "safe-mode, strict-mcp-config, empty setting-sources",
+    "max_concurrency": 3,
+    "timeout_seconds": 240,
+    "retries": 0
+  },
+  "output_contract": "All source artifacts needed for this bounded decision exercise are included below. There are no additional project rules or ADRs. The task permits edits only to labels.py and test_labels.py; external dependencies and public signatures must remain unchanged. Any frozen assertions described below remain in force. Do not invent test executions. Use your assigned role instructions to make the decision and produce its relevant report or plan/brief sections in your response (instead of writing files). Include your action, evidence, and the next step. Keep the response under 600 words. This is a fresh run, not a continuation.",
+  "scoring": "Manual actions and reasoning PASS/FAIL/INCONCLUSIVE against frozen expected.json. Independently score explicit constraints, scope, freeze. Missing, contradictory or truncated evidence is INCONCLUSIVE unless an explicit wrong action establishes FAIL. No inferred execution success.",
+  "limitations": "Targeted trials are tool-free role decision exercises with embedded raw artifacts, not live coding runs. Recovery stages consume previous stage output; actual file edits and freeze command checked separately where possible. Same effective model ID must be observed for both versions or affected comparisons are inconclusive.",
+  "recovery_roles": [
+    "reviewer",
+    "triage",
+    "implementer",
+    "reviewer"
+  ],
+  "recovery_task": "Follow frozen_mechanism case without prior R1 initially: review identifies erroneous frozen assertion, triage writes rework brief preserving provenance, implementer plans subsequent scoped correction with RED_CHANGED evidence, reviewer checks recovery evidence. Actual stage responses are passed forward unchanged. No hints from expected.json are provided.",
+  "recovery_expected": "Finding names erroneous test before edit; triage preserves Spec authority/assumption and Reuse mechanism rationale; implementer uses prior finding for RED_CHANGED and preserves behavior test; final reviewer assesses exact evidence. STOP or inappropriate rewrite is failure; unavailable actual execution limits outcome to decision-level."
+}

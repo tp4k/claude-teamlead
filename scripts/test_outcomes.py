@@ -304,6 +304,44 @@ class Outcomes(unittest.TestCase):
         self.assertIn("- `python3 verify.py`", view)
         self.assertEqual(view.count("```"), 4)
 
+    def test_requirement_provenance_survives_rework_and_packaging(self) -> None:
+        w = World(self.root / "provenance")
+        spec = (
+            '> Return unique labels in first-seen order. — task.md\n'
+            'Authority: explicit user request, applies to labels().\n'
+            'Assumption: case-sensitive labels; product decision unresolved.\n'
+        )
+        reuse = (
+            'reuse: dict.fromkeys — recommended for stable order.\n'
+            'Alternative mechanisms are discretionary.\n'
+            'keep because: the task requires unique labels.\n'
+        )
+        w.put("briefs/impl-ws1-r1.md", "## Spec\n" + spec
+              + "\n## Reuse and scope\n" + reuse
+              + "\n## Scope\n```scope\napp.py\n```\n")
+        w.put("briefs/impl-ws1-r2.md", "## Findings to fix\nRepair ordering.\n")
+        view = current_brief.write(w.run, 1, 2).read_text()
+        parts = dict(current_brief.sections(view))
+        self.assertIn(spec, parts["Spec"])
+        self.assertNotIn("dict.fromkeys", parts["Spec"])
+        self.assertIn(reuse, parts["Reuse and scope"])
+        amended = spec.replace('case-sensitive labels; product decision unresolved.',
+                               'case-sensitive labels; adopted via questions.md #1.')
+        w.put("briefs/impl-ws1-r3.md", "## Spec\n" + amended)
+        parts = dict(current_brief.sections(
+            current_brief.write(w.run, 1, 3).read_text()))
+        self.assertEqual(parts["Spec"].strip(), amended.strip())
+        self.assertIn(reuse, parts["Reuse and scope"])
+        plan = "# Plan\n## WS-1 — labels\n### Spec excerpt\n" + amended
+        plan += "\n### Reuse and scope\n" + reuse
+        w.put("plan.md", plan)
+        package = self.root / "provenance-package"
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name(
+            "review_package.py")), str(w.run), "--base", w.base, "--out", str(package)],
+            env=w.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((package / "plan.md").read_text(), plan)
+
     def test_measurements_distinguish_missing_zero_and_confirmed(self) -> None:
         run = self.root / "run"
         run.mkdir()
